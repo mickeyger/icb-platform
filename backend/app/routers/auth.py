@@ -16,6 +16,7 @@ from ..deps import (
     _login_attempts, _LOCKOUT_SECONDS,
 )
 from ..templates_config import templates
+from ..auth import get_auth_provider
 
 import logging
 logger = logging.getLogger(__name__)
@@ -51,7 +52,10 @@ async def login_post(request: Request, username: str = Form(...),
             db = next(_dbmod.get_db())
 
     try:
-        user = db.query(User).filter_by(username=username).first()
+        # WO v4.12: authentication runs through the pluggable AuthProvider
+        # (email/password in Phase 1). Returns the user on success, None on
+        # invalid credentials; DB/infra errors propagate to the except below.
+        user = get_auth_provider().authenticate(db, username, password)
     except Exception as e:
         logger.error(f"Login DB error from {client_ip}: {e}")
         if db_choice in ("dev", "prod"):
@@ -62,7 +66,7 @@ async def login_post(request: Request, username: str = Form(...),
         return templates.TemplateResponse("login.html",
             _login_ctx(request, "Database unavailable — please try again shortly"))
 
-    if not user or not pwd_context.verify(password, user.password_hash):
+    if not user:
         _record_failed_attempt(client_ip)
         logger.warning(f"Failed login attempt for '{username}' from {client_ip}")
         return templates.TemplateResponse("login.html",
