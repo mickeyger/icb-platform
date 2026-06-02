@@ -81,6 +81,18 @@ def get_db_info():
     return "PROD (PostgreSQL)", detail, True
 
 
+class Branch(Base):
+    """Operating branch (single-tenant Icecold, multi-branch foundation).
+    WO v4.12 (Phase 1) creates this table + nullable branch_id FKs on the
+    operational tables, backfilled to JHB. No branch UI yet (Phase 2)."""
+    __tablename__ = "branches"
+    id         = Column(Integer, primary_key=True)
+    code       = Column(String(8), unique=True, nullable=False)   # JHB | CPT | CEN
+    name       = Column(String(100), nullable=False)
+    is_active  = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
@@ -297,6 +309,7 @@ class BillOfMaterial(Base):
 class Customer(Base):
     __tablename__ = "customers"
     id            = Column(Integer, primary_key=True)
+    branch_id     = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)  # WO v4.12 multi-branch
     bp_code       = Column(String(50))
     name          = Column(String(300), nullable=False)
     email         = Column(String(300))
@@ -346,6 +359,7 @@ class BomOverrideHistory(Base):
 class CalculationRecord(Base):
     __tablename__ = "calculations"
     id = Column(Integer, primary_key=True)
+    branch_id = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)  # WO v4.12 multi-branch
     trailer_type_id = Column(Integer, ForeignKey("trailer_types.id"))
     user_id         = Column(Integer, ForeignKey("users.id"))
     customer_id     = Column(Integer, ForeignKey("customers.id"), nullable=True)
@@ -769,6 +783,7 @@ class BomSnapshot(Base):
     """Point-in-time snapshot of a body type's BOM costs."""
     __tablename__ = "bom_snapshots"
     id              = Column(Integer, primary_key=True)
+    branch_id       = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)  # WO v4.12 multi-branch
     trailer_type_id = Column(Integer, ForeignKey("trailer_types.id"), nullable=False)
     source          = Column(String(10), nullable=False)   # 'app' or 'excel'
     label           = Column(String(200))                  # e.g. "May 2026 pricing"
@@ -789,6 +804,7 @@ class ConfiguratorSnapshot(Base):
     rows' selection fields, item bom_conditions, and body-option-group naming."""
     __tablename__ = "configurator_snapshots"
     id              = Column(Integer, primary_key=True)
+    branch_id       = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)  # WO v4.12 multi-branch
     trailer_type_id = Column(Integer, ForeignKey("trailer_types.id"), nullable=False)
     name            = Column(String(200), nullable=False)
     created_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -804,6 +820,7 @@ class ConfiguratorDraft(Base):
     every browser/device, and it survives cache clears."""
     __tablename__ = "configurator_drafts"
     id              = Column(Integer, primary_key=True)
+    branch_id       = Column(Integer, ForeignKey("branches.id"), nullable=True, index=True)  # WO v4.12 multi-branch
     trailer_type_id = Column(Integer, ForeignKey("trailer_types.id"), unique=True, nullable=False)
     payload         = Column(_BigJson, nullable=False)
     updated_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc),
