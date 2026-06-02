@@ -1,0 +1,95 @@
+{
+  "_meta": {
+    "version": "1.5.0",
+    "source_doc": "Icecold_Bodies_Mockup_Brief_Addendum_v1.5.docx",
+    "generated": "2026-06-02",
+    "purpose": "Seed data for the Materials / Buying / Stores screens — drives MaterialsDashboard, POSuggestionQueue, StoresReconciliation, WeeklyMaterialForecast.",
+    "schema_owner": "BA",
+    "notes": "All financial figures are illustrative. SAP integration is mocked — no real BAPI calls; raisePR fabricates a PR number."
+  },
+  "materials": [
+    { "sap_code": "GRP-MPS-A-0077", "description": "GRP panel skin 90mm — white gel", "supplier": "SA Composites",   "lead_days": 7,  "last_price": 1240,   "abc_class": "A", "dept": "vacuum"    },
+    { "sap_code": "PNL-FLR-100-BG", "description": "Floor panel 100mm bottom-grade",  "supplier": "SA Composites",   "lead_days": 7,  "last_price": 1880,   "abc_class": "A", "dept": "vacuum"    },
+    { "sap_code": "DOR-RR-2000",    "description": "Rear roller door 2000mm",         "supplier": "Whiting SA",       "lead_days": 10, "last_price": 18400,  "abc_class": "A", "dept": "assy"      },
+    { "sap_code": "FRZ-CT-380",     "description": "Carrier Transicold 380 freezer unit", "supplier": "Carrier SA",   "lead_days": 14, "last_price": 142500, "abc_class": "A", "dept": "assy"      },
+    { "sap_code": "LFT-DH-MR15",    "description": "Dhollandia MR15 tail lift",        "supplier": "Dhollandia SA",   "lead_days": 14, "last_price": 78200,  "abc_class": "A", "dept": "assy"      },
+    { "sap_code": "SUB-FRM-3200",   "description": "Subframe 3200mm I-beam",           "supplier": "Macsteel",        "lead_days": 8,  "last_price": 4200,   "abc_class": "B", "dept": "panelshop" },
+    { "sap_code": "INS-PUR-50",     "description": "PUR insulation 50mm sheet",        "supplier": "Lambda Insul.",   "lead_days": 12, "last_price": 540,    "abc_class": "B", "dept": "vacuum"    },
+    { "sap_code": "PNT-WHT-PRO",    "description": "White automotive paint (20L)",     "supplier": "Plascon SA",      "lead_days": 5,  "last_price": 4800,   "abc_class": "B", "dept": "paint"     },
+    { "sap_code": "RIV-A4-200",     "description": "Aluminium rivet A4 200-pack",      "supplier": "Fastenal SA",     "lead_days": 3,  "last_price": 320,    "abc_class": "C", "dept": "assy"      },
+    { "sap_code": "CHN-SS-316",     "description": "Stainless 316 chain link",         "supplier": "Tycor",           "lead_days": 5,  "last_price": 184,    "abc_class": "C", "dept": "assy"      },
+    { "sap_code": "GLU-2K-5L",      "description": "2K polyurethane glue 5L",          "supplier": "Sika SA",         "lead_days": 4,  "last_price": 1240,   "abc_class": "B", "dept": "vacuum"    },
+    { "sap_code": "EDG-ALU-3M",     "description": "Aluminium edge profile 3m",        "supplier": "Wispeco",         "lead_days": 6,  "last_price": 480,    "abc_class": "B", "dept": "panelshop" }
+  ],
+  "stock_positions": [
+    { "sap_code": "GRP-MPS-A-0077", "sap_stock": 8,  "allocated": 0, "free": 8,  "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "PNL-FLR-100-BG", "sap_stock": 4,  "allocated": 0, "free": 4,  "open_po_qty": 10, "open_po_eta": "2026-06-12", "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "DOR-RR-2000",    "sap_stock": 0,  "allocated": 0, "free": 0,  "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "FRZ-CT-380",     "sap_stock": 0,  "allocated": 0, "free": 0,  "open_po_qty": 1,  "open_po_eta": "2026-06-11", "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "LFT-DH-MR15",    "sap_stock": 2,  "allocated": 1, "free": 1,  "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "SUB-FRM-3200",   "sap_stock": 6,  "allocated": 0, "free": 6,  "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "INS-PUR-50",     "sap_stock": 40, "allocated": 0, "free": 40, "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "PNT-WHT-PRO",    "sap_stock": 3,  "allocated": 0, "free": 3,  "open_po_qty": 6,  "open_po_eta": "2026-06-18", "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "RIV-A4-200",     "sap_stock": 42, "allocated": 0, "free": 42, "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "CHN-SS-316",     "sap_stock": 12, "allocated": 0, "free": 12, "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "GLU-2K-5L",      "sap_stock": 18, "allocated": 0, "free": 18, "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" },
+    { "sap_code": "EDG-ALU-3M",     "sap_stock": 24, "allocated": 0, "free": 24, "open_po_qty": 0,  "open_po_eta": null,         "last_refreshed": "2026-06-01T14:23:00Z" }
+  ],
+  "demand_lines": [
+    { "sap_code": "GRP-MPS-A-0077", "qty": 42, "need_by": "2026-06-04", "job_id": "2025-1138", "week_bucket": "2026-W23" },
+    { "sap_code": "GRP-MPS-A-0077", "qty": 36, "need_by": "2026-06-10", "job_id": "2025-1142", "week_bucket": "2026-W24" },
+    { "sap_code": "GRP-MPS-A-0077", "qty": 28, "need_by": "2026-06-17", "job_id": "2025-1146", "week_bucket": "2026-W25" },
+    { "sap_code": "PNL-FLR-100-BG", "qty": 18, "need_by": "2026-06-06", "job_id": "2025-1138", "week_bucket": "2026-W23" },
+    { "sap_code": "PNL-FLR-100-BG", "qty": 14, "need_by": "2026-06-12", "job_id": "2025-1142", "week_bucket": "2026-W24" },
+    { "sap_code": "DOR-RR-2000",    "qty": 3,  "need_by": "2026-06-12", "job_id": "2025-1144", "week_bucket": "2026-W24" },
+    { "sap_code": "FRZ-CT-380",     "qty": 2,  "need_by": "2026-06-14", "job_id": "2025-1141", "week_bucket": "2026-W24" },
+    { "sap_code": "LFT-DH-MR15",    "qty": 1,  "need_by": "2026-06-25", "job_id": "2025-1149", "week_bucket": "2026-W25" },
+    { "sap_code": "SUB-FRM-3200",   "qty": 4,  "need_by": "2026-06-28", "job_id": "2025-1147", "week_bucket": "2026-W26" },
+    { "sap_code": "INS-PUR-50",     "qty": 25, "need_by": "2026-07-02", "job_id": "2025-1150", "week_bucket": "2026-W27" },
+    { "sap_code": "PNT-WHT-PRO",    "qty": 6,  "need_by": "2026-06-30", "job_id": "2025-1148", "week_bucket": "2026-W26" },
+    { "sap_code": "RIV-A4-200",     "qty": 14, "need_by": "2026-06-21", "job_id": "2025-1146", "week_bucket": "2026-W25" },
+    { "sap_code": "CHN-SS-316",     "qty": 8,  "need_by": "2026-06-21", "job_id": "2025-1146", "week_bucket": "2026-W25" },
+    { "sap_code": "GLU-2K-5L",      "qty": 10, "need_by": "2026-06-15", "job_id": "2025-1142", "week_bucket": "2026-W25" },
+    { "sap_code": "EDG-ALU-3M",     "qty": 22, "need_by": "2026-06-18", "job_id": "2025-1146", "week_bucket": "2026-W25" }
+  ],
+  "po_suggestions": [
+    { "id": 1, "sap_code": "GRP-MPS-A-0077", "qty": 42, "suggested_supplier": "SA Composites",   "last_price": 1240,   "total": 52080,  "need_by": "2026-06-04", "jobs_impacted": ["2025-1138", "2025-1142", "2025-1146"], "urgency": "critical", "status": "pending", "created_at": "2026-05-28T08:00:00Z" },
+    { "id": 2, "sap_code": "DOR-RR-2000",    "qty": 3,  "suggested_supplier": "Whiting SA",      "last_price": 18400,  "total": 55200,  "need_by": "2026-06-12", "jobs_impacted": ["2025-1144", "2025-1147"],              "urgency": "order_now", "status": "pending", "created_at": "2026-05-30T08:00:00Z" },
+    { "id": 3, "sap_code": "FRZ-CT-380",     "qty": 2,  "suggested_supplier": "Carrier SA",      "last_price": 142500, "total": 285000, "need_by": "2026-06-14", "jobs_impacted": ["2025-1141", "2025-1145"],              "urgency": "order_now", "status": "pending", "created_at": "2026-05-30T08:00:00Z" },
+    { "id": 4, "sap_code": "LFT-DH-MR15",    "qty": 1,  "suggested_supplier": "Dhollandia SA",   "last_price": 78200,  "total": 78200,  "need_by": "2026-06-25", "jobs_impacted": ["2025-1149"],                            "urgency": "order_now", "status": "pending", "created_at": "2026-06-01T08:00:00Z" },
+    { "id": 5, "sap_code": "CHN-SS-316",     "qty": 25, "suggested_supplier": "Tycor",           "last_price": 184,    "total": 4600,   "need_by": "2026-06-28", "jobs_impacted": ["2025-1144", "2025-1148"],              "urgency": "advisory",  "status": "pending", "created_at": "2026-06-01T08:00:00Z" },
+    { "id": 6, "sap_code": "RIV-A4-200",     "qty": 14, "suggested_supplier": "Fastenal SA",     "last_price": 320,    "total": 4480,   "need_by": "2026-07-02", "jobs_impacted": ["2025-1146", "2025-1150"],              "urgency": "advisory",  "status": "pending", "created_at": "2026-06-01T08:00:00Z" },
+    { "id": 7, "sap_code": "PNT-WHT-PRO",    "qty": 12, "suggested_supplier": "Plascon SA",      "last_price": 4800,   "total": 57600,  "need_by": "2026-07-15", "jobs_impacted": ["2025-1151", "2025-1152"],              "urgency": "advisory",  "status": "pending", "created_at": "2026-06-01T08:00:00Z" },
+    { "id": 8, "sap_code": "GLU-2K-5L",      "qty": 10, "suggested_supplier": "Sika SA",         "last_price": 1240,   "total": 12400,  "need_by": "2026-06-15", "jobs_impacted": ["2025-1142"],                            "urgency": "order_now", "status": "pending", "created_at": "2026-06-01T09:30:00Z" }
+  ],
+  "stock_counts": [
+    { "id": 1, "sap_code": "GRP-MPS-A-0077", "bin": "A-12-3", "sap_stock_at_count": 8,  "physical_count": 5,  "counted_by": "P. Mokoena", "counted_at": "2026-06-01T09:14:00Z", "status": "discrepancy" },
+    { "id": 2, "sap_code": "PNL-FLR-100-BG", "bin": "A-08-1", "sap_stock_at_count": 4,  "physical_count": 2,  "counted_by": "P. Mokoena", "counted_at": "2026-06-01T10:02:00Z", "status": "discrepancy" },
+    { "id": 3, "sap_code": "SUB-FRM-3200",   "bin": "B-04-2", "sap_stock_at_count": 6,  "physical_count": 6,  "counted_by": "S. Dlamini", "counted_at": "2026-06-01T08:30:00Z", "status": "confirmed"   },
+    { "id": 4, "sap_code": "RIV-A4-200",     "bin": "C-02-1", "sap_stock_at_count": 42, "physical_count": 42, "counted_by": "S. Dlamini", "counted_at": "2026-06-01T08:45:00Z", "status": "confirmed"   },
+    { "id": 5, "sap_code": "FRZ-CT-380",     "bin": "D-01-1", "sap_stock_at_count": 0,  "physical_count": null, "counted_by": "P. Mokoena", "counted_at": null,                  "status": "pending"     },
+    { "id": 6, "sap_code": "DOR-RR-2000",    "bin": "D-03-2", "sap_stock_at_count": 0,  "physical_count": null, "counted_by": "S. Dlamini", "counted_at": null,                  "status": "pending"     },
+    { "id": 7, "sap_code": "PNT-WHT-PRO",    "bin": "E-01-1", "sap_stock_at_count": 3,  "physical_count": 3,  "counted_by": "P. Mokoena", "counted_at": "2026-06-01T11:30:00Z", "status": "confirmed"   },
+    { "id": 8, "sap_code": "CHN-SS-316",     "bin": "C-05-3", "sap_stock_at_count": 12, "physical_count": 12, "counted_by": "S. Dlamini", "counted_at": "2026-06-01T09:50:00Z", "status": "confirmed"   },
+    { "id": 9, "sap_code": "LFT-DH-MR15",    "bin": "D-02-1", "sap_stock_at_count": 2,  "physical_count": 1,  "counted_by": "P. Mokoena", "counted_at": "2026-06-01T13:08:00Z", "status": "discrepancy" },
+    { "id": 10,"sap_code": "INS-PUR-50",     "bin": "B-12-4", "sap_stock_at_count": 40, "physical_count": 40, "counted_by": "S. Dlamini", "counted_at": "2026-06-01T14:02:00Z", "status": "confirmed"   }
+  ],
+  "discrepancies": [
+    { "id": 1, "stock_count_id": 1, "raised_at": "2026-06-01T09:15:00Z", "raised_to_buyer": "M. Nkomo", "notes": null, "resolved_at": null },
+    { "id": 2, "stock_count_id": 2, "raised_at": "2026-06-01T10:03:00Z", "raised_to_buyer": "M. Nkomo", "notes": null, "resolved_at": null },
+    { "id": 3, "stock_count_id": 9, "raised_at": "2026-06-01T13:10:00Z", "raised_to_buyer": "M. Nkomo", "notes": null, "resolved_at": null }
+  ],
+  "suppliers": [
+    { "name": "SA Composites",   "contact_person": "J. Pillay",  "payment_terms": "30 days", "phone": "+27 11 555 0011" },
+    { "name": "Whiting SA",      "contact_person": "M. de Wet",  "payment_terms": "30 days", "phone": "+27 11 555 0022" },
+    { "name": "Carrier SA",      "contact_person": "L. Naidoo",  "payment_terms": "45 days", "phone": "+27 11 555 0033" },
+    { "name": "Dhollandia SA",   "contact_person": "P. Marais",  "payment_terms": "30 days", "phone": "+27 11 555 0044" },
+    { "name": "Macsteel",        "contact_person": "T. Mahlangu", "payment_terms": "30 days","phone": "+27 11 555 0055" },
+    { "name": "Lambda Insul.",   "contact_person": "K. Joubert", "payment_terms": "30 days", "phone": "+27 11 555 0066" },
+    { "name": "Plascon SA",      "contact_person": "V. Sithole", "payment_terms": "30 days", "phone": "+27 11 555 0077" },
+    { "name": "Fastenal SA",     "contact_person": "R. Olivier", "payment_terms": "EOM",     "phone": "+27 11 555 0088" },
+    { "name": "Tycor",           "contact_person": "N. Khumalo", "payment_terms": "EOM",     "phone": "+27 11 555 0099" },
+    { "name": "Sika SA",         "contact_person": "F. van Wyk", "payment_terms": "30 days", "phone": "+27 11 555 0100" },
+    { "name": "Wispeco",         "contact_person": "G. Botha",   "payment_terms": "30 days", "phone": "+27 11 555 0111" }
+  ]
+}

@@ -1,0 +1,435 @@
+{
+  "_meta": {
+    "purpose": "Mock data for Icecold Bodies MES Phase-0 mockup. All names are real customers/suppliers; all jobs and statuses are illustrative. Use this single file as the data source for every screen in the mockup brief.",
+    "version": "1.0",
+    "snapshot_date": "2026-05-29",
+    "currency": "ZAR"
+  },
+
+  "user": {
+    "id": "rep_burt",
+    "name": "Burt Smith",
+    "role": "Sales Rep",
+    "rep_code": "BURT",
+    "site": "JHB",
+    "avatar_initials": "BS"
+  },
+
+  "kpis": {
+    "orderbook_total_zar": 177006839,
+    "orderbook_jhb": 155069309,
+    "orderbook_ct": 21937529,
+    "invoiced_ytd_zar": 40832719,
+    "active_jobs": 260,
+    "planned_jobs": 184,
+    "unplanned_jobs": 76,
+    "invoiced_jobs": 58,
+    "late_jobs": 27,
+    "critical_chassis": 35,
+    "weekly_target_zar": 12500000,
+    "current_week": "W22",
+    "completed_today": 4,
+    "target_today": 5
+  },
+
+  "sites": [
+    { "id": "JHB", "name": "Johannesburg (Main Plant)", "is_primary": true },
+    { "id": "CT", "name": "Cape Town" },
+    { "id": "CENT", "name": "Centurion" }
+  ],
+
+  "sales_reps": [
+    { "code": "ATTIE", "name": "Attie van der Merwe", "active_jobs": 10, "planned": 9, "invoiced_ytd": 5, "late": 1, "critical_chassis": 1 },
+    { "code": "BURT", "name": "Burt Smith", "active_jobs": 92, "planned": 87, "invoiced_ytd": 20, "late": 13, "critical_chassis": 28 },
+    { "code": "JANCO", "name": "Janco Botha", "active_jobs": 32, "planned": 30, "invoiced_ytd": 6, "late": 1, "critical_chassis": 1 },
+    { "code": "LOLLIE", "name": "Lollie Naidoo", "active_jobs": 24, "planned": 18, "invoiced_ytd": 9, "late": 3, "critical_chassis": 2 },
+    { "code": "MICHAEL", "name": "Michael Phiri", "active_jobs": 31, "planned": 22, "invoiced_ytd": 7, "late": 2, "critical_chassis": 1 },
+    { "code": "SCOTT", "name": "Scott Patel", "active_jobs": 16, "planned": 11, "invoiced_ytd": 4, "late": 1, "critical_chassis": 0 },
+    { "code": "SIPHO", "name": "Sipho Nkosi", "active_jobs": 18, "planned": 14, "invoiced_ytd": 5, "late": 2, "critical_chassis": 1 },
+    { "code": "STEVIE", "name": "Stevie van Wyk", "active_jobs": 12, "planned": 8, "invoiced_ytd": 3, "late": 1, "critical_chassis": 0 },
+    { "code": "SUZETTE", "name": "Suzette Dlamini", "active_jobs": 9, "planned": 7, "invoiced_ytd": 2, "late": 1, "critical_chassis": 0 },
+    { "code": "TERTIUS", "name": "Tertius Greyling", "active_jobs": 16, "planned": 12, "invoiced_ytd": 5, "late": 2, "critical_chassis": 1 }
+  ],
+
+  "customers": [
+    { "id": 4501, "name": "Rustenburg Toyota", "contact": "Hennie de Bruyn", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4502, "name": "Hestony Transport (Pty) Ltd", "contact": "Pieter Joubert", "default_rep": "JANCO", "site": "JHB" },
+    { "id": 4503, "name": "Spar South Africa", "contact": "Andre Smit", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4504, "name": "Transfesco SA", "contact": "Maria Botha", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4505, "name": "Value Logistics", "contact": "Themba Mahlangu", "default_rep": "SUZETTE", "site": "JHB" },
+    { "id": 4506, "name": "African Perishable Logistics", "contact": "Adriaan Pretorius", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4507, "name": "Lieben Logistics", "contact": "Jakob Visser", "default_rep": "MICHAEL", "site": "JHB" },
+    { "id": 4508, "name": "BB Truck Middelburg - Daily Fruit", "contact": "Karel Mahlangu", "default_rep": "TERTIUS", "site": "JHB" },
+    { "id": 4509, "name": "Malu Pork", "contact": "Riaan Steyn", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4510, "name": "Transworld Roadfreight", "contact": "Lerato Khumalo", "default_rep": "LOLLIE", "site": "JHB" },
+    { "id": 4511, "name": "HdP Transport", "contact": "Hendrik du Plessis", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4512, "name": "Kelrn", "contact": "Naledi Mokoena", "default_rep": "JANCO", "site": "JHB" },
+    { "id": 4513, "name": "Ground Cover", "contact": "Sarel van Rooyen", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4514, "name": "Intertoy Toyota - Rossouw Meat", "contact": "Riana Rossouw", "default_rep": "BURT", "site": "JHB" },
+    { "id": 4515, "name": "NTT Toyota Delmas - CJ Distribution", "contact": "Christo Jansen", "default_rep": "MICHAEL", "site": "JHB" },
+    { "id": 4516, "name": "Afrit - Chrono", "contact": "Yusuf Cassim", "default_rep": "JEREMY", "site": "JHB" },
+    { "id": 4517, "name": "AC&R Refrigeration Services", "contact": "Abu-Bakr Patel", "default_rep": "ATTIE", "site": "JHB" },
+    { "id": 4518, "name": "Secunda Toyota - Romans Pizza", "contact": "Pieter le Roux", "default_rep": "MICHAEL", "site": "JHB" }
+  ],
+
+  "chassis_models": [
+    { "code": "HINO-300-614-SWB-EU3", "make": "Hino", "model": "300 614 SWB (EU3)", "category": "truck", "max_payload_kg": 2500 },
+    { "code": "HINO-300-815", "make": "Hino", "model": "300 815", "category": "truck", "max_payload_kg": 3500 },
+    { "code": "HINO-300-816-SWB-FB3", "make": "Hino", "model": "300 816 SWB (FB3)", "category": "truck", "max_payload_kg": 3500 },
+    { "code": "HINO-500-1627-LWB-EJ5", "make": "Hino", "model": "500 1627 LWB (EJ5)", "category": "truck", "max_payload_kg": 7500 },
+    { "code": "ISUZU-FTR-850-AMT", "make": "Isuzu", "model": "FTR 850 AMT (MY22)", "category": "truck", "max_payload_kg": 6800 },
+    { "code": "TOYOTA-HILUX-24-SC-LWB", "make": "Toyota", "model": "Hilux 2.4 S/C LWB Bakkie", "category": "bakkie", "max_payload_kg": 1000 },
+    { "code": "MAN-TGM-26290", "make": "MAN", "model": "TGM 26.290 (Tag Down)", "category": "truck", "max_payload_kg": 12000 },
+    { "code": "VOLVO-FMX440-6X4", "make": "Volvo", "model": "FMX440 6X4 LH Drive", "category": "truck", "max_payload_kg": 15000 },
+    { "code": "TRAILER-TRI-AXLE", "make": "ICB", "model": "Tri-Axle Trailer Chassis", "category": "trailer", "max_payload_kg": 28000 },
+    { "code": "TRAILER-TANDEM", "make": "ICB", "model": "Tandem Trailer Chassis", "category": "trailer", "max_payload_kg": 20000 }
+  ],
+
+  "fridge_units": [
+    { "code": "TF-R500T", "supplier": "Transfrig", "model": "R500T", "category": "truck", "approx_weight_kg": 65 },
+    { "code": "TF-R600TE", "supplier": "Transfrig", "model": "R600TE", "category": "truck", "approx_weight_kg": 72 },
+    { "code": "TF-KV760I-TE", "supplier": "Transfrig", "model": "KV760i TE", "category": "trailer", "approx_weight_kg": 245 },
+    { "code": "CR-SUPRA-750", "supplier": "Carrier", "model": "Supra 750", "category": "trailer", "approx_weight_kg": 380 },
+    { "code": "CR-SUPRA-HE8", "supplier": "Carrier", "model": "Supra HE8", "category": "trailer", "approx_weight_kg": 410 },
+    { "code": "CR-SUPRA-HE9", "supplier": "Carrier", "model": "Supra HE9", "category": "trailer", "approx_weight_kg": 425 },
+    { "code": "CR-VECTOR-HE19", "supplier": "Carrier", "model": "Vector HE19", "category": "trailer", "approx_weight_kg": 470 },
+    { "code": "JG-P120-EVO", "supplier": "Javgro", "model": "P-120 EVO", "category": "truck", "approx_weight_kg": 88 },
+    { "code": "ACR-REFIT", "supplier": "AC&R", "model": "Remove & Refit - Customer-supplied", "category": "any", "approx_weight_kg": 0 },
+    { "code": "NONE", "supplier": "-", "model": "No Fridge Unit", "category": "any", "approx_weight_kg": 0 }
+  ],
+
+  "tail_lifts": [
+    { "code": "DH-RC10-TUCK", "supplier": "Dhollandia", "model": "DH.RC.10 Tuck Away", "capacity_kg": 1000 },
+    { "code": "DH-RP10-TUCK", "supplier": "Dhollandia", "model": "DH.RP.10 Tuck Away", "capacity_kg": 1000 },
+    { "code": "DH-RC15-TUCK", "supplier": "Dhollandia", "model": "DH.RC.15 Tuck Away", "capacity_kg": 1500 },
+    { "code": "DH-RM20-TUCK", "supplier": "Dhollandia", "model": "DH.RM.20 Tuck Away", "capacity_kg": 2000 },
+    { "code": "DH-SM20-SLIDE", "supplier": "Dhollandia", "model": "DH.SM.20 Slider", "capacity_kg": 2000 },
+    { "code": "DH-SM30-SLIDE", "supplier": "Dhollandia", "model": "DH.SM.30 Slider", "capacity_kg": 3000 },
+    { "code": "DH-SMR20-SLIDE", "supplier": "Dhollandia", "model": "DH.SMR.20 Slider", "capacity_kg": 2000 },
+    { "code": "NONE", "supplier": "-", "model": "No Tail Lift", "capacity_kg": 0 }
+  ],
+
+  "body_types": [
+    { "code": "DF", "name": "Dryfreight", "panel_route": "VACUUM", "complexity": "MEDIUM" },
+    { "code": "CARCASS", "name": "Carcass", "panel_route": "VACUUM", "complexity": "MEDIUM" },
+    { "code": "CHILLER", "name": "Chiller", "panel_route": "VACUUM", "complexity": "HARD" },
+    { "code": "FREEZER", "name": "Freezer", "panel_route": "VACUUM", "complexity": "HARD" },
+    { "code": "ICECREAM", "name": "Icecream", "panel_route": "VACUUM", "complexity": "HARD" },
+    { "code": "FREEZER_AR", "name": "Freezer All Round", "panel_route": "VACUUM", "complexity": "HARD" },
+    { "code": "RR_CARCASS", "name": "RR Carcass Trailer", "panel_route": "VACUUM", "complexity": "HARD" },
+    { "code": "RHINO", "name": "Rhinorange", "panel_route": "PANELSHOP", "complexity": "MEDIUM" },
+    { "code": "INS_TRAILER", "name": "Insulated Trailer", "panel_route": "PANELSHOP", "complexity": "HARD" },
+    { "code": "EXPLOSIVE", "name": "Explosive", "panel_route": "VACUUM", "complexity": "HARD" }
+  ],
+
+  "jobs": [
+    { "job_number": "32891", "customer_id": 4501, "rep": "BURT", "site": "JHB", "description": "3.2m Freezer Body on Hino 300 614 SWB (EU3)",
+      "chassis_code": "HINO-300-614-SWB-EU3", "body_type": "FREEZER", "fridge_code": "TF-R500T", "lift_code": "NONE",
+      "dimensions_mm": { "length": 3200, "width": 2000, "height": 1900 },
+      "cost_zar": 75729, "selling_zar": 129156, "gross_profit_zar": 53426, "markup_pct": 65,
+      "status": "JUST_ACCEPTED", "promised_date": "2026-07-15", "chassis_received": null,
+      "current_phase": "QUOTATION_ACCEPTED", "current_bay": null, "progress_pct": 2,
+      "is_late": false, "priority": "normal", "complexity": "HARD" },
+
+    { "job_number": "31849", "customer_id": 4509, "rep": "BURT", "site": "JHB", "description": "6.7m Carcass on Hino 300 815",
+      "chassis_code": "HINO-300-815", "body_type": "CARCASS", "fridge_code": "TF-R600TE", "lift_code": "DH-RC15-TUCK",
+      "dimensions_mm": { "length": 6700, "width": 2400, "height": 2100 },
+      "cost_zar": 198400, "selling_zar": 327360, "gross_profit_zar": 128960, "markup_pct": 65,
+      "status": "INVOICED", "promised_date": "2026-05-12", "chassis_received": "2026-04-14",
+      "invoiced_date": "2026-05-07", "left_icb_date": null,
+      "current_phase": "DISPATCH_STAGING", "current_bay": "DISP-2", "progress_pct": 95,
+      "is_late": false, "priority": "normal", "complexity": "MEDIUM" },
+
+    { "job_number": "31955", "customer_id": 4504, "rep": "BURT", "site": "JHB", "description": "15.5m RR Trailer Body Only (Transfesco SA)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "TF-KV760I-TE", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1180000, "selling_zar": 1947000, "gross_profit_zar": 767000, "markup_pct": 65,
+      "status": "INVOICED", "promised_date": "2026-04-15", "chassis_received": "2026-04-15",
+      "invoiced_date": "2026-05-08", "left_icb_date": "2026-05-14",
+      "current_phase": "DEPARTED", "current_bay": null, "progress_pct": 100,
+      "is_late": false, "priority": "normal", "complexity": "HARD" },
+
+    { "job_number": "32475", "customer_id": 4512, "rep": "JANCO", "site": "JHB", "description": "15.5m RR Trailer Body Only (Kelrn)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "TF-KV760I-TE", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1175000, "selling_zar": 1938750, "gross_profit_zar": 763750, "markup_pct": 65,
+      "status": "IN_ASSEMBLY", "promised_date": "2026-05-20", "chassis_received": "2026-04-20",
+      "current_phase": "ASSEMBLY", "current_bay": "ASSY-1", "progress_pct": 68,
+      "is_late": false, "priority": "high", "complexity": "HARD" },
+
+    { "job_number": "32185", "customer_id": 4503, "rep": "BURT", "site": "JHB", "description": "15.5m RR Tri-Axle Trailer (Spar SA)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "CR-SUPRA-HE9", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1192000, "selling_zar": 1966800, "gross_profit_zar": 774800, "markup_pct": 65,
+      "status": "IN_GRP", "promised_date": "2026-05-08", "chassis_received": "2026-04-12",
+      "current_phase": "GRP_FITTINGS", "current_bay": "GRP-2", "progress_pct": 81,
+      "is_late": true, "days_late": 21, "priority": "high", "complexity": "HARD" },
+
+    { "job_number": "32186", "customer_id": 4503, "rep": "BURT", "site": "JHB", "description": "15.5m RR Tri-Axle Trailer (Spar SA)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "CR-SUPRA-HE9", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1192000, "selling_zar": 1966800, "gross_profit_zar": 774800, "markup_pct": 65,
+      "status": "IN_PRE_ASSY", "promised_date": "2026-05-13", "chassis_received": "2026-04-16",
+      "current_phase": "PRE_ASSY", "current_bay": "PA-1", "progress_pct": 55,
+      "is_late": true, "days_late": 16, "priority": "high", "complexity": "HARD" },
+
+    { "job_number": "32177", "customer_id": 4507, "rep": "MICHAEL", "site": "JHB", "description": "15.5m RR Tri-Axle Trailer (Lieben Logistics)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "CR-SUPRA-HE9", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1192000, "selling_zar": 1966800, "gross_profit_zar": 774800, "markup_pct": 65,
+      "status": "IN_VACUUM", "promised_date": "2026-05-26", "chassis_received": null,
+      "current_phase": "PANEL_VACUUM", "current_bay": "VAC-1", "progress_pct": 35,
+      "is_late": false, "priority": "normal", "complexity": "HARD" },
+
+    { "job_number": "31758", "customer_id": 4502, "rep": "JANCO", "site": "JHB", "description": "15.5m RR Trailer Body Only (Hestony)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "CR-SUPRA-HE9", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1175000, "selling_zar": 1938750, "gross_profit_zar": 763750, "markup_pct": 65,
+      "status": "IN_QC", "promised_date": "2026-05-11", "chassis_received": "2026-03-25",
+      "current_phase": "FINAL_QC", "current_bay": "QC-1", "progress_pct": 92,
+      "is_late": true, "days_late": 18, "priority": "high", "complexity": "HARD" },
+
+    { "job_number": "32209", "customer_id": 4508, "rep": "TERTIUS", "site": "JHB", "description": "5.2m Freezer on Hino 300 815",
+      "chassis_code": "HINO-300-815", "body_type": "FREEZER", "fridge_code": "TF-R600TE", "lift_code": "DH-RC10-TUCK",
+      "dimensions_mm": { "length": 5200, "width": 2200, "height": 2050 },
+      "cost_zar": 165000, "selling_zar": 272250, "gross_profit_zar": 107250, "markup_pct": 65,
+      "status": "IN_LAMINATION", "promised_date": "2026-04-29", "chassis_received": null,
+      "current_phase": "LAMINATION", "current_bay": "LAM-1", "progress_pct": 73,
+      "is_late": true, "days_late": 30, "priority": "high", "complexity": "HARD" },
+
+    { "job_number": "32560", "customer_id": 4514, "rep": "BURT", "site": "JHB", "description": "4.5m Chiller on Hino 300 614",
+      "chassis_code": "HINO-300-614-SWB-EU3", "body_type": "CHILLER", "fridge_code": "TF-R500T", "lift_code": "NONE",
+      "dimensions_mm": { "length": 4500, "width": 2000, "height": 2000 },
+      "cost_zar": 108000, "selling_zar": 178200, "gross_profit_zar": 70200, "markup_pct": 65,
+      "status": "INVOICED", "promised_date": "2026-05-26", "chassis_received": "2026-05-02",
+      "invoiced_date": "2026-05-28", "left_icb_date": null,
+      "current_phase": "DISPATCH_STAGING", "current_bay": "DISP-1", "progress_pct": 96,
+      "next_action": "Awaiting Transfrig fitment", "is_late": false, "priority": "normal", "complexity": "MEDIUM" },
+
+    { "job_number": "32535", "customer_id": 4515, "rep": "MICHAEL", "site": "JHB", "description": "8.4m Carcass on Isuzu FTR 850",
+      "chassis_code": "ISUZU-FTR-850-AMT", "body_type": "CARCASS", "fridge_code": "JG-P120-EVO", "lift_code": "NONE",
+      "dimensions_mm": { "length": 8400, "width": 2400, "height": 2300 },
+      "cost_zar": 295000, "selling_zar": 486750, "gross_profit_zar": 191750, "markup_pct": 65,
+      "status": "INVOICED", "promised_date": "2026-05-22", "chassis_received": "2026-04-18",
+      "invoiced_date": "2026-05-26", "left_icb_date": null,
+      "current_phase": "DISPATCH_STAGING", "current_bay": "DISP-3", "progress_pct": 96,
+      "next_action": "Awaiting Javgro fitment", "is_late": false, "priority": "normal", "complexity": "MEDIUM" },
+
+    { "job_number": "32348", "customer_id": 4513, "rep": "BURT", "site": "JHB", "description": "12.0m Chiller Trailer",
+      "chassis_code": "TRAILER-TANDEM", "body_type": "CHILLER", "fridge_code": "CR-VECTOR-HE19", "lift_code": "NONE",
+      "dimensions_mm": { "length": 12000, "width": 2500, "height": 2700 },
+      "cost_zar": 875000, "selling_zar": 1443750, "gross_profit_zar": 568750, "markup_pct": 65,
+      "status": "INVOICED", "promised_date": "2026-05-28", "chassis_received": "2026-04-22",
+      "invoiced_date": "2026-05-27", "left_icb_date": null,
+      "current_phase": "TRAILER_COMPLIANCE", "current_bay": null, "progress_pct": 97,
+      "next_action": "Brake sign-off pending", "is_late": false, "priority": "normal", "complexity": "HARD" },
+
+    { "job_number": "31992", "customer_id": 4505, "rep": "SUZETTE", "site": "JHB", "description": "5.5m Dryfreight (Value Logistics)",
+      "chassis_code": "HINO-300-815", "body_type": "DF", "fridge_code": "NONE", "lift_code": "DH-RC10-TUCK",
+      "dimensions_mm": { "length": 5500, "width": 2200, "height": 2100 },
+      "cost_zar": 98000, "selling_zar": 161700, "gross_profit_zar": 63700, "markup_pct": 65,
+      "status": "PIPELINE", "promised_date": "2026-06-28", "chassis_received": null,
+      "current_phase": "PIPELINE", "current_bay": null, "progress_pct": 0,
+      "next_action": "CHASSIS ETA - MID JUN", "is_late": false, "priority": "normal", "complexity": "MEDIUM" },
+
+    { "job_number": "29296", "customer_id": 4510, "rep": "LOLLIE", "site": "JHB", "description": "15.5m Tri-Axle Trailer (Transworld)",
+      "chassis_code": "TRAILER-TRI-AXLE", "body_type": "RR_CARCASS", "fridge_code": "CR-SUPRA-HE9", "lift_code": "NONE",
+      "dimensions_mm": { "length": 15500, "width": 2500, "height": 2700 },
+      "cost_zar": 1192000, "selling_zar": 1966800, "gross_profit_zar": 774800, "markup_pct": 65,
+      "status": "PIPELINE", "promised_date": "2026-07-30", "chassis_received": null,
+      "current_phase": "PIPELINE", "current_bay": null, "progress_pct": 0,
+      "next_action": "TO BUILD", "is_late": false, "priority": "low", "complexity": "HARD" },
+
+    { "job_number": "32891", "customer_id": 4501, "rep": "BURT", "site": "JHB", "description": "3.2m Freezer Body on Hino 300 614 (Rustenburg Toyota — JUST ACCEPTED for live demo)",
+      "chassis_code": "HINO-300-614-SWB-EU3", "body_type": "FREEZER", "fridge_code": "TF-R500T", "lift_code": "NONE",
+      "dimensions_mm": { "length": 3200, "width": 2000, "height": 1900 },
+      "cost_zar": 75729, "selling_zar": 129156, "gross_profit_zar": 53426, "markup_pct": 65,
+      "status": "JUST_ACCEPTED", "promised_date": "2026-07-15", "chassis_received": null,
+      "current_phase": "QUOTATION_ACCEPTED", "current_bay": null, "progress_pct": 2,
+      "is_late": false, "priority": "normal", "complexity": "HARD",
+      "configurator_demo": true }
+  ],
+
+  "bays": [
+    { "id": "VAC-1", "name": "Vacuum 1", "category": "panel_fab", "wip_limit": 2, "wip_count": 1, "status": "GREEN", "current_jobs": ["32177"], "queue": ["32891", "32475"], "throughput_today": 1, "target_today": 2, "team": "Team 1" },
+    { "id": "VAC-2", "name": "Vacuum 2", "category": "panel_fab", "wip_limit": 2, "wip_count": 2, "status": "AMBER", "current_jobs": ["32195", "32198"], "queue": [], "throughput_today": 2, "target_today": 2, "team": "Team 2", "amber_reason": "WIP at limit" },
+    { "id": "PS-1", "name": "Panelshop 1", "category": "panel_fab", "wip_limit": 3, "wip_count": 1, "status": "GREEN", "current_jobs": ["32801"], "queue": ["32812"], "throughput_today": 2, "target_today": 3, "team": "Team 3" },
+    { "id": "PREP-1", "name": "Preparation", "category": "pre_mfg", "wip_limit": 3, "wip_count": 2, "status": "GREEN", "current_jobs": ["32891", "32475"], "queue": [], "throughput_today": 3, "target_today": 3, "team": "Team 4" },
+    { "id": "PM-1", "name": "Premanufacturing 1", "category": "pre_mfg", "wip_limit": 3, "wip_count": 3, "status": "AMBER", "current_jobs": ["32891", "32475", "32812"], "queue": ["32813"], "throughput_today": 2, "target_today": 3, "team": "Team 5", "amber_reason": "WIP at limit" },
+    { "id": "SUB-1", "name": "Subframes 1", "category": "fab", "wip_limit": 2, "wip_count": 1, "status": "GREEN", "current_jobs": ["32475"], "queue": ["32891"], "throughput_today": 1, "target_today": 1, "team": "Team 6" },
+    { "id": "DR-1", "name": "Doors 1", "category": "fab", "wip_limit": 4, "wip_count": 3, "status": "GREEN", "current_jobs": ["32475", "32891", "32177"], "queue": ["32812"], "throughput_today": 3, "target_today": 4, "team": "Doors A" },
+    { "id": "PA-1", "name": "Pre-Assy 1", "category": "assembly", "wip_limit": 3, "wip_count": 3, "status": "GREEN", "current_jobs": ["32186", "32475", "31955"], "queue": ["32177", "32891", "32812", "31760", "31761"], "throughput_today": 2, "target_today": 3, "team": "Team 7", "is_bottleneck": true },
+    { "id": "ASSY-1", "name": "Assembly 1", "category": "assembly", "wip_limit": 3, "wip_count": 2, "status": "GREEN", "current_jobs": ["32475", "31760"], "queue": ["32186"], "throughput_today": 2, "target_today": 3, "team": "Team 8" },
+    { "id": "LAM-1", "name": "Lamination 1", "category": "assembly", "wip_limit": 2, "wip_count": 2, "status": "AMBER", "current_jobs": ["32209", "31761"], "queue": ["32475"], "throughput_today": 1, "target_today": 2, "team": "Team 9", "amber_reason": "WIP at limit" },
+    { "id": "GRP-1", "name": "GRP 1", "category": "assembly", "wip_limit": 3, "wip_count": 1, "status": "GREEN", "current_jobs": ["31760"], "queue": ["32209", "31761"], "throughput_today": 2, "target_today": 3, "team": "Team 10" },
+    { "id": "GRP-2", "name": "GRP 2", "category": "assembly", "wip_limit": 3, "wip_count": 2, "status": "RED", "current_jobs": ["32185", "31763"], "queue": ["32348"], "throughput_today": 0, "target_today": 3, "team": "Team 11", "red_reason": "Material shortage: GRP-MPS-A-0077 (capping)" },
+    { "id": "QC-1", "name": "Final QC 1", "category": "qc", "wip_limit": 2, "wip_count": 1, "status": "GREEN", "current_jobs": ["31758"], "queue": ["32475"], "throughput_today": 2, "target_today": 2, "team": "QC Lead" },
+    { "id": "DISP-1", "name": "Dispatch 1", "category": "dispatch", "wip_limit": 5, "wip_count": 3, "status": "GREEN", "current_jobs": ["32560", "31849", "31955"], "queue": [], "throughput_today": 0, "target_today": 0, "team": "Logistics" },
+    { "id": "DISP-2", "name": "Dispatch 2", "category": "dispatch", "wip_limit": 5, "wip_count": 1, "status": "GREEN", "current_jobs": ["31849"], "queue": [], "throughput_today": 0, "target_today": 0, "team": "Logistics" }
+  ],
+
+  "pre_assy_kanban": {
+    "bay_id": "PA-1",
+    "bay_name": "Pre-Assembly 1",
+    "team": "Team 7 — Lead: Sello Nkwana",
+    "wip_count": 3,
+    "wip_limit": 3,
+    "status": "GREEN",
+    "throughput_today": 2,
+    "target_today": 3,
+    "throughput_wtd": 11,
+    "target_wtd": 15,
+    "factory_bottleneck": "Pre-Assy 1 (this bay) — 5-job queue",
+    "in_queue": [
+      { "job_number": "32177", "customer_name": "Lieben Logistics", "body_type": "RR Carcass Trailer", "priority": "normal", "promised_date": "2026-05-26", "complexity": "HARD" },
+      { "job_number": "32891", "customer_name": "Rustenburg Toyota", "body_type": "3.2m Freezer", "priority": "normal", "promised_date": "2026-07-15", "complexity": "HARD" },
+      { "job_number": "32812", "customer_name": "Hestony Transport", "body_type": "8.4m RR Carcass", "priority": "high", "promised_date": "2026-06-05", "complexity": "HARD" },
+      { "job_number": "31760", "customer_name": "Spar SA", "body_type": "RR Tri-Axle Trailer", "priority": "high", "promised_date": "2026-05-30", "complexity": "HARD" },
+      { "job_number": "31761", "customer_name": "Spar SA", "body_type": "RR Tri-Axle Trailer", "priority": "normal", "promised_date": "2026-06-02", "complexity": "HARD" }
+    ],
+    "in_progress": [
+      { "job_number": "32186", "customer_name": "Spar SA", "body_type": "RR Tri-Axle Trailer", "hours_in_bay": 14.5, "hours_planned": 12.0, "assigned_to": "Patrick Maya", "is_over": true },
+      { "job_number": "32475", "customer_name": "Kelrn", "body_type": "RR Tri-Axle Trailer", "hours_in_bay": 6.2, "hours_planned": 12.0, "assigned_to": "Mzomahle Masuku", "is_over": false },
+      { "job_number": "31955", "customer_name": "Transfesco SA", "body_type": "RR Tri-Axle Trailer", "hours_in_bay": 4.0, "hours_planned": 12.0, "assigned_to": "Nontombeko Mtshali", "is_over": false }
+    ],
+    "waiting": [
+      { "job_number": "31763", "customer_name": "Spar SA", "reason": "Material shortage: GRP-MPS-A-0077 capping", "hours_waiting": 22, "severity": "high" }
+    ],
+    "completed_today": [
+      { "job_number": "32132", "customer_name": "Afrit - Chrono", "completed_at": "10:42" },
+      { "job_number": "32144", "customer_name": "BB Truck Middelburg", "completed_at": "13:18" }
+    ]
+  },
+
+  "vacuum_bay_tablet": {
+    "bay_id": "VAC-1",
+    "bay_name": "Vacuum 1",
+    "operator": "Sello Nkwana",
+    "shift_start": "07:00",
+    "current_work_order": {
+      "wo_id": "WO-32177-VAC",
+      "job_number": "32177",
+      "customer_name": "Lieben Logistics",
+      "body_type": "15.5m RR Carcass Trailer",
+      "phase": "Panel Vacuum Fabrication",
+      "started_at": "2026-05-29T08:15:00Z",
+      "planned_hours": 6.0,
+      "elapsed_hours": 4.3,
+      "panels_in_cycle": "Floor + LHS + RHS",
+      "picking_slip": [
+        { "sap_item_code": "NEW-03", "description": "056mm PU 2440x1220mm 32DV", "qty_required": 14, "qty_picked": 14, "status": "picked" },
+        { "sap_item_code": "NEW-04", "description": "056mm PU 2630x1220mm 32DV", "qty_required": 4, "qty_picked": 4, "status": "picked" },
+        { "sap_item_code": "TIM-PIN-A-0012", "description": "Timber Pine 38x38 Pre-Cut", "qty_required": 28, "qty_picked": 28, "status": "picked" },
+        { "sap_item_code": "STE-PLA-A-0001", "description": "1.2mm Galvanised Skin 2440x1220", "qty_required": 6, "qty_picked": 6, "status": "picked" },
+        { "sap_item_code": "CON-AUT-A-0171", "description": "PVC Spraque Tube", "qty_required": 24, "qty_picked": 18, "status": "short", "shortage": 6 }
+      ],
+      "signoff_items": [
+        { "id": 1, "text": "Foam pieces inspected for cracks and dimensional accuracy", "result": null },
+        { "id": 2, "text": "Timber pieces aligned to layout per Job Pack", "result": null },
+        { "id": 3, "text": "Vacuum bag sealed and tested for leaks", "result": null },
+        { "id": 4, "text": "Cure cycle started — time and pressure logged", "result": null },
+        { "id": 5, "text": "Panel removed without damage", "result": null },
+        { "id": 6, "text": "Final panel inspected for delamination and surface finish", "result": null }
+      ]
+    },
+    "next_work_orders": [
+      { "wo_id": "WO-32891-VAC", "job_number": "32891", "customer_name": "Rustenburg Toyota", "scheduled_start": "2026-05-30T07:00:00Z" },
+      { "wo_id": "WO-32475-VAC", "job_number": "32475", "customer_name": "Kelrn", "scheduled_start": "2026-05-30T13:00:00Z" }
+    ]
+  },
+
+  "qc_checklist_sample": {
+    "wo_id": "WO-31758-QC",
+    "job_number": "31758",
+    "customer_name": "Hestony Transport",
+    "body_type": "15.5m RR Carcass Trailer",
+    "started_at": "2026-05-29T09:00:00Z",
+    "inspector": "QC Lead",
+    "sections": [
+      {
+        "name": "Cab & external",
+        "items": [
+          { "id": 1, "text": "Windscreen clean, no chips", "result": "pass" },
+          { "id": 2, "text": "Front bumper alignment and finish", "result": "pass" },
+          { "id": 3, "text": "Marker lights operational (front, side, rear)", "result": "pass" },
+          { "id": 4, "text": "Door capping aligned (LH and RH)", "result": "fail", "severity": "minor", "comment": "RH capping has 2mm gap", "photo": true }
+        ]
+      },
+      {
+        "name": "Doors & locking",
+        "items": [
+          { "id": 5, "text": "Door hinges operate smoothly", "result": "pass" },
+          { "id": 6, "text": "Locking gear engages fully", "result": "pass" },
+          { "id": 7, "text": "Door rubber seal intact, full perimeter", "result": "pending" },
+          { "id": 8, "text": "Door plate decals applied per spec", "result": "pending" }
+        ]
+      },
+      {
+        "name": "Interior & panel finish",
+        "items": [
+          { "id": 9, "text": "Floor finish clean, no debris", "result": "pending" },
+          { "id": 10, "text": "Roof internal lights operational", "result": "pending" },
+          { "id": 11, "text": "Internal walls free of marks", "result": "pending" },
+          { "id": 12, "text": "Meatrails secure, level", "result": "pending" },
+          { "id": 13, "text": "Load lock tracks operational", "result": "pending" }
+        ]
+      }
+    ],
+    "summary": { "total": 122, "passed": 6, "failed": 1, "pending": 115 }
+  },
+
+  "planning_board": {
+    "weeks": [
+      { "week": "W22", "start": "2026-05-25", "end": "2026-05-29", "slots_total": 32, "slots_filled": 28, "slots_empty": 4, "value_zar": 11200000 },
+      { "week": "W23", "start": "2026-06-01", "end": "2026-06-05", "slots_total": 32, "slots_filled": 24, "slots_empty": 8, "value_zar": 9800000 },
+      { "week": "W24", "start": "2026-06-08", "end": "2026-06-12", "slots_total": 32, "slots_filled": 19, "slots_empty": 13, "value_zar": 7600000 },
+      { "week": "W25", "start": "2026-06-15", "end": "2026-06-19", "slots_total": 32, "slots_filled": 14, "slots_empty": 18, "value_zar": 5600000 },
+      { "week": "W26", "start": "2026-06-22", "end": "2026-06-26", "slots_total": 32, "slots_filled": 11, "slots_empty": 21, "value_zar": 4400000 }
+    ],
+    "slot_assignments": [
+      { "week": "W22", "slot": "V-1", "job_number": "32177", "customer_name": "Lieben Logistics" },
+      { "week": "W22", "slot": "V-2", "job_number": "32475", "customer_name": "Kelrn" },
+      { "week": "W22", "slot": "V-3", "job_number": "32185", "customer_name": "Spar SA" },
+      { "week": "W22", "slot": "V-4", "job_number": "32186", "customer_name": "Spar SA" },
+      { "week": "W22", "slot": "P-1", "job_number": "32801", "customer_name": "African Perishable Logistics" },
+      { "week": "W23", "slot": "V-1", "job_number": "32891", "customer_name": "Rustenburg Toyota" },
+      { "week": "W23", "slot": "V-2", "job_number": "32812", "customer_name": "Hestony Transport" }
+    ],
+    "unscheduled": [
+      { "job_number": "29296", "customer_name": "Transworld Roadfreight", "rep": "LOLLIE", "promised_date": "2026-07-30", "reason": "TO BUILD" },
+      { "job_number": "31992", "customer_name": "Value Logistics", "rep": "SUZETTE", "promised_date": "2026-06-28", "reason": "CHASSIS ETA - MID JUN" },
+      { "job_number": "30666", "customer_name": "HdP Transport", "rep": "BURT", "promised_date": "2026-06-15", "reason": "Awaiting chassis ETA" }
+    ]
+  },
+
+  "material_alerts": [
+    { "sap_item_code": "GRP-MPS-A-0077", "description": "GRP Capping 50mm × 2.4m", "qty_needed": 24, "qty_available": 6, "shortage": 18, "first_use_date": "2026-05-29", "severity": "HIGH", "po_status": "Open PO PO-44521 due 2026-06-02", "affecting_jobs": ["32185", "31763"] },
+    { "sap_item_code": "STE-PLA-A-0042", "description": "0.9mm Aluminium Skin 3050x1525", "qty_needed": 18, "qty_available": 12, "shortage": 6, "first_use_date": "2026-06-03", "severity": "MEDIUM", "po_status": "Open PO PO-44530 due 2026-06-01", "affecting_jobs": ["32812"] },
+    { "sap_item_code": "CON-AUT-A-0171", "description": "PVC Spraque Tube", "qty_needed": 60, "qty_available": 48, "shortage": 12, "first_use_date": "2026-05-30", "severity": "MEDIUM", "po_status": "PO required", "affecting_jobs": ["32177", "32891"] }
+  ],
+
+  "rework_tickets": [
+    { "ticket": "RW-2089", "job_number": "32140", "from_bay": "QC-1", "to_bay": "GRP-2", "reason": "Door capping alignment 4mm out", "severity": "minor", "opened_at": "2026-05-28T15:22:00Z", "status": "open" },
+    { "ticket": "RW-2092", "job_number": "32158", "from_bay": "QC-1", "to_bay": "PA-1", "reason": "Interior light wiring loose", "severity": "minor", "opened_at": "2026-05-29T08:45:00Z", "status": "open" }
+  ],
+
+  "external_vendors": [
+    { "id": "V01", "name": "Transfrig — Refrigeration", "category": "fridge_installer" },
+    { "id": "V02", "name": "Carrier — Refrigeration", "category": "fridge_installer" },
+    { "id": "V03", "name": "Javgro — Refrigeration", "category": "fridge_installer" },
+    { "id": "V04", "name": "AC&R — Refrigeration Services", "category": "fridge_installer" },
+    { "id": "V05", "name": "Dhollandia — Tail Lifts", "category": "lift_fitter" },
+    { "id": "V06", "name": "Bandag — Tyre Fitter", "category": "tyre_fitter" },
+    { "id": "V07", "name": "Brake Calc SA — Brake Calculator", "category": "brake_calc" },
+    { "id": "V08", "name": "Licensing Department", "category": "licensing" }
+  ],
+
+  "employees": [
+    { "clock_no": "ICW001", "name": "France Mbendzani", "dept": "Subframes & Trailers", "skills": ["Pre-Assy", "Brake Fitter", "Auto Elec"] },
+    { "clock_no": "ICW011", "name": "Nontombeko Mtshali", "dept": "GRP", "skills": ["Fitter", "Cleaner"] },
+    { "clock_no": "ICW014", "name": "Sinothile Ndaba", "dept": "GRP", "skills": ["Pre-Assy", "Cleaner"] },
+    { "clock_no": "ICW015", "name": "Patrick Maya", "dept": "GRP", "skills": ["Laminator", "Sealer"] },
+    { "clock_no": "ICW023", "name": "Mzomahle Masuku", "dept": "Doors", "skills": ["Welder", "Door Fitter"] },
+    { "clock_no": "ICW029", "name": "Sello Nkwana", "dept": "Vacuum", "skills": ["Vacuum Operator", "Trimmer"] }
+  ]
+}

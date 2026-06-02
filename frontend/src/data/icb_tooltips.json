@@ -1,0 +1,205 @@
+{
+  "_meta": {
+    "purpose": "Tooltip text + UI-organisation directives for the Icecold Bodies MES mockup. Each tooltip tells the client which sheet(s) from the existing workbook the new UI element replaces or augments. Hovering any of these elements in the mockup surfaces the tooltip — this is the demonstration tool for showing 'where the new system is replacing or fulfilling the old system's function'.",
+    "version": "1.5",
+    "source_workbook_referenced": "ENTERPRISE PLANNING - 2026.xlsx + JOB INSPECTION & SIGN OFF SHEETS 2024-2025.xlsx + per-job 28-sheet workbook ('Burt Costing Model')",
+    "snapshot_date": "2026-05-29",
+    "version_history": "1.0 baseline · 1.5 adds Materials/Buying/Stores groups (WO v4.11): nav keys + materials_dashboard, po_suggestion_queue, stores_reconciliation, weekly_material_forecast"
+  },
+
+  "ui_pattern": {
+    "trigger": "hover on desktop, long-press (500ms) on tablet",
+    "appearance": "Small dark tooltip card, 320–420px wide, 12–14px font, ~250ms fade-in. Background: slate-800 with white text. Always positioned to avoid screen edge.",
+    "prefix_convention": "Every tooltip starts with one of four prefixes: 'Replaces:' (the new UI replaces a sheet, paper form or process), 'Replaces & augments:' (replaces AND adds new capability on top), 'New:' (brand-new capability with no equivalent today), 'Already exists:' (the system already exists at Icecold and is being kept — the mockup screen represents or integrates with it).",
+    "implementation_note": "Use a single Tooltip component that accepts a key (e.g. 'nav.planning') and looks up text from this file. Don't hard-code tooltip strings in screen components."
+  },
+
+  "tooltips": {
+
+    "nav": {
+      "configurator":         "Already exists: this is the existing web costing app (currently in UAT). The web app replaces the per-job 28-sheet workbook ('Burt Costing Model'). On 'Accepted', integrates with the on-prem MES via the integration endpoint — see Proposal Section 3.3 Step 1 and Section 10.6.1.",
+      "planning":             "Replaces: PLANNING (the 336-column master grid), YEARLY PLANNING (32 weekly slots), PANELSHOP PLANNING and TRAILER PLANNING. One visual board replaces four scrolling sheets.",
+      "tablet_vacuum":        "Replaces: JOB INSPECTION & SIGN OFF SHEETS (paper Vacuum form) + the HOURLY paper sheet + the printed picking slip from the per-job workbook.",
+      "kanban":               "Replaces: WORKFLOW sheet (per-bay status) + the implicit pallet-Kanban + verbal handovers. New: WIP-limit enforcement and live bottleneck detection.",
+      "production_dashboard": "Replaces: JOBS, ASSEMBLY SCHEDULE (Plan vs Reality), Sheet1, Sheet2, Sheet3 (working scratch sheets) and the daily walk-the-floor check.",
+      "management_dashboard": "Replaces: INVOICING, INVOICING PER LINE, PLANNING SUMMARY and NEW JOBS PER REP. One screen for the owners, refreshed live.",
+      "qc":                   "Replaces: the paper '2 PER JOB - GREEN' 122-point Final QC checklist from JOB INSPECTION & SIGN OFF SHEETS 2024-2025.xlsx.",
+      "materials_dashboard":   "New: integrated Materials & Buying dashboard — items needed for planned starts, urgency-sorted. The Buyer's home screen.",
+      "materials_suggestions": "New: the Buyer's action queue — system-generated draft PRs to review, adjust and raise to SAP.",
+      "materials_forecast":    "Replaces: the MATERIAL PLANNING sheet (5,162 rows, rebuilt by hand weekly). Per-material, per-week demand grid.",
+      "stores_reconciliation": "Replaces: the manual stock-count walk that fed the MATERIAL PLANNING sheet. Stores confirms physical stock vs SAP."
+    },
+
+    "materials_dashboard": {
+      "screen_title": "New: the Buyer's home — items needed for planned starts, urgency-sorted with click-to-raise.",
+      "kpi_critical": "Items where need-by is within 10 days and stock + open POs are below requirement. Click the tile to filter the table to Critical only.",
+      "kpi_order_now": "Items where need-by is 10–15 days out — raise a PR now to meet supplier lead time. Click to filter.",
+      "kpi_comfortable": "Items covered by current stock or open POs. No action needed today. Click to filter.",
+      "kpi_open_pos": "Total count of POs in flight + committed value at last-paid prices.",
+      "filter_chip_urgency": "Single-select. Filters the table to one urgency band. Combine with supplier dropdown and search to narrow further.",
+      "filter_supplier": "Populated from SAP item-master preferred-supplier field. Selecting a supplier filters to items it provides.",
+      "filter_search": "Typeahead on SAP code or description.",
+      "table_status_pill": "Computed: urgency band + days-to-need. Red = critical, amber = order now, green = comfortable.",
+      "table_action_raise_pr": "Opens the PO Suggestion Queue scoped to this item. From there, review the draft and Raise PR to post to SAP via BAPI_PR_CREATE.",
+      "discrepancy_flag_icon": "An open Stores discrepancy exists for this SAP code. The SAP Stock figure may not match physical reality. Click to view the discrepancy.",
+      "refresh_indicator": "Live SAP stock pull. Refresh every 15 seconds. Last refresh time shown in the table footer."
+    },
+
+    "po_suggestion_queue": {
+      "screen_title": "New: the Buyer's action queue. Pre-filled PR drafts; review, adjust, raise individually or in bulk.",
+      "kpi_pending": "Total suggestions awaiting buyer action. Breakdown by urgency below the number.",
+      "kpi_suggested_value": "Sum of all pending suggestion totals at last-paid prices. A rough order-of-magnitude only.",
+      "kpi_oldest_age": "Days since the oldest pending suggestion was generated. Anything over 5 days for a critical item is unusual.",
+      "kpi_raised_today": "PRs successfully posted to SAP today, with total value.",
+      "row_select_checkbox": "Selecting rows enables Raise Selected (one PR per supplier) and Defer Selected.",
+      "raise_pr_button": "Posts to SAP via BAPI_PR_CREATE. SAP returns the PR number which is stored on the suggestion. Mocked in this build.",
+      "bulk_raise_button": "Raises all pending CRITICAL suggestions in one operation — typically used early in the day to clear the urgent backlog.",
+      "override_supplier_dropdown": "Pick a non-default supplier from a SAP-backed list. Affects price, lead time, MOQ. Requires materials.override_supplier permission.",
+      "defer_button": "Marks suggestion as deferred-until — hides from default view. No SAP posting.",
+      "pr_number_toast": "Confirmation after a successful SAP post. The PR number is the SAP-side identifier; quote it on supplier conversations."
+    },
+
+    "stores_reconciliation": {
+      "screen_title": "Replaces: the manual shelf-count that fed the MATERIAL PLANNING sheet. Stores cycle-counts physical stock against SAP.",
+      "kpi_confirmed_today": "Items where physical count matched SAP today.",
+      "kpi_discrepancies_open": "Items where physical ≠ SAP and the buyer has been notified to investigate (incoming POs not yet received, mis-issue, theft, damage).",
+      "kpi_pending_this_week": "Items the cycle-count plan wants Stores to verify by week-end.",
+      "kpi_cycle_coverage": "Percent of A-class (top-value) items reconciled in the last 14 days. Target: 100%.",
+      "filter_chip_view": "View by status: Discrepancies (action queue), Pending (today's count plan), Confirmed today (audit trail).",
+      "scan_barcode_button": "Opens the scanner UI. Scan a bin label or item barcode to jump to its count entry.",
+      "count_now_button": "Opens the count-entry modal for this item. Scan or key the physical count; the system auto-classifies confirmed vs discrepancy.",
+      "notify_buyer_button": "Creates a discrepancy notification to the item's assigned buyer (from SAP item master). Adds a flag icon on the Buyer's Materials Dashboard.",
+      "cycle_count_plan_note": "Generated nightly from ABC analysis + last-count age. A-class items every 14 days, B every 30, C every 90.",
+      "row_discrepancy_highlight": "Red background = open discrepancy. SAP stock figure is not trusted for this item until resolved."
+    },
+
+    "weekly_material_forecast": {
+      "screen_title": "Replaces: the MATERIAL PLANNING sheet itself. Per-material, per-week demand grid.",
+      "kpi_materials_tracked": "Distinct SAP item codes with demand in the visible window. Should match the row count in the grid below.",
+      "kpi_items_short": "Materials where current stock + open POs cannot cover the running 4-week demand. Each one has a corresponding PO Suggestion.",
+      "kpi_forecast_value": "Sum of (qty × last_price) across all rows × all visible weeks. A working-capital read.",
+      "kpi_jobs_driving": "Distinct jobs whose BOM contributes to this view.",
+      "tab_department": "Filter the grid to materials used by a single department (Vacuum / Panelshop / Assy / Paint).",
+      "cell_quantity_click": "Click any cell to drill into the contributing jobs — which jobs need this much of this material in this week.",
+      "column_total": "Sum of the 4 visible weeks.",
+      "column_stock_covers": "Stock + incoming POs minus 4-week total demand. Negative = short within the window.",
+      "column_flag_short": "Running balance went negative in this week's column. The system has already raised a PO Suggestion.",
+      "column_flag_ok": "Running balance stays non-negative through the visible window. No action.",
+      "sheet_replacement_note": "This view replaces the manually-rebuilt MATERIAL PLANNING sheet. Every figure is auto-computed from BOM × Planning Board schedule."
+    },
+
+    "configurator": {
+      "step_customer":          "Replaces: DDM's master sheet (Customer column) + the customer dropdown in every per-job workbook's 'DDM's & Functions' tab.",
+      "step_chassis":           "Replaces: DDM's master sheet (Chassis Model) + CHASSIS INFORMATION sheet inside the per-job workbook (chassis × widths × hole centres compatibility table).",
+      "step_body_type":         "Replaces: DDM's master sheet (Body Type) + the body-type selector in the per-job workbook. Determines the panel-route automatically (VACUUM or PANELSHOP).",
+      "step_fridge":            "Replaces: FRIDGE UNIT - PRICELIST in the per-job workbook + the manual lookup into the Transfrig/Carrier/Javgro/AC&R catalogues.",
+      "step_tail_lift":         "Replaces: the Tail Lift selector in OPTIONAL EXTRAS - PRICELIST + the manual Dhollandia model lookup.",
+      "step_extras":            "Replaces: OPTIONAL EXTRAS - PRICELIST sheet in the per-job workbook (access ladder, catwalk, evaporator guard, lights, marker lights, escape hatch, etc.).",
+      "step_review":            "Replaces: 2026 COSTINGS, 2026 BOM, JOB CARD - READY-TO-PRINT and WORDLIKE QUOTATION sheets — all auto-generated from the configuration.",
+      "running_quote_sidebar":  "Replaces: the manual mark-up calculation in 2026 COSTINGS. Live re-computation against current SAP item prices.",
+      "accepted_button":        "Replaces: the manual physical hand-over of a printed job pack. Click cascades notifications to Drawing Office, Planner, Materials, Finance, Customer — see Section 3.3 Step 1 of the proposal."
+    },
+
+    "planning_board": {
+      "main_grid":               "Replaces: PLANNING (the 336-column master grid that planners scroll horizontally for minutes today). Same data, visualised as a Gantt-style timeline.",
+      "unscheduled_panel":       "Replaces: the JOBS sheet pipeline side + the verbal 'what's coming next' check with sales reps.",
+      "weekly_capacity_footer":  "Replaces: PLANNING SUMMARY (slots filled / empty / Rand value vs R12.5M weekly target).",
+      "week_navigator":          "Replaces: horizontal scroll across PLANNING's 336 columns.",
+      "drag_a_job_action":       "Replaces: manual cell entry across PLANNING + YEARLY PLANNING + (if trailer) TRAILER PLANNING. One drop auto-cascades all downstream phase dates per the 50-step process.",
+      "chassis_warning_overlay": "Replaces: the manual 'has the chassis arrived?' check against JOBS sheet. New: refuses scheduling for any week before chassis-arrived date.",
+      "material_warning_overlay":"Replaces: the manual blank-cell hunt in MATERIAL PLANNING (5,162 rows) to spot shortages.",
+      "panel_route_filter":      "Replaces: switching between YEARLY PLANNING (vacuum) and PANELSHOP PLANNING sheets.",
+      "trailer_view_filter":     "Replaces: the standalone TRAILER PLANNING sheet (34 cols × 122 rows).",
+      "public_holiday_marker":   "Replaces: planner remembering to skip dates from the PUBLIC HOLIDAYS sheet. New: enforced automatically."
+    },
+
+    "tablet_vacuum": {
+      "header_bar":              "Replaces: paper sign-in / shift-board at the bay door.",
+      "current_work_order_card": "Replaces: the printed Job Pack pages for the Vacuum stage of this job.",
+      "elapsed_vs_planned_timer":"New: no equivalent today — operators don't see time-in-bay live.",
+      "picking_slip_section":    "Replaces: VACUUM ORDERS picking slip from the per-job workbook (printed today).",
+      "picking_slip_tap_row":    "Replaces: pen-and-paper tick on the picking slip.",
+      "report_shortage_button":  "Replaces: verbal report to Stores. New: auto-creates a Material Alert visible on the Production Dashboard.",
+      "signoff_checklist":       "Replaces: the paper 'Vacuum' sign-off form from JOB INSPECTION & SIGN OFF SHEETS 2024-2025.xlsx.",
+      "signoff_item_toggle":     "Replaces: ticking YES/NO in pen on paper sign-off sheet.",
+      "photo_button":            "New: no equivalent — paper QA has no photo evidence.",
+      "comment_button":          "Replaces: handwritten comment in the 'Comments' box of the paper form.",
+      "signoff_and_move_on":     "Replaces: hand-written signature + physical hand-off of paper sheet to QC team.",
+      "next_in_my_queue":        "Replaces: verbal handover from team leader at end of current job."
+    },
+
+    "kanban_board": {
+      "wip_indicator":          "New: WIP limit enforcement (3 of 3) — no equivalent today. Operations team works to limit, not by feel.",
+      "in_queue_column":        "Replaces: WORKFLOW sheet (per-bay queue) + the team leader's mental model of 'what's next'.",
+      "in_progress_column":     "Replaces: HOURLY paper sheet (per-team hour-by-hour tracker). Now aggregates to per-job labour cost.",
+      "in_progress_timer":      "Replaces: HOURLY paper sheet's hour columns. Amber when over plan.",
+      "waiting_column":         "Replaces: verbal 'we're blocked' status + buffer between bays where blocked jobs accumulate today.",
+      "waiting_reason_code":    "New: standardised blocker codes — no equivalent today. Enables defect-trend analysis by reason.",
+      "completed_today_column": "Replaces: INVOICING PER LINE (daily completed units per team).",
+      "bay_status_colour":      "Replaces: subjective 'how's the bay doing?' check. New: objective GREEN/AMBER/RED rule-based.",
+      "factory_bottleneck":     "New: live bottleneck identification — bottleneck is recognised after-the-fact today."
+    },
+
+    "production_dashboard": {
+      "units_in_production_tile":  "Replaces: manual count from JOBS sheet (and #N/A errors when the VLOOKUPs break).",
+      "delayed_units_tile":        "Replaces: cross-checking JOBS + ORDERBOOK against promised dates manually.",
+      "bottleneck_tile":           "New: live bottleneck identification — no equivalent today.",
+      "daily_output_tile":         "Replaces: INVOICING PER LINE daily total.",
+      "today_vs_target_tile":      "Replaces: PLANNING SUMMARY weekly target check, scaled to today.",
+      "bay_utilisation_heatmap":   "Replaces: WORKFLOW sheet (department-by-department) + walk-the-floor visual checks.",
+      "bay_tile_click_drilldown":  "Replaces: phone call to the bay's team leader to ask 'where are you?'.",
+      "material_shortage_alerts":  "Replaces: MATERIAL PLANNING (5,162 rows) blank-cell shortage hunt. Now predictive against planned starts.",
+      "rework_queue_panel":        "New: rework is tracked verbally today — no dataset exists.",
+      "labour_efficiency_chart":   "Replaces: HOURLY paper sheets — now auto-aggregated per team per day.",
+      "critical_chassis_tile":     "Replaces: NEW JOBS PER REP 'Critical Chassis Dates' column."
+    },
+
+    "management_dashboard": {
+      "orderbook_total_tile":      "Replaces: INVOICING sheet (Total Orderbook line).",
+      "invoiced_ytd_tile":         "Replaces: INVOICING sheet (Invoiced YTD line).",
+      "weekly_target_tile":        "Replaces: PLANNING SUMMARY (weekly target column).",
+      "capacity_this_week_tile":   "Replaces: YEARLY PLANNING (slots-filled / empty per week).",
+      "late_jobs_tile":            "Replaces: NEW JOBS PER REP (Late column total).",
+      "orderbook_breakdown_card":  "Replaces: INVOICING sheet's JHB / CT / new bodies / buy-outs / repairs breakdown.",
+      "delivery_risk_card":        "New: risk forecasting against promised dates — not done today.",
+      "per_rep_performance_table": "Replaces: NEW JOBS PER REP sheet (10 reps × 18 cols).",
+      "rep_row_click_drilldown":   "Replaces: filtering ORDERBOOK manually by rep.",
+      "production_forecast_chart": "Replaces: PLANNING SUMMARY weekly forecast view.",
+      "print_pdf_button":          "Replaces: manual screenshot + email of multiple sheets to owners every morning."
+    },
+
+    "qc_screen": {
+      "section_navigator":         "Replaces: the section dividers on the printed '2 PER JOB - GREEN' 122-point checklist.",
+      "checklist_item":            "Replaces: individual line on the paper QC form.",
+      "item_pass_toggle":          "Replaces: hand-ticked YES on paper.",
+      "item_fail_toggle":          "Replaces: hand-ticked NO on paper. New: severity grading and photo evidence required.",
+      "severity_dropdown":         "New: paper form has only pass/fail — no severity gradation.",
+      "photo_attached":            "New: paper form has no photo evidence.",
+      "create_rework_ticket":      "Replaces: verbal hand-off of failed items + manual rework follow-up. New: auto-routes to the responsible bay.",
+      "sign_off_and_invoice":      "Replaces: handwritten QC signature on '2 PER JOB - GREEN' + manual handover to Finance dept. New: auto-enables Invoice work order."
+    }
+
+  },
+
+  "ui_directives": {
+    "configurator_customer_page": {
+      "purpose": "Replaces the alphabetical-only customer list. Now grouped by sales rep so each rep sees their own customers first, with alphabetical sort within each rep group.",
+      "primary_sort": "rep_code (alphabetical: ATTIE → BURT → JANCO → LOLLIE → MICHAEL → SCOTT → SIPHO → STEVIE → SUZETTE → TERTIUS)",
+      "secondary_sort": "customer.name (alphabetical A–Z within each rep group)",
+      "layout": "One vertical section per rep. Each section has a sticky header showing the rep's name + a count badge (e.g. 'BURT — Burt Smith (4 customers)'). Customer cards laid out in a responsive grid below the header (3-4 cards per row on desktop).",
+      "active_rep_first": "The currently logged-in rep's section appears at the top of the list (jump-to-top). All other reps follow in alphabetical order.",
+      "search_box": "A search box above the sections filters across all groups simultaneously.",
+      "new_customer_button": "A '+ New customer' button sits at the top-right of the active rep's section header — new customers created in the configurator default to the logged-in rep.",
+      "applies_to": "Step 1 (Customer Selection) of the Configurator screen only. Other lists (e.g. management dashboard per-rep table) keep their existing sort order."
+    }
+  },
+
+  "wire_up_notes_for_dev": {
+    "tooltip_component_signature": "Tooltip({ k: 'nav.planning', children: <Button /> }) — looks up tooltips[k] from this JSON, returns null if not present.",
+    "fallback_behaviour": "If a tooltip key is missing from this file, the Tooltip component returns the wrapped element with no tooltip — no error, no placeholder text.",
+    "hide_for_known_screens": "Tooltips are intended for the demo / discovery phase. The component should accept a global flag ({tooltipsEnabled: true/false}) so they can be switched off later. Default ON.",
+    "accessibility": "Render as aria-describedby with role='tooltip'. Tab-focusable elements should also show the tooltip on focus, not just hover.",
+    "tooltip_persistence": "Keep tooltip visible for 200ms after pointer leaves so the user can move into it to read longer ones.",
+    "long_tooltips": "If text > 200 chars, render as a small persistent popover (click outside to dismiss) rather than a hover tooltip."
+  }
+}
