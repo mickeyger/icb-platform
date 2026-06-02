@@ -80,6 +80,13 @@ from .routers import pre_job_card as _r_pre_job_card
 from .routers import chassis_catalogue as _r_chassis_catalogue
 from .routers import mes_views as _r_mes_views  # WO v4.7 — MES skin fork at /mes/*
 from .routers import production_jobs as _r_production_jobs  # WO v4.14 — /api/production-jobs/*
+# WO v4.15 — Materials / Buying / Stores APIs
+from .routers import mes_materials as _r_mes_materials
+from .routers import stock_counts as _r_stock_counts
+from .routers import discrepancies as _r_discrepancies
+from .routers import po_suggestions as _r_po_suggestions
+from .routers import demand_lines as _r_demand_lines
+from .routers import suppliers as _r_suppliers
 
 # ─── Logging setup ───────────────────────────────────────────────────────────
 _log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -134,6 +141,13 @@ app.include_router(_r_pre_job_card.demo_router)
 app.include_router(_r_chassis_catalogue.router)
 app.include_router(_r_mes_views.router)  # WO v4.7 — /mes/dashboard + /mes/calculator
 app.include_router(_r_production_jobs.router)  # WO v4.14 — production-jobs API
+# WO v4.15 — Materials / Buying / Stores APIs (12 endpoints across 6 routers)
+app.include_router(_r_mes_materials.router)
+app.include_router(_r_stock_counts.router)
+app.include_router(_r_discrepancies.router)
+app.include_router(_r_po_suggestions.router)
+app.include_router(_r_demand_lines.router)
+app.include_router(_r_suppliers.router)
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered

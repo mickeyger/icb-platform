@@ -52,14 +52,19 @@ def test_auth_provider_is_email_password():
 
 # ── WO v4.13: icb_mes schema + seed ──────────────────────────────────────────
 
-def test_mes_schema_has_12_tables():
+def test_mes_schema_tables():
+    # 12 tables from WO v4.13 + 3 from WO v4.15 (mes_materials, stock_positions, suppliers).
     from sqlalchemy import text
     from app.database import SessionLocal
     with SessionLocal() as db:
         n = db.execute(text(
             "select count(*) from information_schema.tables "
             "where table_schema='icb_mes' and table_type='BASE TABLE'")).scalar()
-    assert n == 12
+        new_tables = db.execute(text(
+            "select count(*) from information_schema.tables where table_schema='icb_mes' "
+            "and table_name in ('mes_materials','stock_positions','suppliers')")).scalar()
+    assert n == 15
+    assert new_tables == 3
 
 
 def test_legacy_view_exposes_old_shape():
