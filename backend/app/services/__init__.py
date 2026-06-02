@@ -4,9 +4,9 @@ from collections import namedtuple
 
 from sqlalchemy.orm import joinedload, selectinload
 
-from . import cache
-from . import database as _db  # WO v4.7.1 — module reference so SessionLocal stays live across switch_db()
-from .database import (
+from .. import cache
+from .. import database as _db  # WO v4.7.1 — module reference so SessionLocal stays live across switch_db()
+from ..database import (
     BillOfMaterial, Material, BOMSection, Formula, GlobalVariable,
     SkinFormula, SkinFormulaItem, SkinFormulaIngredient,
     TapingBlock, TapingBlockItem,
@@ -444,7 +444,7 @@ def _resolve_bom_section(db, name: str):
 
 def compute_chassis_cost(db, selection: dict) -> dict:
     """Build chassis line items + subtotal from the calculator's chassis selection."""
-    from .database import ChassisOption, ChassisConstant
+    from ..database import ChassisOption, ChassisConstant
 
     length     = float(selection.get("length") or 0)
     axles      = int(selection.get("axle_count") or 0)
@@ -505,7 +505,7 @@ def _clean_trailer_name_for_archive(name: str) -> str:
 
 
 def archive_trailer_template_binding(tt, db) -> None:
-    from .database import OrphanedTemplateAssignment
+    from ..database import OrphanedTemplateAssignment
     if not tt or (not tt.group_id and not tt.override_report_template_id):
         return None
     clean_name = _clean_trailer_name_for_archive(tt.name)
@@ -524,7 +524,7 @@ def archive_trailer_template_binding(tt, db) -> None:
 
 
 def restore_orphan_for_trailer(tt, db):
-    from .database import OrphanedTemplateAssignment, TrailerGroup, ReportTemplate
+    from ..database import OrphanedTemplateAssignment, TrailerGroup, ReportTemplate
     from sqlalchemy import func as _fn
     if not tt or not tt.name:
         return None
