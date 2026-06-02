@@ -39,6 +39,7 @@ from .database import (get_db, init_db, User, MaterialCategory, Material,
                       TapingBlock, TapingBlockItem)
 from app.formula_engine import calculate_bom
 from .seed_data import seed
+from .config import settings
 from .quote_numbering import (assign_quote_number, get_or_create_counter,
                               preview_template, validate_template,
                               ALLOWED_PLACEHOLDERS)
@@ -99,12 +100,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # the demo. Credentials must be allowed so the costing-app session cookie travels.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

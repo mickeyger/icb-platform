@@ -64,7 +64,11 @@ class Settings(BaseSettings):
     # ── CORS (accepts a JSON array or a comma-separated string in .env) ──
     ALLOWED_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:8000",
+        "http://127.0.0.1:8000",
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
     ]
 
     @field_validator("ALLOWED_ORIGINS", mode="before")

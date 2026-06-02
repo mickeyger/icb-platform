@@ -43,12 +43,8 @@ from ..deps import get_current_user, _is_localhost
 logger = logging.getLogger("burtcost")
 
 # Origins permitted to call /api/mes/autologin. Mirrors the CORS list in main.py.
-_MES_ORIGINS = {
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:4173",
-    "http://127.0.0.1:4173",
-}
+from ..config import settings
+_MES_ORIGINS = set(settings.ALLOWED_ORIGINS)
 
 
 def _mes_autologin_user() -> str | None:

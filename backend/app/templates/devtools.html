@@ -208,9 +208,9 @@
 function sdMaybeExpand(ev) {
   if (ev.key !== 'Enter') return;
   const inp = ev.target;
-  if (inp.value.trim().toLowerCase() === 'mickeymouse') {
+  if (inp.value.trim().toLowerCase() === 'local') {
     ev.preventDefault();
-    inp.value = 'mysql+pymysql://fajecoza_mickeyger:IceCold2024@faje.co.za:3306/fajecoza_grp_costings';
+    inp.value = 'postgresql+psycopg://icb_app:icb_app_dev@localhost:5433/icb';
   }
 }
 
