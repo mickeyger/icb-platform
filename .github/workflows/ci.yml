@@ -25,14 +25,13 @@ jobs:
       - uses: actions/checkout@v4
 
       # PostgreSQL 16 on Linux AND Windows runners (early cross-OS warning).
-      - name: Set up PostgreSQL 16
+      - name: Set up PostgreSQL
         id: postgres
         uses: ikalnytskyi/action-setup-postgres@v6
         with:
           username: postgres
           password: postgres
           port: 5432
-          postgres-version: "18"
 
       - name: Set up Python
         uses: actions/setup-python@v5

@@ -38,6 +38,12 @@ def _new_table_objs():
     return [Base.metadata.tables[f"icb_mes.{n}"] for n in _NEW_TABLES]
 
 
+def _has_jobs_impacted(bind) -> bool:
+    from sqlalchemy import inspect as _inspect
+    cols = [c["name"] for c in _inspect(bind).get_columns("po_suggestions", schema="icb_mes")]
+    return "jobs_impacted" in cols
+
+
 def upgrade() -> None:
     bind = op.get_bind()
 
@@ -45,15 +51,20 @@ def upgrade() -> None:
     from app.database import Base
     Base.metadata.create_all(bind=bind, tables=_new_table_objs())
 
-    # 2. jobs_impacted on po_suggestions (list[str] of impacted job refs; WO v4.15 Q3).
-    op.add_column(
-        "po_suggestions", sa.Column("jobs_impacted", JSONB(), nullable=True),
-        schema="icb_mes",
-    )
+    # 2. jobs_impacted on po_suggestions (WO v4.15 Q3). IDEMPOTENT: migration 0003
+    #    builds the icb_mes tables via model-driven create_all, so on a FRESH DB it
+    #    already creates this column (the POSuggestion model now declares it); on a
+    #    DB migrated at v4.13 (pre-column) it does not. Guard so both paths converge.
+    if not _has_jobs_impacted(bind):
+        op.add_column(
+            "po_suggestions", sa.Column("jobs_impacted", JSONB(), nullable=True),
+            schema="icb_mes",
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    op.drop_column("po_suggestions", "jobs_impacted", schema="icb_mes")
+    if _has_jobs_impacted(bind):
+        op.drop_column("po_suggestions", "jobs_impacted", schema="icb_mes")
     from app.database import Base
     Base.metadata.drop_all(bind=bind, tables=_new_table_objs())
