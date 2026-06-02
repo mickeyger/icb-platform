@@ -68,6 +68,23 @@ Then visit:
 | http://localhost:8000/ | Jinja dashboard |
 | http://localhost:8000/mes/dashboard | Jinja MES skin (existing) |
 | http://localhost:8000/mes-app/ | React MES app (new) |
+| http://localhost:8000/docs | Interactive API docs (Swagger UI) |
+
+## MES API — production jobs (Phase 2B-1, WO v4.14)
+
+New `/api/production-jobs/*` surface (parallel to the legacy `/api/calculations/*`
+handlers, which retire in Phase 4). All endpoints require an authenticated session.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/production-jobs` | List jobs (filters: `status`, `branch_id`, `accepted_since`, `limit`, `offset`) |
+| GET | `/api/production-jobs/{id}` | Job detail with joined costing data |
+| POST | `/api/production-jobs/from-calculation/{calculation_id}` | Accept a costing into production (idempotent: 201 new / 200 existing) |
+| POST | `/api/production-jobs/{id}/pre-job-card` | Send pre-job card (422 for repair quotes) |
+| POST | `/api/production-jobs/{id}/pre-job-signoff` | Record sales/production sign-off (auto-confirms when both present) |
+| POST | `/api/production-jobs/{id}/planning-ack` | Planning acknowledgement (requires `pre_job_confirmed`) |
+| POST | `/api/production-jobs/{id}/chassis-received` | Confirm chassis arrival |
+| GET | `/api/production-jobs/{id}/timeline` | Derived lifecycle timeline |
 
 ## Database & migrations
 

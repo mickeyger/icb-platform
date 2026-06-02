@@ -79,6 +79,7 @@ from .routers import help as _r_help
 from .routers import pre_job_card as _r_pre_job_card
 from .routers import chassis_catalogue as _r_chassis_catalogue
 from .routers import mes_views as _r_mes_views  # WO v4.7 — MES skin fork at /mes/*
+from .routers import production_jobs as _r_production_jobs  # WO v4.14 — /api/production-jobs/*
 
 # ─── Logging setup ───────────────────────────────────────────────────────────
 _log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -132,6 +133,7 @@ app.include_router(_r_pre_job_card.router)
 app.include_router(_r_pre_job_card.demo_router)
 app.include_router(_r_chassis_catalogue.router)
 app.include_router(_r_mes_views.router)  # WO v4.7 — /mes/dashboard + /mes/calculator
+app.include_router(_r_production_jobs.router)  # WO v4.14 — production-jobs API
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered
