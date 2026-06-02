@@ -16,7 +16,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, Depends, Form, HTTPException, status, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text, func
@@ -337,9 +337,29 @@ def _maybe_refresh_commodity_quotes_async():
 
 BASE_DIR = os.path.dirname(__file__)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
-_MOCKUPS_DIR = os.path.join(os.path.dirname(BASE_DIR), "mockups")
-if os.path.isdir(_MOCKUPS_DIR):
-    app.mount("/mockups", StaticFiles(directory=_MOCKUPS_DIR, html=True), name="mockups")
+# ── React MES single-page app (WO v4.12) ─────────────────────────────────────
+# Served under /mes-app/ in unified mode. The existing Jinja /mes skin and every
+# other route (/, /calculator, /api/*, /static) are untouched. Assets are mounted
+# before the SPA catch-all so hashed bundles win over the index fallback.
+_FRONTEND_DIST = settings.FRONTEND_DIST
+_FRONTEND_INDEX = os.path.join(_FRONTEND_DIST, "index.html")
+_FRONTEND_ASSETS = os.path.join(_FRONTEND_DIST, "assets")
+if os.path.isdir(_FRONTEND_ASSETS):
+    app.mount("/mes-app/assets", StaticFiles(directory=_FRONTEND_ASSETS), name="mes_app_assets")
+
+
+@app.get("/mes-app", include_in_schema=False)
+@app.get("/mes-app/{full_path:path}", include_in_schema=False)
+async def serve_mes_app(full_path: str = ""):
+    """Serve the React MES SPA (BrowserRouter). Any non-asset path under
+    /mes-app/ returns index.html so client-side routing and deep links work."""
+    if os.path.isfile(_FRONTEND_INDEX):
+        return FileResponse(_FRONTEND_INDEX)
+    return HTMLResponse(
+        "<h1>MES app not built</h1><p>Run <code>npm --prefix frontend run build</code> "
+        "or <code>scripts\\setup.bat</code> to build the React app, then reload.</p>",
+        status_code=503,
+    )
 # templates imported from .templates_config (see import block above)
 
 # ── Theme + nav-group cache (avoids a DB round-trip on every request) ─────────
