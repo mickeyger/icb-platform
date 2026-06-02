@@ -12,4 +12,13 @@ class InvalidStateError(ServiceError):
     """An action is invalid for the entity's current state (-> 422)."""
 
 
-__all__ = ["ServiceError", "NotFoundError", "InvalidStateError"]
+class ChassisEtaError(ServiceError):
+    """Scheduling blocked by the chassis-ETA gate (-> 422)."""
+
+
+class CellOccupiedError(ServiceError):
+    """Target planning cell is already occupied (-> 409)."""
+
+
+__all__ = ["ServiceError", "NotFoundError", "InvalidStateError",
+           "ChassisEtaError", "CellOccupiedError"]

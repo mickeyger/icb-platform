@@ -1,0 +1,70 @@
+"""Planning Board schemas (WO v4.16, ADR 0008) — PlanningBoard.tsx contract."""
+from datetime import date, datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict
+
+
+class WeekRef(BaseModel):
+    iso: str          # "2026-W23"
+    start: date       # Monday of the week
+
+
+class PlanningJobRef(BaseModel):
+    """Compact production-job summary for a board cell / the unscheduled pool."""
+    id: int
+    job_number: Optional[str] = None
+    status: Optional[str] = None
+    customer: Optional[str] = None
+    body_type: Optional[str] = None
+    selling_zar: Optional[float] = None
+    branch_id: Optional[int] = None
+    chassis_eta: Optional[datetime] = None
+    chassis_received_at: Optional[datetime] = None
+    planned_start_date: Optional[datetime] = None
+
+
+class PlanningSlotItem(BaseModel):
+    id: int
+    week: Optional[date] = None
+    week_iso: Optional[str] = None
+    bay: Optional[str] = None
+    lane: Optional[str] = None
+    slot_position: Optional[int] = None
+    status: Optional[str] = None
+    production_job: Optional[PlanningJobRef] = None
+
+
+class CapacityCell(BaseModel):
+    week_iso: str
+    filled: int
+    empty: int
+    value_zar: float
+
+
+class PlanningBoard(BaseModel):
+    weeks: List[WeekRef]
+    lanes: List[str]                       # the slot/bay grid identifiers
+    slots: List[PlanningSlotItem]
+    unscheduled_pool: List[PlanningJobRef]
+    capacity: List[CapacityCell]
+
+
+class ScheduleRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "production_job_id": 1, "week": "2026-06-01", "bay": "V-1",
+        "lane": "vacuum", "slot_position": 1}})
+    production_job_id: int
+    week: date                             # any date in the target week (normalised to Monday)
+    bay: str                               # the cell identifier (e.g. "V-1")
+    lane: Optional[str] = None
+    slot_position: Optional[int] = None
+
+
+class MoveRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "week": "2026-06-08", "bay": "V-2", "lane": "vacuum", "slot_position": 2}})
+    week: date
+    bay: str
+    lane: Optional[str] = None
+    slot_position: Optional[int] = None

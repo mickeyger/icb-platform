@@ -240,6 +240,7 @@ def seed(reset: bool = False) -> None:
                 physical_count=s.get("physical_count"),
                 counted_by_name=s.get("counted_by"), counted_at=_dt(s.get("counted_at")),
                 status=s.get("status"),
+                branch_id=branch_by_code.get("JHB"),  # WO v4.16: stock_counts carry a branch (NOT NULL in 0005)
             ))
         db.flush()
         _setval(db, "icb_mes.stock_counts")

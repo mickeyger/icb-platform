@@ -90,10 +90,13 @@ def fresh_count(created):
     from app.models.mes import StockCount
 
     def _make(status="discrepancy", sap_stock=10.0, physical=5.0):
+        from app.database import Branch
         with SessionLocal() as db:
+            jhb = db.query(Branch).filter_by(code="JHB").first()
             sc = StockCount(
                 sap_code=f"TST-{uuid.uuid4().hex[:8]}", bin="T-1",
                 sap_stock_at_count=sap_stock, physical_count=physical, status=status,
+                branch_id=(jhb.id if jhb else None),
             )
             db.add(sc)
             db.commit()
