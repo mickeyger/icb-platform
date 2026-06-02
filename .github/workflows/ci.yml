@@ -44,6 +44,14 @@ jobs:
         with:
           node-version: "20"
 
+      # pycairo (pulled transitively by svglib -> rlPyCairo) ships no Linux wheel;
+      # building it from sdist needs the cairo dev headers + pkg-config. Windows
+      # uses a prebuilt wheel, so this is Linux-only. Pre-existing CI break (red on
+      # every run since v4.13); fixed here per the "build CI now" decision (WO v4.15).
+      - name: Install system libs for pycairo (Linux only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev pkg-config
+
       - name: Install backend dependencies
         working-directory: backend
         run: |
