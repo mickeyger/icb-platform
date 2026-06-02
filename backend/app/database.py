@@ -9,46 +9,28 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 _BigJson = Text().with_variant(LONGTEXT(), "mysql")
 from datetime import datetime, timezone
 import os
-from dotenv import load_dotenv
+from .config import settings
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+# ── Database engine (PostgreSQL only) ───────────────────────────────────────
+# The unified monorepo (WO v4.12) is PostgreSQL-only via psycopg. The legacy
+# SQLite (local dev) and MySQL (prod) engine branches were removed; schema/DDL
+# is owned by Alembic (backend/alembic/), so nothing here touches the DB or
+# creates tables at import time.
+DATABASE_URL = settings.DATABASE_URL
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./costing.db")
-
-is_sqlite = DATABASE_URL.startswith("sqlite")
-
-if is_sqlite:
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False, "timeout": 30},
-        pool_pre_ping=True,
-    )
-    # WAL mode: allows concurrent readers alongside a single writer — avoids
-    # "database is locked" errors under normal async/multi-request load.
-    with engine.connect() as _c:
-        _c.execute(_sa_text("PRAGMA journal_mode=WAL"))
-        _c.execute(_sa_text("PRAGMA busy_timeout=30000"))
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        # Sized for a single Passenger worker on shared cPanel hosting where
-        # max_user_connections is typically ~25-30. Steady pool of 10 keeps
-        # hot connections warm; the +15 overflow absorbs concurrency spikes
-        # without sustained pressure. pool_timeout=10 fails fast instead of
-        # blocking the request thread for 30s when the pool is genuinely
-        # saturated — better to return an error and let the client retry.
-        pool_size=10,
-        max_overflow=15,
-        pool_timeout=10,
-        # Refresh connections every 10 min. Shared hosts often run MySQL with
-        # short wait_timeout, so an hour-old pooled connection comes back dead
-        # and the first user after idle eats a multi-second reconnect tax.
-        pool_recycle=600,
-        # Cap the TCP handshake/auth phase. Default is OS-dependent (often
-        # ~75s on Linux) — too long when MySQL is genuinely unreachable.
-        connect_args={"connect_timeout": 10},
-    )
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=15,
+    pool_timeout=10,
+    # Refresh pooled connections every 10 min so a long-idle connection does not
+    # come back dead and tax the next request with a reconnect.
+    pool_recycle=600,
+    # Cap the TCP handshake/auth phase rather than waiting the OS default (~75s)
+    # when the database is genuinely unreachable.
+    connect_args={"connect_timeout": 10},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -65,12 +47,8 @@ def switch_db(new_url: str):
     """Hot-swap the database connection at runtime (admin only)."""
     global engine, SessionLocal, DATABASE_URL
     DATABASE_URL = new_url
-    _is_sqlite = new_url.startswith("sqlite")
-    if _is_sqlite:
-        engine = create_engine(new_url, connect_args={"check_same_thread": False})
-    else:
-        engine = create_engine(new_url, pool_pre_ping=True, pool_size=5,
-                               max_overflow=10, pool_recycle=600)
+    engine = create_engine(new_url, pool_pre_ping=True, pool_size=5,
+                           max_overflow=10, pool_recycle=600)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     # Invalidate the process-wide TTL caches — they hold rows loaded via the
     # OLD engine's SessionLocal (sections, formulas, global vars). Without this
@@ -86,19 +64,21 @@ def switch_db(new_url: str):
 
 
 def get_db_info():
-    """Return (db_env_label, db_detail, db_is_prod) for the active connection."""
+    """Return (db_env_label, db_detail, db_is_prod) for the active connection.
+    PostgreSQL-only: a localhost connection is treated as DEV, anything else as
+    PROD (drives the UI footer banner)."""
     url = DATABASE_URL
-    if url.startswith("sqlite"):
-        detail = url.replace("sqlite:///", "").replace("./", "") or "costing.db"
-        return "DEV (SQLite)", detail, False
+    host = ""
     try:
         after_at = url.split("@", 1)[1]
         host = after_at.split("/")[0].split(":")[0]
         dbname = after_at.split("/", 1)[1].split("?")[0]
         detail = f"{host} / {dbname}"
     except Exception:
-        detail = "MySQL"
-    return "PROD (MySQL)", detail, True
+        detail = "PostgreSQL"
+    if host in ("localhost", "127.0.0.1", "::1", ""):
+        return "DEV (PostgreSQL)", detail, False
+    return "PROD (PostgreSQL)", detail, True
 
 
 class User(Base):
@@ -886,8 +866,10 @@ class HelpRequestLog(Base):
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _run_migrations()
+    """Seed built-in defaults only. Schema/DDL is owned by Alembic — run
+    `alembic upgrade head` before starting the app. (create_all() and the
+    legacy SQLite/MySQL _run_migrations() were removed in the unified
+    monorepo, WO v4.12.)"""
     _seed_defaults()
 
 
