@@ -1,6 +1,6 @@
-"""Phase 1 smoke tests — the unified app boots on PostgreSQL, the Jinja routes
-behave, the React SPA is served at /mes-app/, auth runs through the provider,
-and the multi-branch seed is present."""
+"""Smoke tests — the unified app boots on PostgreSQL, Jinja routes behave, the
+React SPA is served at /mes-app/, auth runs through the provider, the
+multi-branch seed is present, and (WO v4.13) the icb_mes schema + seed load."""
 
 
 def test_health(client):
@@ -48,3 +48,41 @@ def test_branches_seeded():
 def test_auth_provider_is_email_password():
     from app.auth import get_auth_provider
     assert get_auth_provider().name == "email_password"
+
+
+# ── WO v4.13: icb_mes schema + seed ──────────────────────────────────────────
+
+def test_mes_schema_has_12_tables():
+    from sqlalchemy import text
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        n = db.execute(text(
+            "select count(*) from information_schema.tables "
+            "where table_schema='icb_mes' and table_type='BASE TABLE'")).scalar()
+    assert n == 12
+
+
+def test_legacy_view_exposes_old_shape():
+    from sqlalchemy import text
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        cols = db.execute(text(
+            "select count(*) from information_schema.columns where "
+            "table_schema='icb_costings' and table_name='v_calculation_records_legacy'")).scalar()
+    assert cols == 32  # 14 staying + 18 moved columns
+
+
+def test_seed_from_mockup_counts():
+    # Self-contained: seed (reset) then assert the volumes match the mockup JSON.
+    from scripts.seed_from_mockup import seed
+    seed(reset=True)
+    from app.database import SessionLocal
+    from app.models.mes import (
+        DemandLine, Discrepancy, POSuggestion, ProductionJob, StockCount,
+    )
+    with SessionLocal() as db:
+        assert db.query(POSuggestion).count() == 8
+        assert db.query(StockCount).count() == 10
+        assert db.query(Discrepancy).count() == 3
+        assert db.query(DemandLine).count() == 15
+        assert db.query(ProductionJob).count() >= 1

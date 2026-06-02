@@ -112,6 +112,7 @@ def seed(reset: bool = False) -> None:
                     return
             print("[seed] Clearing icb_mes tables (TRUNCATE ... RESTART IDENTITY CASCADE)")
             _truncate_mes(db)
+            db.expunge_all()  # drop identity-map rows loaded by the mes_has_data probe
 
         branch_by_code = {b.code: b.id for b in db.query(Branch).all()}
 
