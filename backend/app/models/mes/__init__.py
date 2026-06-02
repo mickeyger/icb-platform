@@ -1,0 +1,333 @@
+"""MES domain models — the `icb_mes` schema (WO v4.13, Phase 2A).
+
+All 12 tables defined per WO v4.13 §3.1. They share the single declarative
+`Base` from `app.database`, each pinned to the `icb_mes` schema via
+`__table_args__`.
+
+Cross-schema FK note (important):
+  The legacy Cost-Calculator models in `app.database` are schema-less in the
+  metadata (they rely on the role search_path to land in `icb_costings`), so a
+  declarative `ForeignKey("icb_costings.calculations.id")` cannot resolve at
+  mapper-config time. Therefore the **cross-schema** columns below
+  (`calculation_record_id`, `branch_id`, every `*_user_id`) are plain `Integer`
+  here, and their FK constraints to `icb_costings.*` are created in migration
+  `0003` via `op.create_foreign_key(... referent_schema='icb_costings')`.
+  `alembic/env.py` excludes cross-schema FKs from autogenerate so `alembic check`
+  stays clean. Intra-`icb_mes` FKs ARE declared here (they resolve fine).
+
+Other deviations (documented in the WO as-shipped note + ADR 0005/0007):
+  * `production_jobs` carries ALL 18 MES-lifecycle columns moved from
+    `icb_costings.calculations` (the spec named only 7), plus a new `accepted_at`.
+  * Spec sign-off actors are `*_user_id` FKs; the mockup carries display NAMES,
+    so each keeps a nullable `*_by_name` string seeded losslessly.
+  * Mockup business keys with no numeric id are preserved:
+    `rework_tickets.ticket_code`, `demand_lines.job_ref`.
+
+Status/enum-like fields are VARCHAR (matching `calculations.status`) with allowed
+values in comments — avoids native PG ENUM churn in migrations.
+"""
+from datetime import datetime, timezone
+
+from sqlalchemy import (
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+)
+
+from app.database import Base
+
+# Cross-schema FK constraints to create in migration 0003 (icb_mes -> icb_costings).
+# (source_table, local_col, referent_table, ondelete)
+CROSS_SCHEMA_FKS = [
+    ("production_jobs", "calculation_record_id", "calculations", "RESTRICT"),
+    ("production_jobs", "branch_id", "branches", "RESTRICT"),
+    ("work_orders", "assigned_to_user_id", "users", "SET NULL"),
+    ("tasks", "completed_by_user_id", "users", "SET NULL"),
+    ("sign_offs", "signed_off_by_user_id", "users", "SET NULL"),
+    ("planning_acks", "acknowledged_by_user_id", "users", "SET NULL"),
+    ("stock_counts", "counted_by_user_id", "users", "SET NULL"),
+    ("stock_counts", "branch_id", "branches", "RESTRICT"),
+    ("discrepancies", "raised_to_buyer_user_id", "users", "SET NULL"),
+    ("po_suggestions", "raised_by_user_id", "users", "SET NULL"),
+]
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. production_jobs — central MES entity, 1:1 with an accepted calculation.
+# ─────────────────────────────────────────────────────────────────────────────
+class ProductionJob(Base):
+    __tablename__ = "production_jobs"
+    __table_args__ = (
+        Index("ix_production_jobs_status_start", "status", "planned_start_date"),
+        Index("ix_production_jobs_branch_id", "branch_id"),
+        Index("ix_production_jobs_calculation_record_id", "calculation_record_id"),
+        {"schema": "icb_mes"},
+    )
+
+    id = Column(Integer, primary_key=True)
+    # cross-schema -> icb_costings.calculations.id (FK in 0003, NOT NULL UNIQUE, RESTRICT)
+    calculation_record_id = Column(Integer, nullable=False, unique=True)
+    # cross-schema -> icb_costings.branches.id (FK in 0003, RESTRICT)
+    branch_id = Column(Integer, nullable=True)
+    job_number = Column(String(32), unique=True)          # derived from Q-32891 -> 32891
+    status = Column(String(24), nullable=False, default="accepted")
+    # accepted | pre_job_sent | pre_job_confirmed | planning | in_production | completed
+    accepted_at = Column(DateTime(timezone=True))         # NEW (spec); no source column in calculations
+
+    # ── 18 columns moved from icb_costings.calculations (ordinals 15-32) ──
+    pre_job_sent_at = Column(DateTime(timezone=True))
+    pre_job_confirmed_at = Column(DateTime(timezone=True))
+    job_number_assigned = Column(String(32))
+    repair_phases_json = Column(Text)
+    pre_job_signoff_sales_at = Column(DateTime(timezone=True))
+    pre_job_signoff_sales_by = Column(String(64))
+    pre_job_signoff_sales_attestation = Column(Text)
+    pre_job_signoff_production_at = Column(DateTime(timezone=True))
+    pre_job_signoff_production_by = Column(String(64))
+    pre_job_signoff_production_attestation = Column(Text)
+    planning_acknowledged_at = Column(DateTime(timezone=True))   # spec: planning_ack_at
+    planning_acknowledged_by = Column(String(64))
+    chassis_eta = Column(DateTime(timezone=True))
+    chassis_eta_captured_at = Column(DateTime(timezone=True))
+    chassis_eta_captured_by = Column(String(64))
+    chassis_data_json = Column(Text)
+    chassis_received_at = Column(DateTime(timezone=True))
+    chassis_received_by = Column(String(64))
+
+    # ── production scheduling ──
+    planned_start_date = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. work_orders — per-bay work parcels for a production job.
+# ─────────────────────────────────────────────────────────────────────────────
+class WorkOrder(Base):
+    __tablename__ = "work_orders"
+    __table_args__ = (
+        Index("ix_work_orders_production_job_id", "production_job_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    bay = Column(String(32))                       # "Vacuum-1", "Pre-Assy"
+    sequence = Column(Integer)
+    status = Column(String(24))
+    assigned_to_user_id = Column(Integer)          # cross-schema -> icb_costings.users.id (FK in 0003)
+    assigned_to_name = Column(String(64))          # mockup display name (FK companion)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. tasks — per-work-order checklist items.
+# ─────────────────────────────────────────────────────────────────────────────
+class Task(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (Index("ix_tasks_work_order_id", "work_order_id"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    work_order_id = Column(
+        Integer, ForeignKey("icb_mes.work_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    description = Column(Text)
+    sequence = Column(Integer)
+    required = Column(Boolean, default=True)
+    completed_at = Column(DateTime(timezone=True))
+    completed_by_user_id = Column(Integer)         # cross-schema -> icb_costings.users.id (FK in 0003)
+    completed_by_name = Column(String(64))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. sign_offs — captured at task or work-order completion.
+# ─────────────────────────────────────────────────────────────────────────────
+class SignOff(Base):
+    __tablename__ = "sign_offs"
+    __table_args__ = (Index("ix_sign_offs_work_order_id", "work_order_id"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    work_order_id = Column(
+        Integer, ForeignKey("icb_mes.work_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    task_id = Column(Integer, ForeignKey("icb_mes.tasks.id", ondelete="SET NULL"), nullable=True)
+    signed_off_by_user_id = Column(Integer)        # cross-schema -> icb_costings.users.id (FK in 0003)
+    signed_off_by_name = Column(String(64))
+    signed_at = Column(DateTime(timezone=True))
+    comment = Column(Text)
+    photo_count = Column(Integer, default=0)
+    severity = Column(String(16))                  # info | minor | major | critical
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. photos — attached to a sign-off.
+# ─────────────────────────────────────────────────────────────────────────────
+class Photo(Base):
+    __tablename__ = "photos"
+    __table_args__ = (Index("ix_photos_sign_off_id", "sign_off_id"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    sign_off_id = Column(
+        Integer, ForeignKey("icb_mes.sign_offs.id", ondelete="CASCADE"), nullable=False
+    )
+    file_path = Column(String(500))                # resolved by the FileStore Protocol (Phase 3)
+    caption = Column(String(255))
+    uploaded_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. rework_tickets — raised when a QC sign-off fails.
+# ─────────────────────────────────────────────────────────────────────────────
+class ReworkTicket(Base):
+    __tablename__ = "rework_tickets"
+    __table_args__ = (Index("ix_rework_tickets_sign_off_id", "sign_off_id"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    sign_off_id = Column(
+        Integer, ForeignKey("icb_mes.sign_offs.id", ondelete="CASCADE"), nullable=True
+    )
+    ticket_code = Column(String(32))               # mockup business key e.g. "RW-2089"
+    routed_to_bay = Column(String(32))
+    status = Column(String(16))                    # open | closed
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    closed_at = Column(DateTime(timezone=True))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. planning_slots — Planning Board cells.
+# ─────────────────────────────────────────────────────────────────────────────
+class PlanningSlot(Base):
+    __tablename__ = "planning_slots"
+    __table_args__ = (
+        Index("ix_planning_slots_production_job_id", "production_job_id"),
+        Index("ix_planning_slots_week_lane", "week", "lane"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    week = Column(Date)                            # Monday of the week
+    bay = Column(String(32))
+    lane = Column(String(32))                      # vacuum | panelshop | ...
+    slot_position = Column(Integer)                # 1..N within the lane
+    status = Column(String(16))                    # unscheduled | scheduled | in_progress | completed
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. planning_acks — planner acknowledgement records.
+# ─────────────────────────────────────────────────────────────────────────────
+class PlanningAck(Base):
+    __tablename__ = "planning_acks"
+    __table_args__ = (Index("ix_planning_acks_production_job_id", "production_job_id"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    acknowledged_by_user_id = Column(Integer)      # cross-schema -> icb_costings.users.id (FK in 0003)
+    acknowledged_by_name = Column(String(64))
+    acknowledged_at = Column(DateTime(timezone=True))
+    chassis_eta_at_ack = Column(DateTime(timezone=True))
+    notes = Column(Text)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. stock_counts — Stores cycle counts.
+# ─────────────────────────────────────────────────────────────────────────────
+class StockCount(Base):
+    __tablename__ = "stock_counts"
+    __table_args__ = (
+        Index("ix_stock_counts_status_counted", "status", "counted_at"),
+        Index("ix_stock_counts_branch_id", "branch_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(100))
+    bin = Column(String(32))
+    sap_stock_at_count = Column(Float)
+    physical_count = Column(Float)
+    counted_by_user_id = Column(Integer)           # cross-schema -> icb_costings.users.id (FK in 0003)
+    counted_by_name = Column(String(64))
+    counted_at = Column(DateTime(timezone=True))
+    status = Column(String(16))                    # confirmed | discrepancy | pending
+    branch_id = Column(Integer, nullable=True)     # cross-schema -> icb_costings.branches.id (FK in 0003)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. discrepancies — buyer notifications from Stores.
+# ─────────────────────────────────────────────────────────────────────────────
+class Discrepancy(Base):
+    __tablename__ = "discrepancies"
+    __table_args__ = (Index("ix_discrepancies_stock_count_id", "stock_count_id"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    stock_count_id = Column(
+        Integer, ForeignKey("icb_mes.stock_counts.id", ondelete="CASCADE"), nullable=False
+    )
+    raised_to_buyer_user_id = Column(Integer)      # cross-schema -> icb_costings.users.id (FK in 0003)
+    raised_to_buyer_name = Column(String(64))
+    raised_at = Column(DateTime(timezone=True))
+    notes = Column(Text)
+    resolved_at = Column(DateTime(timezone=True))
+    resolution_notes = Column(Text)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. po_suggestions — buyer's PR queue.
+# ─────────────────────────────────────────────────────────────────────────────
+class POSuggestion(Base):
+    __tablename__ = "po_suggestions"
+    __table_args__ = (Index("ix_po_suggestions_status_urgency", "status", "urgency"), {"schema": "icb_mes"})
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(100))
+    qty = Column(Float)
+    suggested_supplier = Column(String(128))
+    last_price = Column(Float)
+    total = Column(Float)
+    need_by = Column(Date)
+    urgency = Column(String(16))                   # critical | order_now | advisory
+    status = Column(String(16))                    # pending | raised | deferred
+    pr_number = Column(String(32))                 # populated after SAP roundtrip
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    raised_at = Column(DateTime(timezone=True))
+    raised_by_user_id = Column(Integer)            # cross-schema -> icb_costings.users.id (FK in 0003)
+    raised_by_name = Column(String(64))
+    deferred_until = Column(Date)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. demand_lines — per-BOM-line demand against the schedule (cached).
+# ─────────────────────────────────────────────────────────────────────────────
+class DemandLine(Base):
+    __tablename__ = "demand_lines"
+    __table_args__ = (
+        Index("ix_demand_lines_sap_week", "sap_code", "week_bucket"),
+        Index("ix_demand_lines_production_job_id", "production_job_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(100))
+    qty = Column(Float)
+    need_by = Column(Date)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="SET NULL"), nullable=True
+    )
+    job_ref = Column(String(32))                   # mockup job_id e.g. "2025-1138" (may not resolve)
+    bom_line_ref = Column(String(64))
+    week_bucket = Column(String(16))               # e.g. 2026-W23
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+__all__ = [
+    "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
+    "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
+    "CROSS_SCHEMA_FKS",
+]

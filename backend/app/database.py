@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text as _sa_text, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, text as _sa_text, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, UniqueConstraint, event
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -31,6 +31,20 @@ engine = create_engine(
     # when the database is genuinely unreachable.
     connect_args={"connect_timeout": 10},
 )
+
+
+@event.listens_for(engine, "connect")
+def _set_search_path(dbapi_conn, conn_record):
+    """WO v4.13: every connection resolves icb_mes first, then icb_costings, then
+    public. MES models are explicitly schema-qualified; this keeps any unqualified
+    names and the v_calculation_records_legacy view resolving predictably."""
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("SET search_path TO icb_mes, icb_costings, public")
+    finally:
+        cur.close()
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

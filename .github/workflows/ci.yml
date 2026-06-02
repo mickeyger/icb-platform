@@ -66,6 +66,9 @@ jobs:
           alembic downgrade base
           alembic upgrade head
 
+      - name: Seed mockup data into icb_mes
+        run: python -m backend.scripts.seed_from_mockup --reset
+
       - name: Backend tests
         working-directory: backend
         run: pytest
