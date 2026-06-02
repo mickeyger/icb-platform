@@ -1,0 +1,686 @@
+{% extends "base.html" %}
+{% block title %}Snapshot – {{ snap.trailer_type.name }}{% endblock %}
+{% block content %}
+
+{# ── Colour constants ─────────────────────────────────────────────────────── #}
+{% set APP_CLR   = '#f0883e' %}
+{% set EXCEL_CLR = '#3fb950' %}
+{% set DIFF_CLR  = '#f85149' %}
+{% set snap_clr  = APP_CLR if snap.source == 'app' else EXCEL_CLR %}
+{% set comp_clr  = (APP_CLR if comp_data and comp_data.source == 'app' else EXCEL_CLR) if comp_data else '' %}
+
+<div style="max-width:1200px;margin:0 auto;padding:20px 16px">
+
+  <!-- Header -->
+  <div style="margin-bottom:20px">
+    <a href="/admin/bom-snapshots" style="color:#58a6ff;font-size:.85rem;text-decoration:none">← All Snapshots</a>
+    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:8px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0 0 4px;font-size:1.4rem">{{ snap.trailer_type.name }}</h1>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:12px;color:#8b949e;font-size:.87rem">
+          <span style="background:{% if snap.source=='app' %}#1f6feb{% else %}#3d2b00{% endif %};
+                       color:{% if snap.source=='app' %}#cae8ff{% else %}#e3b341{% endif %};
+                       border-radius:4px;padding:2px 8px;font-size:.78rem;font-weight:600">
+            {{ snap.source|upper }}
+          </span>
+          {% if snap.is_pinned_baseline %}
+          <span style="background:#1a2d1a;color:#3fb950;border:1px solid #2ea043;border-radius:4px;padding:2px 8px;font-size:.78rem;font-weight:600">
+            📌 PINNED BASELINE
+          </span>
+          {% endif %}
+          <span>{{ snap.snapshot_date }}</span>
+          {% if snap.label %}<span style="color:#e6edf3">{{ snap.label }}</span>{% endif %}
+          {% if snap.source_file %}<span style="color:#6e7681;font-size:.8rem">{{ snap.source_file }}</span>{% endif %}
+          {% if dims %}
+          <span>L={{ dims.length }}m &nbsp;W={{ dims.width }}m &nbsp;H={{ dims.height }}m</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Baseline action buttons -->
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;margin-top:4px">
+        {% if snap.is_pinned_baseline %}
+          <button id="pin-btn" onclick="unpinBaseline()"
+            style="background:rgba(46,160,67,.15);color:#3fb950;border:1px solid #2ea043;border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer">
+            📌 Unpin Baseline
+          </button>
+          {% if snap.source == 'app' %}
+          <button id="restore-btn" onclick="restoreBaseline()"
+            style="background:#1a2d1a;color:#3fb950;border:1px solid #2ea043;border-radius:6px;padding:6px 14px;font-size:.82rem;font-weight:600;cursor:pointer"
+            title="Restore all BOM override prices to the values captured in this snapshot">
+            ↺ Restore Baseline Prices
+          </button>
+          {% endif %}
+        {% else %}
+          <button id="pin-btn" onclick="pinBaseline()"
+            style="background:#161b22;color:#8b949e;border:1px solid #30363d;border-radius:6px;padding:6px 14px;font-size:.82rem;cursor:pointer"
+            onmouseover="this.style.borderColor='#2ea043';this.style.color='#3fb950'"
+            onmouseout="this.style.borderColor='#30363d';this.style.color='#8b949e'"
+            title="Mark this snapshot as the approved baseline for {{ snap.trailer_type.name }}">
+            📌 Pin as Baseline
+          </button>
+          {% if pinned_baseline and pinned_baseline.id != snap.id and snap.source == 'app' %}
+          <a href="/admin/bom-snapshots/{{ pinned_baseline.id }}"
+            style="background:#161b22;color:#8b949e;border:1px solid #30363d;border-radius:6px;padding:6px 14px;font-size:.82rem;text-decoration:none;cursor:pointer"
+            title="Go to the current pinned baseline for {{ snap.trailer_type.name }}">
+            View Pinned Baseline →
+          </a>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Drift warning: shown when this is NOT the pinned baseline but a pinned one exists -->
+  {% if pinned_baseline and not snap.is_pinned_baseline and pinned_baseline.id != snap.id %}
+  <div style="background:#0d2818;border:1px solid #2ea043;border-radius:8px;padding:12px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:.87rem">
+    <span>📌</span>
+    <span style="flex:1;color:#e6edf3">
+      The pinned baseline for this body type is snapshot
+      <a href="/admin/bom-snapshots/{{ pinned_baseline.id }}" style="color:#3fb950">
+        {{ pinned_baseline.snapshot_date }}{% if pinned_baseline.label %} — {{ pinned_baseline.label }}{% endif %}
+      </a>.
+      You are viewing a different snapshot — <strong>prices shown here may differ from the locked baseline.</strong>
+    </span>
+    <a href="/admin/bom-snapshots/{{ pinned_baseline.id }}"
+       style="background:#2ea043;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:.82rem;text-decoration:none;cursor:pointer;white-space:nowrap">
+      Go to Baseline
+    </a>
+  </div>
+  {% endif %}
+
+  <!-- Compare controls -->
+  {% if siblings %}
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 16px;margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="color:#8b949e;font-size:.87rem">Compare against:</span>
+    <select id="comp-sel" style="padding:6px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:.87rem">
+      <option value="">— none —</option>
+      {% for s in siblings %}
+      <option value="{{ s.id }}" {% if compare_to == s.id %}selected{% endif %}
+              {% if s.source == 'excel' %}style="color:#3fb950"{% endif %}>
+        {% if s.source == 'excel' %}🟢 {% endif %}{{ s.snapshot_date }} – {{ s.source|upper }}{% if s.label %} – {{ s.label }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    <button onclick="applyCompare()" style="background:#1f6feb;color:#fff;border:none;border-radius:6px;padding:6px 16px;font-size:.87rem;cursor:pointer">Compare</button>
+    {% if compare_to %}
+    <a href="/admin/bom-snapshots/{{ snap.id }}" style="color:#8b949e;font-size:.85rem;text-decoration:none">Clear</a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Legend (comparison mode only) -->
+  {% if comp_data %}
+  <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px;font-size:.82rem;align-items:center">
+    <span style="color:#8b949e">Legend:</span>
+    <span style="color:{{ snap_clr }}">■ This snapshot ({{ snap.source|upper }})</span>
+    <span style="color:{{ comp_clr }}">■ Comparison ({{ comp_data.source|upper }})</span>
+    <span style="color:{{ DIFF_CLR }}">■ Difference</span>
+    {% if snap.source == 'app' %}
+    <span style="color:#6e7681;font-size:.78rem">&nbsp;·&nbsp;Click ✎ or right-click a diff row to edit its price</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Stale-snapshot banner (shown when prices were edited after capture) -->
+  {% if snap.is_stale %}
+  <div id="stale-banner" style="background:#1a1000;border:1px solid #f0883e;border-radius:8px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;flex-wrap:wrap;gap:12px">
+    <span style="font-size:1.1rem">⚠</span>
+    <span style="flex:1;color:#e6edf3;font-size:.88rem">
+      Prices were updated after this snapshot was captured — it may not reflect current database pricing.
+    </span>
+    <button onclick="autoCapture()" style="background:#f0883e;color:#000;border:none;border-radius:6px;padding:6px 16px;font-size:.85rem;font-weight:600;cursor:pointer" id="stale-capture-btn">
+      Auto-update (new snapshot)
+    </button>
+    <button onclick="dismissStaleBanner()" style="background:transparent;color:#8b949e;border:1px solid #30363d;border-radius:6px;padding:6px 14px;font-size:.85rem;cursor:pointer">
+      Keep as is
+    </button>
+  </div>
+  {% endif %}
+
+  <!-- Totals bar -->
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 20px;min-width:180px">
+      <div style="color:#8b949e;font-size:.78rem;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Grand Total</div>
+      <div style="font-size:1.5rem;font-weight:700;color:{{ snap_clr }}">R {{ '{:,.2f}'.format(grand_total) }}</div>
+      {% if comp_data %}
+      {% set gdiff = grand_total - comp_data.grand_total %}
+      <div style="color:{{ comp_clr }};font-size:.87rem;margin-top:2px">vs R {{ '{:,.2f}'.format(comp_data.grand_total) }}</div>
+      <div style="font-size:.85rem;color:{{ DIFF_CLR }};margin-top:2px">
+        {% if gdiff > 0.01 %}+{% elif gdiff < -0.01 %}{% endif %}
+        {% if gdiff|abs >= 0.01 %}R {{ '{:,.2f}'.format(gdiff) }}{% else %}<span style="color:#8b949e">no change</span>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 20px;min-width:140px">
+      <div style="color:#8b949e;font-size:.78rem;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Categories</div>
+      <div style="font-size:1.5rem;font-weight:700">{{ categories|length }}</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 20px;min-width:140px">
+      <div style="color:#8b949e;font-size:.78rem;margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">Line Items</div>
+      <div style="font-size:1.5rem;font-weight:700">{{ snap.items|length }}</div>
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:8px;padding-bottom:4px">
+      <button onclick="expandAll()" style="background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:6px;padding:6px 12px;font-size:.8rem;cursor:pointer">Expand all</button>
+      <button onclick="collapseAll()" style="background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:6px;padding:6px 12px;font-size:.8rem;cursor:pointer">Collapse all</button>
+    </div>
+  </div>
+
+  <!-- BOM table -->
+  <table style="width:100%;border-collapse:collapse;font-size:.88rem">
+    <thead>
+      <tr style="border-bottom:2px solid #30363d;color:#8b949e;text-align:left">
+        <th style="padding:8px 10px;width:{% if comp_data %}24%{% else %}34%{% endif %}">Item</th>
+        <th style="padding:8px 10px;width:{% if comp_data %}15%{% else %}22%{% endif %}">Formula</th>
+        <th style="padding:8px 10px;text-align:right;width:7%">Qty</th>
+        <th style="padding:8px 10px;text-align:right;width:{% if comp_data %}8%{% else %}10%{% endif %}">Unit Price</th>
+        <th style="padding:8px 10px;text-align:right;width:9%;color:{{ snap_clr }}">
+          Total ({{ snap.source|upper }})
+        </th>
+        {% if comp_data %}
+        <th style="padding:8px 10px;text-align:right;width:9%;color:{{ comp_clr }}">
+          Unit Price ({{ comp_data.source|upper }})
+        </th>
+        <th style="padding:8px 10px;text-align:right;width:9%;color:{{ comp_clr }}">
+          Total ({{ comp_data.source|upper }})
+        </th>
+        <th style="padding:8px 10px;text-align:right;width:11%;color:{{ DIFF_CLR }}">Difference</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for cat, items in categories.items() %}
+      {% set cat_idx = loop.index %}
+      {% set cdiff = cat_diffs.get(cat, 0) if comp_data else 0 %}
+
+      {# Count items in this category that can receive a comp-price bulk apply #}
+      {% set ns = namespace(apply_count=0) %}
+      {% if comp_data and snap.source == 'app' %}
+        {% for it in items %}
+          {% set _idiff = item_diffs.get(it.id) %}
+          {% if _idiff is not none and _idiff != 0 and it.total != 0 and it.bom_id and comp_item_prices.get(it.id) is not none %}
+            {% set ns.apply_count = ns.apply_count + 1 %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+
+      <!-- Category header -->
+      <tr class="cat-hdr" data-cat="{{ cat_idx }}"
+          onclick="toggleCat({{ cat_idx }}, this)"
+          style="background:#1c2128;cursor:pointer;user-select:none">
+        <td colspan="{% if comp_data %}8{% else %}5{% endif %}" style="padding:9px 10px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="chevron" style="font-size:.75rem;color:#8b949e;transition:transform .18s;display:inline-block">▼</span>
+              <strong style="font-size:.85rem;letter-spacing:.04em;text-transform:uppercase;color:#e6edf3">{{ cat }}</strong>
+              <span style="color:#6e7681;font-size:.78rem">({{ items|length }})</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              {% if comp_data and cdiff != 0 %}
+              <span style="font-size:.82rem;color:{{ DIFF_CLR }}">
+                {% if cdiff > 0 %}+{% endif %}R {{ '{:,.2f}'.format(cdiff) }}
+              </span>
+              {% endif %}
+              <span style="font-weight:700;color:{{ snap_clr }}">R {{ '{:,.2f}'.format(cat_totals[cat]) }}</span>
+              {% if comp_data and snap.source == 'app' and ns.apply_count > 0 %}
+              <button data-cix="{{ cat_idx }}" data-cname="{{ cat | e }}"
+                      onclick="event.stopPropagation();applyAllCompPricesInCat(+this.dataset.cix, this.dataset.cname)"
+                      style="background:rgba(46,160,67,.15);border:1px solid #2ea043;color:#3fb950;border-radius:4px;padding:3px 10px;font-size:.71rem;font-weight:600;letter-spacing:.04em;cursor:pointer;white-space:nowrap"
+                      onmouseover="this.style.background='rgba(46,160,67,.28)'"
+                      onmouseout="this.style.background='rgba(46,160,67,.15)'"
+                      title="Set unit_price_override on all {{ ns.apply_count }} differing item{{ 's' if ns.apply_count != 1 }} in this section to the comparison prices">
+                ✓ Apply comp prices ({{ ns.apply_count }})
+              </button>
+              {% endif %}
+              {% if comp_data and snap.source == 'app' %}
+              <button onclick="event.stopPropagation();autoCapture(this)"
+                      style="background:transparent;border:1px solid #f0883e;color:#f0883e;border-radius:4px;padding:3px 10px;font-size:.71rem;font-weight:600;letter-spacing:.04em;cursor:pointer;white-space:nowrap"
+                      onmouseover="this.style.background='rgba(240,136,62,.15)'"
+                      onmouseout="this.style.background='transparent'">
+                ↺ Update Snapshot
+              </button>
+              {% endif %}
+              <a href="/admin/bom-snapshots" onclick="event.stopPropagation()"
+                 style="color:#58a6ff;font-size:.71rem;text-decoration:none;white-space:nowrap"
+                 onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">
+                ← All Snapshots
+              </a>
+            </div>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Line items -->
+      {% for it in items %}
+      {% set idiff = item_diffs.get(it.id) if comp_data else 0 %}
+      {% set comp_tot = comp_item_totals.get(it.id) if comp_data else None %}
+      {% set comp_price = comp_item_prices.get(it.id) if comp_data else None %}
+      {% set psrc = pricing_sources.get(it.id) if pricing_sources is defined else None %}
+      {% set has_diff = comp_data and idiff is not none and idiff != 0 and it.total != 0 %}
+      {% set editable = has_diff and snap.source == 'app' and it.bom_id %}
+      <tr class="cat-rows cat-{{ cat_idx }}"
+          data-item-id="{{ it.id }}"
+          data-bom-id="{{ it.bom_id or '' }}"
+          data-item-name="{{ it.item_name | e }}"
+          data-unit-price="{{ it.unit_price or '' }}"
+          data-comp-unit-price="{{ comp_price if comp_price is not none else '' }}"
+          data-has-diff="{% if has_diff %}1{% else %}0{% endif %}"
+          data-editable="{% if editable %}1{% else %}0{% endif %}"
+          style="border-bottom:1px solid #21262d;transition:background .12s{% if editable %};cursor:context-menu{% endif %}"
+          onmouseover="this.style.background='#161b22'" onmouseout="this.style.background=''"
+          oncontextmenu="{% if editable %}rowRightClick(event, this){% endif %}">
+        <td style="padding:8px 10px 8px 30px">
+          {{ it.item_name }}
+          {% if psrc %}
+          <a href="{{ psrc.url }}" onclick="event.stopPropagation()"
+             title="Price sourced from {{ psrc.label }} — click to update there"
+             style="display:inline-block;margin-left:5px;color:#388bfd;font-size:.72rem;text-decoration:none;border:1px solid #388bfd;border-radius:50%;width:14px;height:14px;line-height:13px;text-align:center;vertical-align:middle;flex-shrink:0"
+             onmouseover="this.style.background='rgba(56,139,253,.15)'" onmouseout="this.style.background=''">i</a>
+          {% endif %}
+        </td>
+        <td style="padding:8px 10px;color:#8b949e;font-family:monospace;font-size:.82rem">{{ it.formula or '—' }}</td>
+        <td style="padding:8px 10px;text-align:right;color:#8b949e">
+          {% if it.quantity is not none %}{{ '{:,.4f}'.format(it.quantity) }}{% else %}—{% endif %}
+        </td>
+        <td style="padding:8px 10px;text-align:right">
+          {% if it.unit_price is not none %}
+          <span style="display:inline-block;border:1.5px solid #8b949e;border-radius:50px;padding:1px 9px;color:#8b949e;font-size:.84rem">R {{ '{:,.2f}'.format(it.unit_price) }}</span>
+          {% else %}<span style="color:#6e7681">—</span>{% endif %}
+        </td>
+        <td style="padding:8px 10px;text-align:right;font-weight:500;color:{{ snap_clr }}">R {{ '{:,.2f}'.format(it.total) }}</td>
+        {% if comp_data %}
+        <td style="padding:8px 10px;text-align:right">
+          {% if comp_price is not none %}
+          <span style="display:inline-block;border:1.5px solid {{ comp_clr }};border-radius:50px;padding:1px 9px;color:{{ comp_clr }};font-size:.84rem">R {{ '{:,.2f}'.format(comp_price) }}</span>
+          {% else %}<span style="color:#6e7681;font-size:.78rem">—</span>{% endif %}
+        </td>
+        <td style="padding:8px 10px;text-align:right;font-weight:500;color:{{ comp_clr }}">
+          {% if comp_tot is not none %}R {{ '{:,.2f}'.format(comp_tot) }}{% else %}<span style="color:#6e7681;font-size:.78rem">—</span>{% endif %}
+        </td>
+        <td style="padding:8px 10px;text-align:right;font-size:.85rem">
+          {% if idiff is none %}
+            <span style="color:#6e7681;font-size:.78rem">new</span>
+          {% elif idiff == 0 %}
+            <span style="color:#6e7681">—</span>
+          {% else %}
+            <span style="color:{{ DIFF_CLR }};font-weight:600">
+              {% if idiff > 0 %}+{% endif %}R {{ '{:,.2f}'.format(idiff) }}
+            </span>
+            {% if editable %}<span style="color:#6e7681;font-size:.72rem;margin-left:4px;cursor:pointer" title="Edit price" onclick="event.stopPropagation();_ctxRow=this.closest('tr');openEditModal()">✎</span>{% endif %}
+          {% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+
+</div>
+
+<!-- ── Right-click context menu ─────────────────────────────────────────── -->
+<div id="ctx-menu" style="display:none;position:fixed;z-index:9000;
+     background:#1c2128;border:1px solid #30363d;border-radius:6px;
+     padding:4px 0;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,.6)">
+  <div id="ctx-item-label" style="padding:6px 14px 4px;color:#6e7681;font-size:.78rem;font-style:italic;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+  <hr style="border:none;border-top:1px solid #30363d;margin:4px 0">
+  <button onclick="openEditModal()" style="display:block;width:100%;text-align:left;background:none;border:none;
+          color:#e6edf3;padding:7px 14px;font-size:.88rem;cursor:pointer"
+          onmouseover="this.style.background='#30363d'" onmouseout="this.style.background=''">
+    ✎ &nbsp;Edit price permanently
+  </button>
+</div>
+
+<!-- ── Edit-price modal ──────────────────────────────────────────────────── -->
+<div id="edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;align-items:center;justify-content:center">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:28px;width:420px;max-width:95vw">
+    <h2 style="margin:0 0 6px;font-size:1.05rem">Edit Unit Price</h2>
+    <p id="edit-item-name" style="margin:0 0 18px;color:#8b949e;font-size:.87rem"></p>
+
+    <div id="edit-comp-price-hint" style="display:none;background:#0d2818;border:1px solid #2ea043;border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:.85rem">
+      <span style="color:#8b949e">{{ comp_data.source|upper if comp_data else 'Comparison' }} unit price:</span>
+      <strong id="edit-comp-price-val" style="color:#3fb950;margin-left:6px"></strong>
+      <button onclick="useCompPrice()" style="margin-left:12px;background:#2ea043;color:#fff;border:none;border-radius:4px;padding:2px 10px;font-size:.8rem;cursor:pointer">Use this</button>
+    </div>
+
+    <label style="display:block;margin-bottom:6px;font-size:.85rem;color:#8b949e">New Unit Price (R)</label>
+    <input id="edit-price-input" type="number" step="0.0001" min="0"
+           style="width:100%;box-sizing:border-box;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:.95rem;margin-bottom:16px"/>
+
+    <div style="font-size:.8rem;color:#6e7681;margin-bottom:16px;line-height:1.5">
+      This sets <strong style="color:#e6edf3">unit_price_override</strong> on the BOM row.
+      Changes affect all future quotations for this body type.
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="closeEditModal()" style="background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:7px 16px;cursor:pointer">Cancel</button>
+      <button id="edit-save-btn" onclick="savePrice()" style="background:#238636;color:#fff;border:none;border-radius:6px;padding:7px 20px;cursor:pointer">Save</button>
+    </div>
+    <p id="edit-err" style="display:none;color:#f85149;margin:12px 0 0;font-size:.85rem"></p>
+  </div>
+</div>
+
+<script>
+// ── collapse/expand ─────────────────────────────────────────────────────────
+function toggleCat(idx, hdr) {
+  const rows = document.querySelectorAll('.cat-' + idx);
+  const chevron = hdr.querySelector('.chevron');
+  const collapsed = rows[0] && rows[0].style.display === 'none';
+  rows.forEach(r => r.style.display = collapsed ? '' : 'none');
+  chevron.style.transform = collapsed ? '' : 'rotate(-90deg)';
+}
+function expandAll() {
+  document.querySelectorAll('.cat-rows').forEach(r => r.style.display = '');
+  document.querySelectorAll('.chevron').forEach(c => c.style.transform = '');
+}
+function collapseAll() {
+  document.querySelectorAll('.cat-rows').forEach(r => r.style.display = 'none');
+  document.querySelectorAll('.chevron').forEach(c => c.style.transform = 'rotate(-90deg)');
+}
+function applyCompare() {
+  const v = document.getElementById('comp-sel').value;
+  const base = '/admin/bom-snapshots/{{ snap.id }}';
+  window.location.href = v ? base + '?compare_to=' + v : base;
+}
+
+// ── page constants (injected from server) ───────────────────────────────────
+const _snapId          = {{ snap.id }};
+const _trailerTypeId   = {{ snap.trailer_type_id }};
+const _compareToId     = {{ compare_to if compare_to else 'null' }};
+const _trailerName     = {{ snap.trailer_type.name | tojson }};
+
+// ── dirty-state tracking ────────────────────────────────────────────────────
+let _editsMade = false;
+
+// ── stale banner ─────────────────────────────────────────────────────────────
+(function() {
+  const key = 'stale-dismissed-' + _snapId;
+  if (sessionStorage.getItem(key)) {
+    const b = document.getElementById('stale-banner');
+    if (b) b.style.display = 'none';
+  }
+})();
+
+function dismissStaleBanner() {
+  sessionStorage.setItem('stale-dismissed-' + _snapId, '1');
+  const b = document.getElementById('stale-banner');
+  if (b) b.style.display = 'none';
+}
+
+// ── auto-capture ─────────────────────────────────────────────────────────────
+async function autoCapture(triggerBtn) {
+  const stalBtn = document.getElementById('stale-capture-btn');
+  if (triggerBtn) { triggerBtn.disabled = true; triggerBtn.textContent = 'Capturing…'; }
+  if (stalBtn)    { stalBtn.disabled = true;    stalBtn.textContent    = 'Capturing…'; }
+
+  const now   = new Date();
+  const mm    = String(now.getMonth() + 1).padStart(2, '0');
+  const yyyy  = now.getFullYear();
+  const hh    = String(now.getHours()).padStart(2, '0');
+  const min   = String(now.getMinutes()).padStart(2, '0');
+  const label = _trailerName + '/' + mm + '/' + yyyy + ' ' + hh + ':' + min;
+
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  try {
+    const r = await fetch('/api/bom-snapshots/capture', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({trailer_type_id: _trailerTypeId, label}),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+    const compareParam = _compareToId ? '?compare_to=' + _compareToId : '';
+    _editsMade = false; // prevent beforeunload
+    window.location.href = '/admin/bom-snapshots/' + j.snapshot_id + compareParam;
+  } catch(e) {
+    await alertModal('Capture failed: ' + e.message, {title:'Capture Failed',danger:true});
+    if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = '↺ Update Snapshot'; }
+    if (stalBtn)    { stalBtn.disabled = false;    stalBtn.textContent    = 'Auto-update (new snapshot)'; }
+  }
+}
+
+// ── right-click context menu ────────────────────────────────────────────────
+let _ctxRow = null;
+
+function rowRightClick(e, row) {
+  e.preventDefault();
+  _ctxRow = row;
+  const menu = document.getElementById('ctx-menu');
+  document.getElementById('ctx-item-label').textContent = row.dataset.itemName || '';
+  menu.style.display = 'block';
+  // Position near cursor, keep within viewport
+  const x = Math.min(e.clientX, window.innerWidth  - 220);
+  const y = Math.min(e.clientY, window.innerHeight - 100);
+  menu.style.left = x + 'px';
+  menu.style.top  = y + 'px';
+}
+
+document.addEventListener('click', function() {
+  document.getElementById('ctx-menu').style.display = 'none';
+});
+document.addEventListener('contextmenu', function(e) {
+  // Hide menu if right-clicking elsewhere
+  if (!e.target.closest('#ctx-menu') && !_ctxRow?.contains(e.target)) {
+    document.getElementById('ctx-menu').style.display = 'none';
+  }
+});
+
+// ── edit-price modal ────────────────────────────────────────────────────────
+function openEditModal() {
+  document.getElementById('ctx-menu').style.display = 'none';
+  if (!_ctxRow) return;
+  document.getElementById('edit-item-name').textContent = _ctxRow.dataset.itemName || '';
+  const up = _ctxRow.dataset.unitPrice;
+  document.getElementById('edit-price-input').value = up ? parseFloat(up).toFixed(2) : '';
+
+  // Show comparison unit price hint if available
+  const compUp = _ctxRow.dataset.compUnitPrice;
+  const hint = document.getElementById('edit-comp-price-hint');
+  const compVal = document.getElementById('edit-comp-price-val');
+  if (compUp !== '' && compUp !== undefined && !isNaN(parseFloat(compUp))) {
+    compVal.textContent = 'R ' + parseFloat(compUp).toFixed(2);
+    hint.style.display = 'block';
+  } else {
+    hint.style.display = 'none';
+  }
+
+  document.getElementById('edit-err').style.display = 'none';
+  document.getElementById('edit-save-btn').disabled = false;
+  document.getElementById('edit-save-btn').textContent = 'Save';
+  document.getElementById('edit-modal').style.display = 'flex';
+  document.getElementById('edit-price-input').focus();
+  document.getElementById('edit-price-input').select();
+}
+
+function useCompPrice() {
+  const compUp = _ctxRow?.dataset.compUnitPrice;
+  if (compUp && !isNaN(parseFloat(compUp))) {
+    document.getElementById('edit-price-input').value = parseFloat(compUp).toFixed(2);
+    document.getElementById('edit-price-input').focus();
+  }
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').style.display = 'none';
+}
+
+async function savePrice() {
+  const btn = document.getElementById('edit-save-btn');
+  const err = document.getElementById('edit-err');
+  const val = document.getElementById('edit-price-input').value.trim();
+  if (val === '' || isNaN(parseFloat(val))) {
+    err.textContent = 'Please enter a valid price.';
+    err.style.display = 'block';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  err.style.display = 'none';
+
+  const snapItemId = _ctxRow.dataset.itemId;
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  try {
+    const r = await fetch(`/api/bom-snapshots/items/${snapItemId}/update-price`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({unit_price: parseFloat(val)}),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || r.statusText);
+
+    // Update the unit-price cell — restore pill badge styling
+    const cells = _ctxRow.querySelectorAll('td');
+    if (cells[3]) {
+      cells[3].innerHTML = `<span style="display:inline-block;border:1.5px solid #8b949e;border-radius:50px;padding:1px 9px;color:#8b949e;font-size:.84rem">R ${parseFloat(val).toFixed(2)}</span>`;
+    }
+
+    // Add "UPDATED" badge under the difference value in the last cell
+    const diffCell = cells[cells.length - 1];
+    if (diffCell && !diffCell.querySelector('.updated-badge')) {
+      const badge = document.createElement('div');
+      badge.className = 'updated-badge';
+      badge.style.cssText = 'font-size:.65rem;font-weight:700;letter-spacing:.07em;color:#f0883e;margin-top:3px;text-align:right';
+      badge.textContent = 'UPDATED';
+      diffCell.appendChild(badge);
+    }
+
+    closeEditModal();
+    _editsMade = true;
+    // Visual confirmation: briefly highlight the row
+    _ctxRow.style.background = '#1a3020';
+    setTimeout(() => { _ctxRow.style.background = ''; }, 1400);
+  } catch(e) {
+    err.textContent = e.message;
+    err.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+// Close modal on backdrop click
+document.getElementById('edit-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditModal();
+});
+// Close modal on Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeEditModal();
+});
+
+// ── Apply all comp prices in a category ────────────────────────────────────
+async function applyAllCompPricesInCat(catIdx, catName) {
+  const rows = [...document.querySelectorAll(`.cat-rows.cat-${catIdx}[data-editable="1"]`)]
+    .filter(r => r.dataset.compUnitPrice !== '' && !isNaN(parseFloat(r.dataset.compUnitPrice)));
+
+  if (!rows.length) { await alertModal('No pending comp prices to apply in this category.'); return; }
+
+  const lines = rows.slice(0, 6).map(r =>
+    `  • ${r.dataset.itemName}: R ${parseFloat(r.dataset.unitPrice || 0).toFixed(2)} → R ${parseFloat(r.dataset.compUnitPrice).toFixed(2)}`
+  ).join('\n');
+  const more = rows.length > 6 ? `\n  … and ${rows.length - 6} more` : '';
+  if (!await confirmModal(`Apply ${rows.length} comp price${rows.length===1?'':'s'} in "${catName}"?\n\n${lines}${more}\n\nThis updates the BOM override prices permanently.`, {title:'Apply Comp Prices',okText:'Apply All'})) return;
+
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  let ok = 0, fail = 0;
+  for (const row of rows) {
+    const newPrice = parseFloat(row.dataset.compUnitPrice);
+    try {
+      const r = await fetch(`/api/bom-snapshots/items/${row.dataset.itemId}/update-price`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+        body: JSON.stringify({unit_price: newPrice}),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || r.statusText);
+
+      // Update unit-price pill
+      const cells = row.querySelectorAll('td');
+      if (cells[3]) {
+        cells[3].innerHTML = `<span style="display:inline-block;border:1.5px solid #8b949e;border-radius:50px;padding:1px 9px;color:#8b949e;font-size:.84rem">R ${newPrice.toFixed(2)}</span>`;
+      }
+      // Add UPDATED badge in diff cell
+      const diffCell = cells[cells.length - 1];
+      if (diffCell && !diffCell.querySelector('.updated-badge')) {
+        const badge = document.createElement('div');
+        badge.className = 'updated-badge';
+        badge.style.cssText = 'font-size:.65rem;font-weight:700;letter-spacing:.07em;color:#f0883e;margin-top:3px;text-align:right';
+        badge.textContent = 'UPDATED';
+        diffCell.appendChild(badge);
+      }
+      row.dataset.unitPrice = newPrice.toString();
+      row.dataset.editable = '0';
+      row.style.background = '#1a3020';
+      setTimeout(() => { row.style.background = ''; }, 1400);
+      ok++;
+    } catch(e) {
+      console.error('applyAllCompPrices row error:', e);
+      fail++;
+    }
+  }
+  _editsMade = true;
+  await alertModal(`Done: ${ok} price${ok===1?'':'s'} updated` + (fail ? `, ${fail} failed.` : '.'), {title:'Done'});
+}
+
+// ── Baseline pin / restore ───────────────────────────────────────────────────
+const _csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+async function _snapFetch(url, method = 'POST') {
+  const r = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _csrf },
+    body: JSON.stringify({}),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+}
+
+async function pinBaseline() {
+  const btn = document.getElementById('pin-btn');
+  btn.disabled = true; btn.textContent = 'Pinning…';
+  try {
+    await _snapFetch(`/api/bom-snapshots/${_snapId}/pin`);
+    // Reload so the badge and button state update from server
+    window.location.reload();
+  } catch(e) {
+    await alertModal('Pin failed: ' + e.message, {title:'Error',danger:true});
+    btn.disabled = false; btn.textContent = '📌 Pin as Baseline';
+  }
+}
+
+async function unpinBaseline() {
+  if (!await confirmModal('Remove the pinned baseline flag from this snapshot?', {title:'Unpin Baseline',okText:'Unpin',danger:true})) return;
+  const btn = document.getElementById('pin-btn');
+  btn.disabled = true; btn.textContent = 'Unpinning…';
+  try {
+    await _snapFetch(`/api/bom-snapshots/${_snapId}/unpin`);
+    window.location.reload();
+  } catch(e) {
+    await alertModal('Unpin failed: ' + e.message, {title:'Error',danger:true});
+    btn.disabled = false; btn.textContent = '📌 Unpin Baseline';
+  }
+}
+
+async function restoreBaseline() {
+  if (!await confirmModal(
+    'Restore baseline prices?\n\n' +
+    'This will write the unit prices from this snapshot back onto each linked BOM row as price overrides. ' +
+    'The change can be undone via "↶ Undo BT overrides" on the Materials & Prices page.',
+    {title:'Restore Baseline Prices',okText:'Restore'}
+  )) return;
+  const btn = document.getElementById('restore-btn');
+  btn.disabled = true; btn.textContent = 'Restoring…';
+  try {
+    const j = await _snapFetch(`/api/bom-snapshots/${_snapId}/restore-baseline`);
+    await alertModal(
+      `Baseline restored: ${j.restored} price${j.restored===1?'':'s'} applied` +
+      (j.skipped > 0 ? `\n(${j.skipped} item${j.skipped===1?'':'s'} skipped — no BOM link or no price captured)` : ''),
+      {title:'Restore Complete'}
+    );
+    window.location.reload();
+  } catch(e) {
+    await alertModal('Restore failed: ' + e.message, {title:'Error',danger:true});
+    btn.disabled = false; btn.textContent = '↺ Restore Baseline Prices';
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,259 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * Icecold Bodies MES skin
+ *
+ * Layered on top of style.css. Activates only when the page is loaded
+ * from an MES React-mockup context (see load_active_theme middleware in
+ * app/main.py — referer / cookie / query-param detection). Standard
+ * production users continue to see the active Theme row from the DB.
+ *
+ * Palette source: Phase-0 Mockup Brief §3 + addendum status palette.
+ * Production-safe: additive overrides only. No DOM changes. No
+ * structural CSS modifications.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+:root, body {
+  /* ── Backgrounds ────────────────────────────────────── */
+  --bg-dark:    #F5F7FB;   /* page */
+  --bg-panel:   #FFFFFF;
+  --bg-card:    #FFFFFF;
+  --bg-input:   #FFFFFF;
+
+  /* ── Borders & dividers ─────────────────────────────── */
+  --border:     #E5E7EB;
+  --border-hi:  #0E4D8C;
+
+  /* ── Brand (Icecold blue) ───────────────────────────── */
+  --blue:       #0E4D8C;
+  --blue-hi:    #0B3B6C;
+  --blue-dim:   #DCE7F4;
+
+  /* ── Status palette ─────────────────────────────────── */
+  --orange:     #F59E0B;
+  --green:      #16A34A;
+  --red:        #DC2626;
+
+  /* ── Typography ─────────────────────────────────────── */
+  --text:       #23303A;
+  --text-head:  #0F172A;
+  --text-dim:   #6B7280;
+  --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:  ui-monospace, 'SF Mono', Consolas, monospace;
+
+  /* ── Misc ───────────────────────────────────────────── */
+  --grid-line:  transparent;
+  --shadow:     0 2px 8px rgba(15, 23, 42, 0.06);
+  --radius:     8px;
+  --disabled:   #94A3B8;
+}
+
+/* Remove the blueprint grid background that style.css applies by default. */
+body {
+  background: var(--bg-dark) !important;
+  background-image: none !important;
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* ── Header / topbar ──────────────────────────────────── */
+.topbar {
+  background: var(--blue);
+  color: #fff;
+  border-bottom: 1px solid var(--blue-hi);
+}
+.topbar-title           { color: #fff; }
+.topbar-title strong    { color: #fff; }
+.topbar a, .topbar .btn { color: #fff; }
+.topbar .btn-outline    { border-color: rgba(255,255,255,.45); color: #fff; }
+.topbar .btn-outline:hover { background: rgba(255,255,255,.12); }
+
+/* ── Sidebar ──────────────────────────────────────────── */
+.sidebar {
+  background: #FFFFFF;
+  border-right: 1px solid var(--border);
+}
+.sidebar-brand .logo { color: var(--blue); }
+.sidebar-brand h1    { color: var(--text-head); }
+
+.nav-label { color: var(--text); font-weight: 600; }
+/* Override the rainbow-coloured nav group labels from theme-light.css */
+.nav-group .nav-label {
+  color: var(--text) !important;
+  border-left: 3px solid var(--blue-dim) !important;
+  padding-left: 13px !important;
+}
+.nav-item        { color: var(--text); border-left-color: transparent; }
+.nav-item:hover  { background: var(--blue-dim); color: var(--blue-hi); }
+.nav-item.active { background: var(--blue-dim); color: var(--blue); border-left-color: var(--blue); }
+
+.sidebar-footer { border-top: 1px solid var(--border); }
+.user-avatar    { background: var(--blue-dim); color: var(--blue); }
+
+/* ── Cards & panels ───────────────────────────────────── */
+.card, .calc-panel, .panel, .stat-card, .summary-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.card-header, .panel-header {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-head);
+}
+.card-title, .panel-header { font-weight: 600; }
+
+/* Summary panel — the running quote callout */
+.calc-panel--summary {
+  border: 1px solid var(--blue);
+}
+.calc-panel--summary .panel-header,
+.calc-panel--summary .panel-footer {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+.grand-total-amount { color: var(--blue); }
+
+/* ── Tables ───────────────────────────────────────────── */
+table {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+thead th {
+  background: var(--blue) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--blue-hi);
+  padding: 10px 12px;
+}
+tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+tbody tr:nth-child(even) td { background: var(--bg-dark); }
+tbody tr:hover td           { background: var(--blue-dim); }
+.td-num, .td-mono           { font-family: var(--font-mono); }
+.tfoot-row td               { background: var(--bg-dark); font-weight: 600; color: var(--text-head); }
+
+/* ── Buttons ──────────────────────────────────────────── */
+.btn {
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  transition: background .15s, border-color .15s;
+}
+.btn-primary {
+  background: var(--blue);
+  color: #ffffff;
+  border: 1px solid var(--blue);
+}
+.btn-primary:hover { background: var(--blue-hi); border-color: var(--blue-hi); }
+.btn-outline {
+  background: transparent;
+  color: var(--blue);
+  border: 1px solid var(--border);
+}
+.btn-outline:hover { background: var(--blue-dim); border-color: var(--blue); }
+.btn-success { background: var(--green); color: #ffffff; border: 1px solid var(--green); }
+.btn-success:hover { background: #15803d; border-color: #15803d; }
+.btn-warning { background: var(--orange); color: #ffffff; border: 1px solid var(--orange); }
+.btn-danger {
+  background: transparent;
+  color: var(--red);
+  border: 1px solid transparent;
+}
+.btn-danger:hover { background: rgba(220,38,38,.08); border-color: var(--red); }
+
+/* ── Status pills / badges (match MES palette) ────────── */
+.badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.badge-admin { background: rgba(245,158,11,.15); color: #B45309; }
+.badge-user  { background: rgba(22,163,74,.15);  color: #15803D; }
+
+.costing-state-pill,
+.production-state-pill,
+.calc-bulk-pill-btn {
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* ── Forms ────────────────────────────────────────────── */
+.form-label { color: var(--text); font-weight: 600; font-size: 12px; }
+.form-hint  { color: var(--text-dim); }
+input[type=text], input[type=number], input[type=email], input[type=password],
+input[type=search], textarea, select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(14,77,140,0.15);
+}
+
+/* ── Tags (steel/timber/etc. in the BOM) — keep the colour-coding but
+ *    soften the saturation so they read as MES badges. */
+.tag {
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Category headings on the calculator (BOM sections) ── */
+.category-heading {
+  background: var(--blue-dim);
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+}
+.cat-name  { color: var(--blue-hi); font-weight: 600; }
+.cat-total { color: var(--blue);    font-weight: 700; }
+
+/* ── Login screen ─────────────────────────────────────── */
+.login-shell, .login-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.login-card h1, .login-card h2 { color: var(--text-head); }
+.login-card .btn-primary       { width: 100%; }
+
+/* ── Tiny MES-skin watermark in the page footer so it's obvious in demos */
+body::after {
+  content: 'MES skin';
+  position: fixed;
+  right: 8px;
+  bottom: 6px;
+  background: var(--blue);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 9999;
+}

@@ -1,0 +1,973 @@
+{% extends "base.html" %}
+{% block title %}Formulas{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Formulas{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-outline btn-sm" onclick="openAddGlobalVar()" style="margin-right:6px">+ Global Variable</button>
+  <button class="btn btn-primary btn-sm" onclick="openAddFormula()">+ Add Formula</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Variables reference -->
+<div style="margin-bottom:16px;padding:14px 16px;background:var(--bg-card);
+  border:1px solid var(--border);border-radius:var(--radius)">
+  <div style="font-family:var(--font-mono);font-size:10px;color:var(--blue);
+    letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Available Variables</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+    {% for v in ['length','width','height','floor_thickness','panel_thickness',
+      'insulation_thickness','num_doors','num_axles','wall_area','roof_area',
+      'floor_area','front_rear_area','surface_area','total_panel_area','volume'] %}
+    <code style="background:var(--bg-input);border:1px solid var(--border);
+      padding:2px 8px;border-radius:3px;font-size:11px;color:var(--blue-hi);cursor:pointer"
+      onclick="insertVar(this.textContent)">{{ v }}</code>
+    {% endfor %}
+  </div>
+  <div style="font-size:11px;color:var(--text-dim)">
+    Operators: + - * / ** (power) &nbsp;·&nbsp; Functions: abs() round() min() max() sqrt()
+    &nbsp;·&nbsp; Click a variable to insert it into the active formula field.
+  </div>
+</div>
+
+<!-- Global Variables card -->
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header">
+    <span class="card-title">Global Variables</span>
+    <span id="gv-count" style="font-size:11px;color:var(--text-dim)"></span>
+    <button class="btn btn-outline btn-sm" style="margin-left:auto"
+      onclick="openWasteMigration()" title="Replace hardcoded 0.05 with {Waste} across all BOM formulas">
+      ⟳ Replace 0.05 → {Waste}
+    </button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Value</th><th>Description</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="gv-body">
+        <tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-dim)">
+          <span class="spinner"></span> Loading…
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Formula Library</span>
+    <span id="formula-count" style="font-size:11px;color:var(--text-dim)"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Description</th><th>Expression</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="formula-body">
+        <tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-dim)">
+          <span class="spinner"></span> Loading…
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Add/Edit Global Variable Modal ────────────────── -->
+<div class="modal-backdrop hidden" id="modal-gv">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <span class="modal-title" id="gv-modal-title">Add Global Variable</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-gv')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="gv-id"/>
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input class="form-control" id="gv-name" placeholder="e.g. Waste"/>
+        <div class="form-hint">Used as <code>{Name}</code> in formulas — no spaces</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Value</label>
+        <input class="form-control" id="gv-value" type="number" step="0.001" placeholder="0.05"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input class="form-control" id="gv-desc" placeholder="What this constant represents"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger hidden" id="gv-delete-btn" onclick="deleteGlobalVar()">Delete</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-outline" onclick="closeModal('modal-gv')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveGlobalVar()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Waste Migration Modal ──────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-waste-migration">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title">Replace 0.05 → {Waste}</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-waste-migration')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="waste-migration-body" style="min-height:60px">
+        <div style="text-align:center;padding:20px"><span class="spinner"></span> Loading preview…</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-waste-migration')">Cancel</button>
+      <button class="btn btn-primary" id="waste-apply-btn" onclick="applyWasteMigration()" disabled>
+        Apply to All
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add/Edit Formula Modal ─────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-formula">
+  <div class="modal" style="max-width:880px">
+    <div class="modal-header">
+      <span class="modal-title" id="fmodal-title">Add Formula</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-formula')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="f-id"/>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Name (identifier)</label>
+          <input class="form-control" id="f-name" placeholder="e.g. wall_area"/>
+          <div class="form-hint">snake_case, no spaces</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <input class="form-control" id="f-desc" placeholder="What this calculates"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Expression</label>
+        <textarea class="form-control" id="f-expr" rows="4"
+          placeholder="e.g. length * height * 2&#10;or (width-{SIDES EPS}-{SIDES PU}+0.05)*(height-{ROOF EPS}-{ROOF PU}-{FLOOR EPS}+0.05)"
+          oninput="runPreview()"
+          style="font-family:var(--font-mono);font-size:13px;resize:vertical"></textarea>
+        <div class="form-hint">
+          Use dimension variables or reference another formula with <code>{FORMULA NAME}</code> tokens.
+        </div>
+      </div>
+
+      <!-- Dimension variable chips -->
+      <div style="background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:6px">Dimension Variables — click to insert</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          {% for v in ['length','width','height','floor_thickness','insulation_thickness',
+            'num_doors','num_axles','wall_area','roof_area','floor_area',
+            'front_rear_area','surface_area','total_panel_area','volume'] %}
+          <code onclick="insertVar('{{ v }}')" style="
+            background:rgba(56,139,253,.12);border:1px solid rgba(56,139,253,.3);
+            padding:2px 8px;border-radius:3px;font-size:11px;color:var(--blue-hi);
+            cursor:pointer;user-select:none">{{ v }}</code>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Body variable chips + test values -->
+      <div style="background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:8px">Body Variables — click to insert {NAME}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          {% for name, default in [
+            ('FRONT EPS','0.060'),('FRONT PU','0.000'),
+            ('DRD EPS','0.060'),('DRD PU','0.000'),
+            ('SRD EPS','0.000'),('SRD PU','0.000'),
+            ('SIDES EPS','0.060'),('SIDES PU','0.000'),
+            ('ROOF EPS','0.100'),('ROOF PU','0.000'),
+            ('FLOOR EPS','0.100'),('FLOOR PU','0.000')] %}
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <code onclick="insertFormulaRef('{{ name }}')" style="
+              background:rgba(46,160,67,.12);border:1px solid rgba(46,160,67,.3);
+              padding:2px 8px;border-radius:3px;font-size:11px;color:#4ade80;
+              cursor:pointer;user-select:none;white-space:nowrap">{{'{'}}{{ name }}{{'}'}}</code>
+            <input type="number" step="0.001"
+              id="bv-{{ name | replace(' ','-') | lower }}"
+              value="{{ default }}" oninput="runPreview()"
+              style="width:62px;background:#0d1117;color:var(--text-dim);
+                border:1px solid var(--border);border-radius:3px;font-size:10px;
+                text-align:center;padding:2px 4px;font-family:var(--font-mono)"/>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Global variable chips -->
+      <div style="background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:6px">Global Variables — click to insert {NAME}</div>
+        <div id="gv-chips" style="display:flex;flex-wrap:wrap;gap:4px">
+          <span style="color:var(--text-dim);font-size:11px">Loading…</span>
+        </div>
+      </div>
+
+      <!-- Formula reference chips -->
+      <div style="background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:6px">Formula References — click to insert {NAME}</div>
+        <div id="formula-ref-chips" style="display:flex;flex-wrap:wrap;gap:4px">
+          <span style="color:var(--text-dim);font-size:11px">Loading…</span>
+        </div>
+      </div>
+
+      <!-- Test inputs -->
+      <div style="background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:12px;margin-top:8px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:8px">Dimension Test Values</div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label">length (m)</label>
+            <input class="form-control" type="number" id="tv-length" value="13.6" oninput="runPreview()"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">width (m)</label>
+            <input class="form-control" type="number" id="tv-width" value="2.5" oninput="runPreview()"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">height (m)</label>
+            <input class="form-control" type="number" id="tv-height" value="2.7" oninput="runPreview()"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">insulation (m)</label>
+            <input class="form-control" type="number" id="tv-insul" value="0.076" oninput="runPreview()"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">num_axles</label>
+            <input class="form-control" type="number" id="tv-axles" value="3" oninput="runPreview()"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">num_doors</label>
+            <input class="form-control" type="number" id="tv-doors" value="2" oninput="runPreview()"/>
+          </div>
+        </div>
+        <div id="f-preview" style="margin-top:8px;padding:8px 12px;
+          background:var(--bg-input);border-radius:var(--radius);
+          font-family:var(--font-mono);font-size:13px;min-height:32px">
+          Result will appear here
+        </div>
+      </div>
+
+      <!-- ── Apply formula to BOM items ────────────────────────── -->
+      <div style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+        <div onclick="toggleApplyPanel()" style="display:flex;align-items:center;
+          justify-content:space-between;padding:10px 14px;background:var(--bg-panel);
+          cursor:pointer;user-select:none">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+              color:var(--text-dim)">Apply to BOM Items</span>
+            <span id="apply-selected-count" style="display:none;background:var(--blue);
+              color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;
+              font-weight:600"></span>
+          </div>
+          <span id="apply-panel-arrow" style="color:var(--text-dim);font-size:11px">▶ Show</span>
+        </div>
+        <div id="apply-panel-content" style="display:none;border-top:1px solid var(--border)">
+          <div id="apply-panel-inner" style="max-height:380px;overflow-y:auto">
+            <div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">
+              Expand to select BOM items this formula will be applied to
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger hidden" id="f-delete-btn" onclick="deleteFormula()">Delete</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-outline" onclick="closeModal('modal-formula')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFormula()">Save Formula</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let formulaMap = {};
+let activeExprField = null;
+let applyTargets = [];
+let applyDataLoaded = false;
+let applyPanelOpen = false;
+let gvMap = {}; // id -> global variable
+
+// ── Global Variables ──────────────────────────────────────────────────────────
+
+async function loadGlobalVars() {
+  try {
+    const rows = await api('GET', '/api/global-variables');
+    gvMap = {};
+    rows.forEach(r => gvMap[r.id] = r);
+    renderGlobalVars(rows);
+    renderGVChips();
+    document.getElementById('gv-count').textContent = `${rows.length} variable${rows.length !== 1 ? 's' : ''}`;
+  } catch(e) { toast('Failed to load global variables: ' + e.message, 'error'); }
+}
+
+function renderGlobalVars(rows) {
+  const tbody = document.getElementById('gv-body');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-dim)">No global variables</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td style="font-family:var(--font-mono);color:#f0a500;font-weight:600">{${escHtml(r.name)}}</td>
+      <td style="font-family:var(--font-mono);color:var(--green)">${r.value}</td>
+      <td style="color:var(--text-dim);font-size:13px">${escHtml(r.description)}</td>
+      <td class="td-actions">
+        <button class="btn btn-outline btn-sm" onclick="openEditGlobalVar(${r.id})">Edit</button>
+      </td>
+    </tr>`).join('');
+}
+
+function renderGVChips() {
+  const el = document.getElementById('gv-chips');
+  if (!el) return;
+  const vars = Object.values(gvMap);
+  if (!vars.length) {
+    el.innerHTML = '<span style="color:var(--text-dim);font-size:11px">No global variables</span>';
+    return;
+  }
+  el.innerHTML = vars.map(r =>
+    `<code onclick="insertFormulaRef('${escHtml(r.name)}')" title="= ${r.value}" style="
+      background:rgba(240,165,0,.12);border:1px solid rgba(240,165,0,.35);
+      padding:2px 8px;border-radius:3px;font-size:11px;color:#f0a500;cursor:pointer;
+      user-select:none">{${escHtml(r.name)}} <span style="opacity:.6;font-size:10px">= ${r.value}</span></code>`
+  ).join('');
+}
+
+function openAddGlobalVar() {
+  document.getElementById('gv-id').value = '';
+  document.getElementById('gv-modal-title').textContent = 'Add Global Variable';
+  document.getElementById('gv-name').value = '';
+  document.getElementById('gv-value').value = '';
+  document.getElementById('gv-desc').value = '';
+  document.getElementById('gv-delete-btn').classList.add('hidden');
+  openModal('modal-gv');
+  setTimeout(() => document.getElementById('gv-name').focus(), 100);
+}
+
+function openEditGlobalVar(id) {
+  const r = gvMap[id];
+  if (!r) return;
+  document.getElementById('gv-id').value = r.id;
+  document.getElementById('gv-modal-title').textContent = 'Edit: ' + r.name;
+  document.getElementById('gv-name').value = r.name;
+  document.getElementById('gv-value').value = r.value;
+  document.getElementById('gv-desc').value = r.description;
+  document.getElementById('gv-delete-btn').classList.remove('hidden');
+  openModal('modal-gv');
+}
+
+async function saveGlobalVar() {
+  const id    = document.getElementById('gv-id').value;
+  const name  = document.getElementById('gv-name').value.trim();
+  const value = document.getElementById('gv-value').value.trim();
+  const desc  = document.getElementById('gv-desc').value.trim();
+  if (!name)  { toast('Name is required', 'error'); return; }
+  if (value === '') { toast('Value is required', 'error'); return; }
+  try {
+    if (id) await api('PUT',  `/api/global-variables/${id}`, { name, value: +value, description: desc });
+    else    await api('POST', '/api/global-variables',       { name, value: +value, description: desc });
+    closeModal('modal-gv');
+    toast(id ? 'Variable updated' : 'Variable added', 'success');
+    await loadGlobalVars();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteGlobalVar() {
+  const id = document.getElementById('gv-id').value;
+  const r = gvMap[id];
+  if (!await confirmModal(`Delete variable "${r ? r.name : id}"?`, { title: 'Delete variable', okText: 'Delete', danger: true })) return;
+  try {
+    await api('DELETE', `/api/global-variables/${id}`);
+    closeModal('modal-gv');
+    toast('Variable deleted', 'success');
+    await loadGlobalVars();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Waste migration ───────────────────────────────────────────────────────────
+
+async function openWasteMigration() {
+  document.getElementById('waste-migration-body').innerHTML =
+    '<div style="text-align:center;padding:20px"><span class="spinner"></span> Scanning formulas…</div>';
+  document.getElementById('waste-apply-btn').disabled = true;
+  openModal('modal-waste-migration');
+  try {
+    const data = await api('GET', '/api/global-variables/waste-migration-preview');
+    const { count, items } = data;
+    if (!count) {
+      document.getElementById('waste-migration-body').innerHTML =
+        '<div style="padding:16px;color:var(--text-dim);text-align:center">No BOM formulas contain the literal <code>0.05</code> — nothing to replace.</div>';
+      return;
+    }
+    document.getElementById('waste-apply-btn').disabled = false;
+    const rows = items.slice(0, 50).map(it => `
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:5px 10px;font-size:11px;color:var(--text-dim)">${it.bom_id}</td>
+        <td style="padding:5px 10px">
+          <code style="background:var(--bg-input);border:1px solid var(--border);
+            padding:1px 5px;border-radius:3px;font-size:11px;color:#e53935">${escHtml(it.before)}</code>
+        </td>
+        <td style="padding:5px 10px">
+          <code style="background:var(--bg-input);border:1px solid var(--border);
+            padding:1px 5px;border-radius:3px;font-size:11px;color:var(--green)">${escHtml(it.after)}</code>
+        </td>
+      </tr>`).join('');
+    const more = count > 50 ? `<tr><td colspan="3" style="padding:8px 10px;color:var(--text-dim);font-size:11px;text-align:center">… and ${count - 50} more</td></tr>` : '';
+    document.getElementById('waste-migration-body').innerHTML = `
+      <div style="margin-bottom:10px;font-size:13px">
+        Found <strong style="color:var(--blue-hi)">${count}</strong> formula${count !== 1 ? 's' : ''} containing <code>0.05</code>.
+        Clicking <em>Apply to All</em> will replace each occurrence with <code>{Waste}</code>.
+      </div>
+      <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="background:var(--bg-panel)">
+            <th style="padding:5px 10px;text-align:left;color:var(--text-dim);width:60px">BOM ID</th>
+            <th style="padding:5px 10px;text-align:left;color:var(--text-dim)">Before</th>
+            <th style="padding:5px 10px;text-align:left;color:var(--text-dim)">After</th>
+          </tr></thead>
+          <tbody>${rows}${more}</tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    document.getElementById('waste-migration-body').innerHTML =
+      `<div style="padding:16px;color:var(--red)">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function applyWasteMigration() {
+  document.getElementById('waste-apply-btn').disabled = true;
+  try {
+    const res = await api('POST', '/api/global-variables/waste-migration-apply');
+    closeModal('modal-waste-migration');
+    toast(`Replaced 0.05 → {Waste} in ${res.updated} formula${res.updated !== 1 ? 's' : ''}`, 'success');
+  } catch(e) {
+    toast('Migration failed: ' + e.message, 'error');
+    document.getElementById('waste-apply-btn').disabled = false;
+  }
+}
+
+function _insertIntoExpr(text) {
+  const field = document.getElementById('f-expr');
+  if (!field) return;
+  const pos = field.selectionStart;
+  const val = field.value;
+  field.value = val.slice(0, pos) + text + val.slice(pos);
+  field.focus();
+  field.selectionStart = field.selectionEnd = pos + text.length;
+  runPreview();
+}
+
+function insertVar(v) { _insertIntoExpr(v); }
+
+function insertFormulaRef(name) { _insertIntoExpr('{' + name + '}'); }
+
+function renderFormulaChips() {
+  const container = document.getElementById('formula-ref-chips');
+  if (!container) return;
+  const names = Object.values(formulaMap).map(f => f.name).sort();
+  if (!names.length) {
+    container.innerHTML = '<span style="color:var(--text-dim);font-size:11px">No formulas yet</span>';
+    return;
+  }
+  container.innerHTML = names.map(name =>
+    `<code onclick="insertFormulaRef('${name}')" style="
+      background:rgba(187,93,255,.12);border:1px solid rgba(187,93,255,.3);
+      padding:2px 8px;border-radius:3px;font-size:11px;color:#bb5dff;cursor:pointer;
+      user-select:none">{${escHtml(name)}}</code>`
+  ).join('');
+}
+
+// ── Apply-to-BOM panel ────────────────────────────────────────────────────────
+
+function toggleApplyPanel() {
+  applyPanelOpen = !applyPanelOpen;
+  document.getElementById('apply-panel-content').style.display = applyPanelOpen ? 'block' : 'none';
+  document.getElementById('apply-panel-arrow').textContent = applyPanelOpen ? '▼ Hide' : '▶ Show';
+  if (applyPanelOpen && !applyDataLoaded) loadApplyTargets();
+}
+
+async function loadApplyTargets() {
+  document.getElementById('apply-panel-inner').innerHTML =
+    '<div style="padding:20px;text-align:center;color:var(--text-dim)"><span class="spinner"></span> Loading…</div>';
+  try {
+    applyTargets = await api('GET', '/api/formulas/apply-targets');
+    applyDataLoaded = true;
+    renderApplyTargets();
+  } catch(e) {
+    document.getElementById('apply-panel-inner').innerHTML =
+      `<div style="padding:16px;text-align:center;color:var(--red)">Failed to load: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderApplyTargets() {
+  const inner = document.getElementById('apply-panel-inner');
+  if (!applyTargets.length) {
+    inner.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-dim)">No body types found</div>';
+    return;
+  }
+  inner.innerHTML = applyTargets.map(tt => {
+    // Group items by bom_section, preserving order of first appearance
+    const catOrder = [], catMap = {};
+    tt.items.forEach(item => {
+      const cat = item.bom_section || 'GENERAL';
+      if (!catMap[cat]) { catMap[cat] = []; catOrder.push(cat); }
+      catMap[cat].push(item);
+    });
+
+    const rowsHtml = catOrder.map((cat, ci) => {
+      const catId = `c${tt.id}_${ci}`;
+      return `
+        <tr onclick="toggleApplyCategory('${catId}')"
+          style="background:var(--bg-panel);cursor:pointer;border-top:1px solid var(--border)">
+          <td style="padding:4px 8px 4px 34px">
+            <label onclick="event.stopPropagation()" style="margin:0;cursor:pointer;display:flex;align-items:center">
+              <input type="checkbox" class="apply-cat-all" data-tt="${tt.id}" data-catid="${catId}"
+                onchange="toggleCategoryAll(this,'${catId}')">
+            </label>
+          </td>
+          <td colspan="3" style="padding:4px 8px;font-size:11px;font-weight:600;
+            color:var(--blue-hi);letter-spacing:0.5px;text-transform:uppercase">
+            ${escHtml(cat)}<span style="font-weight:400;color:var(--text-dim);margin-left:6px">${catMap[cat].length}</span>
+          </td>
+          <td style="padding:4px 8px;text-align:right">
+            <span id="cat-arrow-${catId}" style="font-size:10px;color:var(--text-dim)">▶</span>
+          </td>
+        </tr>
+        ${catMap[cat].map(item => `
+          <tr data-cat-item="${catId}" data-tt="${tt.id}"
+            style="display:none;border-top:1px solid rgba(255,255,255,0.04)">
+            <td style="padding:3px 8px 3px 50px">
+              <input type="checkbox" class="apply-bom-cb" value="${item.bom_id}" onchange="updateApplyCount()">
+            </td>
+            <td style="padding:3px 8px;color:var(--text)">${escHtml(item.material_name)}</td>
+            <td style="padding:3px 8px">
+              <code title="${escHtml(item.current_formula)}" style="
+                background:var(--bg-input);border:1px solid var(--border);
+                padding:1px 5px;border-radius:3px;font-size:10px;display:block;
+                overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:155px">
+                ${escHtml(item.current_formula)}</code>
+            </td>
+            <td style="padding:3px 8px;text-align:right;color:var(--text-dim);white-space:nowrap">
+              R ${(item.unit_price||0).toFixed(2)}
+            </td>
+            <td class="apply-total" data-unit-price="${item.unit_price||0}"
+              style="padding:3px 8px;text-align:right;white-space:nowrap;color:var(--text-dim)">—</td>
+          </tr>`).join('')}`;
+    }).join('');
+
+    return `
+      <div style="border-bottom:1px solid var(--border)">
+        <div onclick="toggleApplyGroup(${tt.id})"
+          style="display:flex;align-items:center;gap:8px;padding:8px 12px;
+            background:var(--bg-panel);cursor:pointer;user-select:none;
+            position:sticky;top:0;z-index:1;border-bottom:1px solid var(--border)">
+          <label onclick="event.stopPropagation()" style="display:flex;align-items:center;cursor:pointer;margin:0">
+            <input type="checkbox" class="apply-grp-all" data-tt="${tt.id}"
+              onchange="toggleGroupAll(this,${tt.id})">
+          </label>
+          <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">${escHtml(tt.name)}</span>
+          <span style="font-size:11px;color:var(--text-dim)">${tt.items.length} items</span>
+          <span id="apply-grp-arrow-${tt.id}" style="font-size:11px;color:var(--text-dim);width:14px;text-align:right">▶</span>
+        </div>
+        <div id="apply-grp-items-${tt.id}" style="display:none">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:rgba(0,0,0,0.2)">
+                <th style="width:50px;padding:4px 8px"></th>
+                <th style="padding:4px 8px;text-align:left;color:var(--text-dim);font-weight:500">Item</th>
+                <th style="padding:4px 8px;text-align:left;color:var(--text-dim);font-weight:500">Current Formula</th>
+                <th style="padding:4px 8px;text-align:right;color:var(--text-dim);font-weight:500">Unit Price</th>
+                <th style="padding:4px 8px;text-align:right;color:var(--text-dim);font-weight:500">New Total</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+  updateApplyTotals();
+}
+
+function toggleApplyGroup(ttId) {
+  const items = document.getElementById('apply-grp-items-' + ttId);
+  const arrow = document.getElementById('apply-grp-arrow-' + ttId);
+  if (!items) return;
+  const open = items.style.display === 'none';
+  items.style.display = open ? 'block' : 'none';
+  if (arrow) arrow.textContent = open ? '▼' : '▶';
+}
+
+function toggleApplyCategory(catId) {
+  const rows = document.querySelectorAll(`tr[data-cat-item="${catId}"]`);
+  const arrow = document.getElementById('cat-arrow-' + catId);
+  const isHidden = !rows.length || rows[0].style.display === 'none';
+  rows.forEach(r => r.style.display = isHidden ? 'table-row' : 'none');
+  if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
+}
+
+function toggleCategoryAll(cb, catId) {
+  document.querySelectorAll(`tr[data-cat-item="${catId}"] .apply-bom-cb`).forEach(box => {
+    box.checked = cb.checked;
+  });
+  updateApplyCount();
+}
+
+function toggleGroupAll(cb, ttId) {
+  document.querySelectorAll(`tr[data-tt="${ttId}"] .apply-bom-cb`).forEach(box => {
+    box.checked = cb.checked;
+  });
+  updateApplyCount();
+}
+
+function updateApplyCount() {
+  const count = document.querySelectorAll('.apply-bom-cb:checked').length;
+  const el = document.getElementById('apply-selected-count');
+  if (el) {
+    el.textContent = count + ' selected';
+    el.style.display = count > 0 ? 'inline-block' : 'none';
+  }
+  // Sync body-type level
+  document.querySelectorAll('.apply-grp-all').forEach(grpCb => {
+    const ttId = grpCb.dataset.tt;
+    const groupCbs = [...document.querySelectorAll(`tr[data-tt="${ttId}"] .apply-bom-cb`)];
+    const chk = groupCbs.filter(c => c.checked).length;
+    grpCb.checked = chk === groupCbs.length && groupCbs.length > 0;
+    grpCb.indeterminate = chk > 0 && chk < groupCbs.length;
+  });
+  // Sync category level
+  document.querySelectorAll('.apply-cat-all').forEach(catCb => {
+    const catId = catCb.dataset.catid;
+    const catCbs = [...document.querySelectorAll(`tr[data-cat-item="${catId}"] .apply-bom-cb`)];
+    const chk = catCbs.filter(c => c.checked).length;
+    catCb.checked = chk === catCbs.length && catCbs.length > 0;
+    catCb.indeterminate = chk > 0 && chk < catCbs.length;
+  });
+}
+
+function updateApplyTotals() {
+  const cells = document.querySelectorAll('.apply-total[data-unit-price]');
+  if (!cells.length) return;
+  let expr = (document.getElementById('f-expr')?.value || '').trim();
+  let qty = null;
+  if (expr) {
+    const ctx = _buildCtx();
+    try {
+      const resolved = resolveFormulaRefs(expr, ctx, new Set(), _bodyVars());
+      const result = _safeMathEval(resolved, ctx);
+      if (!isNaN(result)) qty = Math.max(0, result);
+    } catch(e) { qty = null; }
+  }
+  cells.forEach(cell => {
+    const up = parseFloat(cell.dataset.unitPrice);
+    if (qty !== null && !isNaN(up)) {
+      cell.textContent = 'R ' + (qty * up).toFixed(2);
+      cell.style.color = 'var(--green)';
+    } else {
+      cell.textContent = '—';
+      cell.style.color = 'var(--text-dim)';
+    }
+  });
+}
+
+function resetApplyPanel() {
+  document.querySelectorAll('.apply-bom-cb').forEach(cb => cb.checked = false);
+  document.querySelectorAll('.apply-grp-all,.apply-cat-all').forEach(cb => { cb.checked = false; cb.indeterminate = false; });
+  updateApplyCount();
+  updateApplyTotals();
+  // Collapse panel
+  applyPanelOpen = false;
+  const content = document.getElementById('apply-panel-content');
+  if (content) content.style.display = 'none';
+  const arrow = document.getElementById('apply-panel-arrow');
+  if (arrow) arrow.textContent = '▶ Show';
+}
+
+function getCheckedBomIds() {
+  return [...document.querySelectorAll('.apply-bom-cb:checked')].map(cb => +cb.value);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _BV_NAMES = ['FRONT EPS','FRONT PU','DRD EPS','DRD PU','SRD EPS','SRD PU',
+                   'SIDES EPS','SIDES PU','ROOF EPS','ROOF PU','FLOOR EPS','FLOOR PU'];
+
+function _bodyVars() {
+  const m = {};
+  _BV_NAMES.forEach(n => {
+    const el = document.getElementById('bv-' + n.replace(/ /g, '-').toLowerCase());
+    m[n] = el ? (+el.value || 0) : 0;
+  });
+  return m;
+}
+
+function _buildCtx() {
+  const L  = +document.getElementById('tv-length')?.value || 0;
+  const W  = +document.getElementById('tv-width')?.value  || 0;
+  const H  = +document.getElementById('tv-height')?.value || 0;
+  const IT = +document.getElementById('tv-insul')?.value  || 0;
+  const NA = +document.getElementById('tv-axles')?.value  || 0;
+  const ND = +document.getElementById('tv-doors')?.value  || 0;
+  return {
+    length:L, width:W, height:H,
+    insulation_thickness:IT, floor_thickness:IT, panel_thickness:IT,
+    num_axles:NA, num_doors:ND,
+    wall_area:L*H*2, roof_area:L*W, floor_area:L*W,
+    front_rear_area:W*H*2,
+    surface_area:L*H*2+L*W*2+W*H*2,
+    total_panel_area:L*H*2+L*W+W*H*2,
+    volume:L*W*H,
+  };
+}
+
+// Safe recursive descent math evaluator — no eval / new Function required.
+// Supports: +  -  *  /  ** (right-assoc)  unary-  ( )
+//           abs() round() ceil() floor() sqrt() min() max()  pi
+function _safeMathEval(expr, ctx) {
+  let i = 0;
+  const s = String(expr || '').replace(/\s+/g, '');
+  if (!s) return NaN;
+  function cur()          { return i < s.length ? s[i] : ''; }
+  function isDigit(c)     { return c >= '0' && c <= '9'; }
+  function isAlNum(c)     { return /[a-zA-Z0-9_]/.test(c); }
+  function isAlpha(c)     { return /[a-zA-Z_]/.test(c); }
+  function parseExpr()    { return parseAdd(); }
+  function parseAdd() {
+    let v = parseMul();
+    while (cur() === '+' || cur() === '-') {
+      const op = s[i++]; v = op === '+' ? v + parseMul() : v - parseMul();
+    }
+    return v;
+  }
+  function parseMul() {
+    let v = parsePow();
+    while (cur() === '*' || cur() === '/') {
+      if (cur() === '*' && s[i+1] === '*') break; // leave ** for parsePow
+      const op = s[i++]; v = op === '*' ? v * parsePow() : v / parsePow();
+    }
+    return v;
+  }
+  function parsePow() {
+    const base = parseUnary();
+    if (cur() === '*' && s[i+1] === '*') { i += 2; return Math.pow(base, parsePow()); }
+    return base;
+  }
+  function parseUnary() {
+    if (cur() === '-') { i++; return -parsePrimary(); }
+    if (cur() === '+') { i++; return parsePrimary(); }
+    return parsePrimary();
+  }
+  function parsePrimary() {
+    const c = cur();
+    if (isDigit(c) || (c === '.' && isDigit(s[i+1] || ''))) {
+      let n = '';
+      while (isDigit(cur()) || cur() === '.') n += s[i++];
+      if (cur() === 'e' || cur() === 'E') {
+        n += s[i++];
+        if (cur() === '+' || cur() === '-') n += s[i++];
+        while (isDigit(cur())) n += s[i++];
+      }
+      return parseFloat(n);
+    }
+    if (c === '(') {
+      i++;
+      const v = parseExpr();
+      if (cur() === ')') i++;
+      return v;
+    }
+    if (isAlpha(c)) {
+      let name = '';
+      while (isAlNum(cur())) name += s[i++];
+      if (cur() === '(') {
+        i++;
+        const args = [];
+        while (cur() !== ')' && cur() !== '') {
+          args.push(parseExpr());
+          if (cur() === ',') i++;
+        }
+        if (cur() === ')') i++;
+        switch (name) {
+          case 'abs':   return Math.abs(args[0] || 0);
+          case 'round': return Math.round(args[0] || 0);
+          case 'ceil':  return Math.ceil(args[0] || 0);
+          case 'floor': return Math.floor(args[0] || 0);
+          case 'sqrt':  return Math.sqrt(args[0] || 0);
+          case 'min':   return Math.min(...(args.length ? args : [0]));
+          case 'max':   return Math.max(...(args.length ? args : [0]));
+          default:      return 0;
+        }
+      }
+      if (name === 'pi') return Math.PI;
+      return (name in ctx) ? Number(ctx[name]) : 0;
+    }
+    i++;
+    return 0;
+  }
+  try { return parseExpr(); } catch(e) { return NaN; }
+}
+
+function resolveFormulaRefs(expr, ctx, seen, bodyVars) {
+  return expr.replace(/\{([^}]+)\}/g, (match, name) => {
+    const key = name.trim();
+    const keyUpper = key.toUpperCase();
+    // Named formula from library
+    const ref = Object.values(formulaMap).find(f => f.name === key);
+    if (ref) {
+      if (seen.has(key)) throw new Error('Circular reference: {' + key + '}');
+      const nested = new Set(seen); nested.add(key);
+      const resolved = resolveFormulaRefs(ref.expression, ctx, nested, bodyVars);
+      const val = _safeMathEval(resolved, ctx);
+      return String(isNaN(val) ? 0 : val);
+    }
+    // Body variable
+    if (bodyVars && Object.prototype.hasOwnProperty.call(bodyVars, keyUpper)) {
+      return String(bodyVars[keyUpper]);
+    }
+    // Global variable
+    const gv = Object.values(gvMap).find(r => r.name.toUpperCase() === keyUpper);
+    if (gv) return String(gv.value);
+    throw new Error('Unknown formula/variable: {' + key + '}');
+  });
+}
+
+function runPreview() {
+  let expr = (document.getElementById('f-expr')?.value || '').trim();
+  const prev = document.getElementById('f-preview');
+  if (!prev) return;
+  if (!expr) { prev.innerHTML = '<span style="color:var(--text-dim)">Enter an expression above</span>'; return; }
+  const ctx = _buildCtx();
+  try {
+    const resolved = resolveFormulaRefs(expr, ctx, new Set(), _bodyVars());
+    const result = _safeMathEval(resolved, ctx);
+    if (isNaN(result)) throw new Error('Invalid expression');
+    prev.innerHTML = `<span style="color:var(--green)">✓ Result: <strong>${result.toFixed(4)}</strong></span>`;
+  } catch(e) {
+    prev.innerHTML = `<span style="color:var(--red)">✕ ${escHtml(e.message)}</span>`;
+  }
+  updateApplyTotals();
+}
+
+async function loadFormulas() {
+  try {
+    const fs = await api('GET', '/api/formulas');
+    formulaMap = {};
+    fs.forEach(f => formulaMap[f.id] = f);
+    renderFormulas(fs);
+    renderFormulaChips();
+    document.getElementById('formula-count').textContent = `${fs.length} formulas`;
+  } catch(e) { toast('Failed to load: ' + e.message, 'error'); }
+}
+
+function renderFormulas(fs) {
+  const tbody = document.getElementById('formula-body');
+  if (!fs.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-dim)">No formulas</td></tr>';
+    return;
+  }
+  tbody.innerHTML = fs.map(f => `
+    <tr>
+      <td style="font-family:var(--font-mono);color:var(--blue-hi)">${escHtml(f.name)}</td>
+      <td style="color:var(--text-dim);font-size:13px">${escHtml(f.description)}</td>
+      <td><code style="background:var(--bg-input);border:1px solid var(--border);
+        padding:3px 8px;border-radius:3px;font-size:12px">${escHtml(f.expression)}</code></td>
+      <td class="td-actions">
+        <button class="btn btn-outline btn-sm" onclick="openEditFormula(${f.id})">Edit</button>
+      </td>
+    </tr>`).join('');
+}
+
+function openAddFormula() {
+  document.getElementById('f-id').value = '';
+  document.getElementById('fmodal-title').textContent = 'Add Formula';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('f-expr').value = '';
+  document.getElementById('f-preview').innerHTML = 'Result will appear here';
+  document.getElementById('f-delete-btn').classList.add('hidden');
+  resetApplyPanel();
+  openModal('modal-formula');
+  setTimeout(() => document.getElementById('f-name').focus(), 100);
+}
+
+function openEditFormula(id) {
+  const f = formulaMap[id];
+  if (!f) return;
+  document.getElementById('f-id').value = f.id;
+  document.getElementById('fmodal-title').textContent = 'Edit: ' + f.name;
+  document.getElementById('f-name').value = f.name;
+  document.getElementById('f-desc').value = f.description;
+  document.getElementById('f-expr').value = f.expression;
+  document.getElementById('f-delete-btn').classList.remove('hidden');
+  resetApplyPanel();
+  runPreview();
+  openModal('modal-formula');
+}
+
+async function saveFormula() {
+  const id         = document.getElementById('f-id').value;
+  const name       = document.getElementById('f-name').value.trim();
+  const expression = document.getElementById('f-expr').value.trim();
+  const description= document.getElementById('f-desc').value.trim();
+  const checkedIds = getCheckedBomIds();
+
+  if (!expression) { toast('Expression is required', 'error'); return; }
+  if (!name && checkedIds.length === 0) {
+    toast('Enter a formula name, select BOM items to apply to, or both', 'error');
+    return;
+  }
+  try {
+    if (name) {
+      if (id) await api('PUT', `/api/formulas/${id}`, { name, description, expression });
+      else    await api('POST', '/api/formulas', { name, description, expression });
+    }
+    if (checkedIds.length > 0) {
+      const res = await api('POST', '/api/formulas/apply', { expression, bom_ids: checkedIds });
+      const n = res.updated, s = n === 1 ? '' : 's';
+      toast(name ? `Formula saved · applied to ${n} item${s}` : `Expression applied to ${n} item${s}`, 'success');
+    } else {
+      toast(id ? 'Formula updated' : 'Formula added', 'success');
+    }
+    closeModal('modal-formula');
+    await loadFormulas();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteFormula() {
+  const id = document.getElementById('f-id').value;
+  const f = formulaMap[id];
+  if (!await confirmModal(`Delete formula "${f ? f.name : id}"?`, { title: 'Delete formula', okText: 'Delete', danger: true })) return;
+  try {
+    await api('DELETE', `/api/formulas/${id}`);
+    closeModal('modal-formula');
+    toast('Formula deleted', 'success');
+    await loadFormulas();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadGlobalVars();
+loadFormulas();
+</script>
+{% endblock %}

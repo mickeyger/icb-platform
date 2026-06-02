@@ -1,0 +1,21 @@
+/* Dark theme for GRP Costings */
+:root {
+  --bg: #121212;
+  --bg-panel: #1f1f1f;
+  --bg-input: #1b1b1b;
+  --border: #333333;
+  --text: #e0e0e0;
+  --text-head: #ffffff;
+  --text-dim: #aaaaaa;
+  --blue-hi: #3fa7ff;
+  --green: #7fc77f;
+  --disabled: #555;
+  --radius: 6px;
+}
+body { background: var(--bg); color: var(--text); }
+.card { background: var(--bg-panel); border-color: var(--border); }
+.forms, input, select, textarea { background: var(--bg-input); color: var(--text); border-color: var(--border); }
+.sidebar, .main { background: var(--bg-panel); }
+.sidebar a.active { background: #272727; }
+.btn { border-color: var(--border); }
+.btn-primary { background: #16538a; color: #fff; }

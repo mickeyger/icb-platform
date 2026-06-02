@@ -1,0 +1,1017 @@
+{% extends "base.html" %}
+{% block title %}PDF Template Builder{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / PDF Template Builder{% endblock %}
+{% block topbar_actions %}
+  <a href="/admin/pdf-templates" class="btn btn-outline btn-sm">Back to Templates</a>
+{% endblock %}
+
+{% block content %}
+<div style="display:grid;grid-template-columns:minmax(320px,420px) minmax(0,1fr);gap:20px;align-items:start">
+  <div class="card">
+    <div class="panel-header">
+      <span>Template Setup</span>
+    </div>
+    <div style="padding:16px">
+      <div class="form-group">
+        <label class="form-label" for="template-name">Template Name</label>
+        <input class="form-control" id="template-name" placeholder="e.g. EXPLOSIVE BODY 2026" style="text-transform:uppercase" />
+      </div>
+
+      <div id="edit-mode-banner" class="hidden" style="margin-bottom:12px;padding:8px 10px;border:1px solid var(--blue);border-radius:var(--radius);background:rgba(56,139,253,.12);font-size:12px;color:var(--text-head)"></div>
+
+      <div class="form-group">
+        <label class="form-label" for="pdf-upload">PDF File</label>
+        <input class="form-control" id="pdf-upload" type="file" accept="application/pdf,.pdf" />
+        <div id="pdf-status" class="form-hint">Upload a PDF to preview it and place overlay fields.</div>
+      </div>
+
+      <div class="form-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label class="form-label" style="margin-bottom:0">Link to Body Types</label>
+          <button type="button" class="btn btn-outline btn-sm" onclick="toggleAllTrailers(true)">Select All</button>
+        </div>
+        <div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel)">
+          {% if trailers %}
+            {% for trailer in trailers %}
+            <label style="display:flex;align-items:center;gap:8px;padding:10px;border-bottom:1px solid var(--border);cursor:pointer">
+              <input type="checkbox" class="trailer-select" value="{{ trailer.id }}" />
+              <span>{{ trailer.name }}</span>
+            </label>
+            {% endfor %}
+          {% else %}
+            <div style="padding:14px;color:var(--text-dim);font-size:12px">No active trailer types found.</div>
+          {% endif %}
+        </div>
+        <div class="form-hint">A single template can be linked to multiple trailer types.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Drag Fields Onto The PDF</label>
+        <div id="field-palette" style="display:flex;flex-wrap:wrap;gap:8px">
+          {% for field_name, label in [("costing_id", "Costing Number"), ("trailer_type", "Body Type"), ("customer_name", "Customer Name"), ("customer_email", "Customer Email"), ("customer_telephone", "Customer Telephone"), ("length", "Length"), ("width", "Width"), ("height", "Height"), ("date", "Date"), ("grand_total", "Total Cost")] %}
+          <button type="button" class="btn btn-outline btn-sm field-chip" draggable="true" data-field="{{ field_name }}" data-label="{{ label }}" style="cursor:grab">{{ label }}</button>
+          {% endfor %}
+        </div>
+        <div class="form-hint">Drag a field onto the PDF preview, then drag it again to reposition it.</div>
+      </div>
+
+      <div class="form-group">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label class="form-label" style="margin-bottom:0">Static Text Overlays</label>
+          <button type="button" class="btn btn-outline btn-sm" id="add-static-btn" onclick="startStaticPlacement()">+ Add Static Text</button>
+        </div>
+        <div class="form-hint" id="static-hint">Cover original PDF text with replacement text. Click "Add Static Text", then click on the PDF where it should sit.</div>
+        <div id="configured-static" style="margin-top:8px;min-height:0;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);padding:8px;display:none"></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Placed Fields</label>
+        <div id="configured-fields" style="min-height:84px;max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);padding:8px">
+          <div id="no-fields-message" style="padding:16px;color:var(--text-dim);font-size:12px;text-align:center">No fields placed yet.</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;border-top:1px solid var(--border);padding-top:16px">
+        <button type="button" class="btn btn-danger" onclick="resetBuilder()">Reset</button>
+        <button type="button" class="btn btn-primary" style="flex:1" onclick="saveTemplate()">Save Template</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="panel-header">
+      <span>PDF Preview</span>
+      <span id="preview-meta" style="font-size:11px;color:var(--text-dim)">Waiting for PDF</span>
+    </div>
+    <div style="padding:16px">
+      <div style="background:var(--bg-panel);border:1px dashed var(--border);border-radius:var(--radius);padding:16px;min-height:640px;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:5px">
+              <input type="checkbox" id="grid-enabled" checked />
+              Snap
+            </label>
+            <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
+              Size
+              <input type="number" id="grid-size" min="1" max="100" value="5" style="width:46px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)" />
+            </label>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:11px;color:var(--text-dim)">Presets:</span>
+            <button type="button" onclick="setGridPreset(1)" style="padding:2px 7px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer">1</button>
+            <button type="button" onclick="setGridPreset(5)" style="padding:2px 7px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer">5</button>
+            <button type="button" onclick="setGridPreset(10)" style="padding:2px 7px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer">10</button>
+            <button type="button" onclick="setGridPreset(20)" style="padding:2px 7px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer">20</button>
+          </div>
+        </div>
+        <div style="text-align:right;font-size:11px;color:var(--text-dim);margin:-2px 0 8px 0">Arrow keys nudge selected field. Shift = ×5 step. Ctrl = 1px micro-nudge.</div>
+        <div id="pdf-empty-state" style="min-height:600px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--text-dim)">
+          <div>
+            <div style="font-size:24px;margin-bottom:8px">PDF</div>
+            <div>Upload a PDF file to build an overlay template.</div>
+            <div style="font-size:11px;margin-top:8px">Drag fields onto the preview where each costing value should appear.</div>
+          </div>
+        </div>
+        <div id="pdf-stage" style="display:none;position:relative;width:max-content;margin:0 auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+            <button type="button" class="btn btn-outline btn-sm" id="prev-page-btn">Prev Page</button>
+            <span id="page-indicator" style="font-size:12px;color:var(--text-dim)">Page 1 / 1</span>
+            <button type="button" class="btn btn-outline btn-sm" id="next-page-btn">Next Page</button>
+          </div>
+          <div id="pdf-canvas-wrap" style="position:relative;width:max-content">
+            <canvas id="pdf-canvas" style="display:block;border:1px solid var(--border);background:#fff"></canvas>
+            <div id="overlay-layer" style="position:absolute;inset:0"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const existingTemplate = {{ existing_template|tojson|safe if existing_template else 'null' }};
+const placedFields = {};
+const staticTexts = {};        // id -> {id, text, x, yPdf, page, fontSize, color, align, bgColor, padX, padY, width, height}
+let placingStatic = false;     // click-to-place mode flag
+let draggedStaticId = null;
+let selectedStaticId = null;
+let draggedFieldName = null;
+let selectedFieldName = null;
+let pdfDocument = null;
+const renderScale = 1.35;
+let currentPage = 1;
+let totalPages = 1;
+
+const pdfUpload = document.getElementById('pdf-upload');
+const pdfStatus = document.getElementById('pdf-status');
+const previewMeta = document.getElementById('preview-meta');
+const pageIndicator = document.getElementById('page-indicator');
+const prevPageBtn = document.getElementById('prev-page-btn');
+const nextPageBtn = document.getElementById('next-page-btn');
+const gridEnabledCheckbox = document.getElementById('grid-enabled');
+const gridSizeInput = document.getElementById('grid-size');
+const editModeBanner = document.getElementById('edit-mode-banner');
+const configuredFields = document.getElementById('configured-fields');
+const noFieldsMessage = document.getElementById('no-fields-message');
+const pdfEmptyState = document.getElementById('pdf-empty-state');
+const pdfStage = document.getElementById('pdf-stage');
+const pdfCanvas = document.getElementById('pdf-canvas');
+const pdfCanvasWrap = document.getElementById('pdf-canvas-wrap');
+const overlayLayer = document.getElementById('overlay-layer');
+const fieldPalette = document.getElementById('field-palette');
+const configuredStatic = document.getElementById('configured-static');
+const addStaticBtn = document.getElementById('add-static-btn');
+const staticHint = document.getElementById('static-hint');
+
+function setGridPreset(n) {
+  gridSizeInput.value = n;
+  gridEnabledCheckbox.checked = n > 1;
+  refreshGridOverlay();
+  redrawOverlayMarkers();
+}
+
+function microNudge(fieldName, dx, dy) {
+  if (!placedFields[fieldName]) return;
+  const prev = gridEnabledCheckbox.checked;
+  gridEnabledCheckbox.checked = false;
+  nudgeSelectedField(dx, dy);
+  selectedFieldName = fieldName;
+  gridEnabledCheckbox.checked = prev;
+  renderConfiguredFields();
+  redrawOverlayMarkers();
+}
+
+function getGridSize() {
+  const v = Number(gridSizeInput.value || 20);
+  if (!Number.isFinite(v)) return 20;
+  return Math.max(5, Math.min(100, Math.round(v)));
+}
+
+function snapValue(v) {
+  if (!gridEnabledCheckbox.checked) return Math.round(v);
+  const g = getGridSize();
+  return Math.round(v / g) * g;
+}
+
+function refreshGridOverlay() {
+  if (!gridEnabledCheckbox.checked) {
+    overlayLayer.style.backgroundImage = 'none';
+    return;
+  }
+  const g = getGridSize();
+  overlayLayer.style.backgroundImage = `
+    linear-gradient(rgba(88,166,255,0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(88,166,255,0.15) 1px, transparent 1px)
+  `;
+  overlayLayer.style.backgroundSize = `${g}px ${g}px`;
+}
+
+const pdfjsScript = document.createElement('script');
+pdfjsScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+pdfjsScript.onload = () => {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  previewMeta.textContent = 'PDF renderer ready';
+};
+pdfjsScript.onerror = () => {
+  previewMeta.textContent = 'PDF renderer unavailable';
+  pdfStatus.textContent = 'Preview could not be loaded because PDF.js failed to load.';
+};
+document.head.appendChild(pdfjsScript);
+
+fieldPalette.addEventListener('dragstart', (event) => {
+  const chip = event.target.closest('.field-chip');
+  if (!chip) return;
+  draggedFieldName = chip.dataset.field;
+  event.dataTransfer.setData('text/plain', draggedFieldName);
+  event.dataTransfer.effectAllowed = 'move';
+});
+
+overlayLayer.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+});
+
+overlayLayer.addEventListener('drop', (event) => {
+  event.preventDefault();
+  const rect = overlayLayer.getBoundingClientRect();
+  const snappedX = snapValue(event.clientX - rect.left);
+  const snappedY = snapValue(event.clientY - rect.top);
+
+  if (draggedStaticId) {
+    moveStatic(draggedStaticId, snappedX, snappedY);
+    draggedStaticId = null;
+    return;
+  }
+  const fieldName = event.dataTransfer.getData('text/plain') || draggedFieldName;
+  if (!fieldName) return;
+  placeField(fieldName, snappedX, snappedY, currentPage - 1);
+  draggedFieldName = null;
+});
+
+overlayLayer.addEventListener('click', async (event) => {
+  if (!placingStatic) return;
+  if (!pdfDocument) { return; }
+  const rect = overlayLayer.getBoundingClientRect();
+  const x = snapValue(event.clientX - rect.left);
+  const yTop = snapValue(event.clientY - rect.top);
+  const text = await promptModal('Replacement text:', '', { title: 'Replace Text' });
+  if (text === null) { stopStaticPlacement(); return; }
+  createStatic(text || '', x, yTop, currentPage - 1);
+  stopStaticPlacement();
+});
+
+function startStaticPlacement() {
+  if (!pdfDocument) { toast('Upload a PDF first.', 'warn'); return; }
+  placingStatic = true;
+  overlayLayer.style.cursor = 'crosshair';
+  addStaticBtn.textContent = 'Cancel';
+  addStaticBtn.onclick = stopStaticPlacement;
+  staticHint.textContent = 'Click on the PDF where the replacement text should appear.';
+  staticHint.style.color = 'var(--blue)';
+}
+
+function stopStaticPlacement() {
+  placingStatic = false;
+  overlayLayer.style.cursor = '';
+  addStaticBtn.textContent = '+ Add Static Text';
+  addStaticBtn.onclick = startStaticPlacement;
+  staticHint.textContent = 'Cover original PDF text with replacement text. Click "Add Static Text", then click on the PDF where it should sit.';
+  staticHint.style.color = '';
+}
+
+function makeStaticId() {
+  return 's_' + Math.random().toString(36).slice(2, 9);
+}
+
+function createStatic(text, x, yTop, pageIndex, opts = {}) {
+  const id = opts.id || makeStaticId();
+  const yPdf = Math.max(0, Math.round(pdfCanvas.height - yTop));
+  staticTexts[id] = {
+    id,
+    text: text,
+    x: Math.round(x),
+    yPdf,
+    page: pageIndex,
+    fontSize: Number(opts.fontSize || 10),
+    color:    opts.color    || '#000000',
+    align:    opts.align    || 'left',
+    bgColor:  opts.bgColor  || '#FFFFFF',
+    padX:     Number(opts.padX != null ? opts.padX : 2),
+    padY:     Number(opts.padY != null ? opts.padY : 2),
+    width:    opts.width  || null,
+    height:   opts.height || null,
+  };
+  selectedStaticId = id;
+  renderStaticList();
+  redrawOverlayMarkers();
+  return id;
+}
+
+function moveStatic(id, x, yTop) {
+  const s = staticTexts[id]; if (!s) return;
+  const bounds = getCanvasBounds();
+  const clampedX = Math.max(0, Math.min(bounds.width, snapValue(x)));
+  const clampedTop = Math.max(0, Math.min(bounds.height, snapValue(yTop)));
+  s.x = Math.round(clampedX);
+  s.yPdf = Math.max(0, Math.round(bounds.height - clampedTop));
+  renderStaticList();
+  redrawOverlayMarkers();
+}
+
+function updateStatic(id, key, value) {
+  const s = staticTexts[id]; if (!s) return;
+  if (key === 'fontSize') s.fontSize = Math.max(6, Math.min(72, Number(value) || 10));
+  else if (key === 'page') {
+    const maxPage = Math.max(1, Number(totalPages || 1));
+    const p = Math.max(1, Math.min(maxPage, Number(value) || 1));
+    s.page = p - 1;
+    if (selectedStaticId === id && pdfDocument && currentPage !== p) {
+      currentPage = p; renderPDFPage(currentPage); return;
+    }
+  }
+  else if (key === 'x' || key === 'yPdf' || key === 'padX' || key === 'padY' || key === 'width' || key === 'height') {
+    const n = value === '' ? null : Number(value);
+    s[key] = (n === null || !Number.isFinite(n)) ? (key === 'width' || key === 'height' ? null : 0) : Math.round(n);
+  }
+  else s[key] = value;
+  renderStaticList();
+  redrawOverlayMarkers();
+}
+
+function removeStatic(id) {
+  if (selectedStaticId === id) selectedStaticId = null;
+  delete staticTexts[id];
+  renderStaticList();
+  redrawOverlayMarkers();
+}
+
+function renderStaticList() {
+  const entries = Object.entries(staticTexts);
+  configuredStatic.innerHTML = '';
+  if (!entries.length) { configuredStatic.style.display = 'none'; return; }
+  configuredStatic.style.display = 'block';
+  entries.forEach(([id, s]) => {
+    const isSel = selectedStaticId === id;
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex;flex-direction:column;gap:6px;padding:8px;margin-bottom:6px;border:1px solid ${isSel ? 'var(--blue)' : 'var(--border)'};border-radius:var(--radius);background:${isSel ? 'rgba(56,139,253,.12)' : 'var(--bg-card)'};cursor:pointer`;
+    row.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <input type="text" value="${(s.text||'').replace(/"/g,'&quot;')}" data-key="text" data-id="${id}"
+            placeholder="(empty — whiteout only)"
+            style="width:100%;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-weight:600"/>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Page ${s.page + 1} at (${s.x}, ${s.yPdf})</div>
+        </div>
+        <button type="button" class="btn btn-icon" data-remove="${id}" style="padding:4px 8px">×</button>
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--text-dim)">Pg</label>
+        <input type="number" min="1" max="${Math.max(1,totalPages)}" value="${s.page+1}" data-key="page" data-id="${id}" style="width:42px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+        <label style="font-size:11px;color:var(--text-dim)">X</label>
+        <input type="number" value="${s.x}" data-key="x" data-id="${id}" style="width:54px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+        <label style="font-size:11px;color:var(--text-dim)">Y</label>
+        <input type="number" value="${s.yPdf}" data-key="yPdf" data-id="${id}" style="width:54px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+        <label style="font-size:11px;color:var(--text-dim)">Size</label>
+        <input type="number" min="6" max="72" value="${s.fontSize}" data-key="fontSize" data-id="${id}" style="width:50px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--text-dim)">Text</label>
+        <input type="color" value="${s.color}" data-key="color" data-id="${id}" style="width:42px;height:24px;border:1px solid var(--border);border-radius:4px;padding:0"/>
+        <label style="font-size:11px;color:var(--text-dim)">Box</label>
+        <input type="color" value="${s.bgColor || '#FFFFFF'}" data-key="bgColor" data-id="${id}" style="width:42px;height:24px;border:1px solid var(--border);border-radius:4px;padding:0"/>
+        <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px">
+          <input type="checkbox" data-key="bgEnabled" data-id="${id}" ${s.bgColor ? 'checked' : ''}/> Whiteout
+        </label>
+        <label style="font-size:11px;color:var(--text-dim)">Align</label>
+        ${['left','center','right'].map(a => {
+          const active = (s.align || 'left') === a;
+          return `<button type="button" data-key="align" data-id="${id}" data-value="${a}" style="padding:2px 7px;font-size:11px;border:1px solid ${active?'var(--blue)':'var(--border)'};border-radius:4px;background:${active?'rgba(56,139,253,.2)':'var(--bg-input)'};color:${active?'var(--blue)':'var(--text)'};cursor:pointer">${a[0].toUpperCase()}</button>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--text-dim)">Box W</label>
+        <input type="number" min="0" placeholder="auto" value="${s.width ?? ''}" data-key="width" data-id="${id}" style="width:60px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+        <label style="font-size:11px;color:var(--text-dim)">H</label>
+        <input type="number" min="0" placeholder="auto" value="${s.height ?? ''}" data-key="height" data-id="${id}" style="width:60px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+        <label style="font-size:11px;color:var(--text-dim)">Pad X</label>
+        <input type="number" min="0" value="${s.padX}" data-key="padX" data-id="${id}" style="width:46px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+        <label style="font-size:11px;color:var(--text-dim)">Y</label>
+        <input type="number" min="0" value="${s.padY}" data-key="padY" data-id="${id}" style="width:46px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)"/>
+      </div>
+    `;
+    row.addEventListener('click', () => {
+      selectedStaticId = id;
+      const fieldPage = (s.page || 0) + 1;
+      if (pdfDocument && currentPage !== fieldPage) { currentPage = fieldPage; renderPDFPage(currentPage); }
+      else { renderStaticList(); redrawOverlayMarkers(); }
+    });
+    row.querySelectorAll('input[data-key], button[data-key]').forEach((el) => {
+      el.addEventListener('click', (e) => e.stopPropagation());
+      const key = el.dataset.key;
+      if (el.tagName === 'BUTTON') {
+        el.addEventListener('click', () => updateStatic(id, 'align', el.dataset.value));
+      } else if (key === 'bgEnabled') {
+        el.addEventListener('change', () => updateStatic(id, 'bgColor', el.checked ? (s.bgColor || '#FFFFFF') : ''));
+      } else {
+        el.addEventListener('input', () => updateStatic(id, key, el.value));
+      }
+    });
+    row.querySelector('[data-remove]').addEventListener('click', (e) => { e.stopPropagation(); removeStatic(id); });
+    configuredStatic.appendChild(row);
+  });
+}
+
+gridEnabledCheckbox.addEventListener('change', () => {
+  refreshGridOverlay();
+  redrawOverlayMarkers();
+});
+
+gridSizeInput.addEventListener('input', () => {
+  refreshGridOverlay();
+  redrawOverlayMarkers();
+});
+
+prevPageBtn.addEventListener('click', async () => {
+  if (!pdfDocument || currentPage <= 1) return;
+  currentPage -= 1;
+  await renderPDFPage(currentPage);
+});
+
+nextPageBtn.addEventListener('click', async () => {
+  if (!pdfDocument || currentPage >= totalPages) return;
+  currentPage += 1;
+  await renderPDFPage(currentPage);
+});
+
+pdfUpload.addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!window.pdfjsLib) {
+    pdfStatus.textContent = 'PDF renderer is still loading. Try again in a second.';
+    return;
+  }
+
+  pdfStatus.textContent = 'Loading PDF preview...';
+  previewMeta.textContent = file.name;
+
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    pdfDocument = await pdfjsLib.getDocument({ data: bytes }).promise;
+    totalPages = pdfDocument.numPages;
+    currentPage = 1;
+    await renderPDFPage(currentPage);
+    pdfStatus.textContent = `Loaded ${file.name} (${pdfDocument.numPages} page${pdfDocument.numPages === 1 ? '' : 's'})`;
+  } catch (error) {
+    pdfStatus.textContent = 'Failed to render PDF preview: ' + error.message;
+  }
+});
+
+async function renderPDFPage(pageNumber) {
+  const page = await pdfDocument.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: renderScale });
+  const context = pdfCanvas.getContext('2d');
+
+  pdfCanvas.width = viewport.width;
+  pdfCanvas.height = viewport.height;
+  pdfCanvasWrap.style.width = `${viewport.width}px`;
+  pdfCanvasWrap.style.height = `${viewport.height}px`;
+  overlayLayer.style.width = `${viewport.width}px`;
+  overlayLayer.style.height = `${viewport.height}px`;
+
+  await page.render({ canvasContext: context, viewport }).promise;
+
+  pdfEmptyState.style.display = 'none';
+  pdfStage.style.display = 'block';
+  pageIndicator.textContent = `Page ${currentPage} / ${totalPages}`;
+  prevPageBtn.disabled = currentPage <= 1;
+  nextPageBtn.disabled = currentPage >= totalPages;
+  refreshGridOverlay();
+  redrawOverlayMarkers();
+}
+
+function toggleAllTrailers(checked) {
+  document.querySelectorAll('.trailer-select').forEach((checkbox) => {
+    checkbox.checked = checked;
+  });
+}
+
+function getFieldLabel(fieldName) {
+  const chip = fieldPalette.querySelector(`[data-field="${fieldName}"]`);
+  return chip ? chip.dataset.label : fieldName;
+}
+
+function placeField(fieldName, x, yTop, pageIndex) {
+  const snappedX = snapValue(x);
+  const snappedTop = snapValue(yTop);
+  const yPdf = Math.max(0, Math.round(pdfCanvas.height - snappedTop));
+  const existing = placedFields[fieldName] || {};
+  placedFields[fieldName] = {
+    label: getFieldLabel(fieldName),
+    x: snappedX,
+    yPdf,
+    page: pageIndex,
+    fontSize: Number(existing.fontSize || 10),
+    color: existing.color || '#000000',
+    align: existing.align || 'left',
+  };
+  selectedFieldName = fieldName;
+  renderConfiguredFields();
+  redrawOverlayMarkers();
+}
+
+function getCanvasBounds() {
+  return {
+    width: Number(pdfCanvas.width || 0),
+    height: Number(pdfCanvas.height || 0),
+  };
+}
+
+function updateFieldPosition(fieldName, x, yPdf) {
+  if (!placedFields[fieldName]) return;
+
+  const bounds = getCanvasBounds();
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    placedFields[fieldName].x = Math.round(Number(x || 0));
+    placedFields[fieldName].yPdf = Math.round(Number(yPdf || 0));
+    renderConfiguredFields();
+    redrawOverlayMarkers();
+    return;
+  }
+
+  const rawX = Number.isFinite(Number(x)) ? Number(x) : placedFields[fieldName].x;
+  const rawYPdf = Number.isFinite(Number(yPdf)) ? Number(yPdf) : placedFields[fieldName].yPdf;
+
+  const clampedX = Math.max(0, Math.min(bounds.width, rawX));
+  const clampedTop = Math.max(0, Math.min(bounds.height, bounds.height - rawYPdf));
+
+  const snappedX = Math.max(0, Math.min(bounds.width, snapValue(clampedX)));
+  const snappedTop = Math.max(0, Math.min(bounds.height, snapValue(clampedTop)));
+
+  placedFields[fieldName].x = Math.round(snappedX);
+  placedFields[fieldName].yPdf = Math.max(0, Math.round(bounds.height - snappedTop));
+
+  renderConfiguredFields();
+  redrawOverlayMarkers();
+}
+
+function updateFieldPage(fieldName, pageNumber) {
+  if (!placedFields[fieldName]) return;
+  const maxPage = Math.max(1, Number(totalPages || 1));
+  const parsed = Number(pageNumber);
+  const clampedPage = Number.isFinite(parsed) ? Math.max(1, Math.min(maxPage, Math.round(parsed))) : 1;
+  placedFields[fieldName].page = clampedPage - 1;
+
+  if (selectedFieldName === fieldName && pdfDocument && currentPage !== clampedPage) {
+    currentPage = clampedPage;
+    renderPDFPage(currentPage);
+    return;
+  }
+
+  renderConfiguredFields();
+  redrawOverlayMarkers();
+}
+
+function selectField(fieldName, options = {}) {
+  if (!placedFields[fieldName]) return;
+  selectedFieldName = fieldName;
+
+  const jumpToPage = options.jumpToPage !== false;
+  const fieldPage = Number(placedFields[fieldName].page || 0) + 1;
+  if (jumpToPage && pdfDocument && fieldPage !== currentPage) {
+    currentPage = fieldPage;
+    renderPDFPage(currentPage);
+  } else {
+    renderConfiguredFields();
+    redrawOverlayMarkers();
+  }
+}
+
+function nudgeSelectedField(dx, dyPdf) {
+  if (!selectedFieldName || !placedFields[selectedFieldName]) return;
+  const config = placedFields[selectedFieldName];
+  updateFieldPosition(selectedFieldName, Number(config.x || 0) + dx, Number(config.yPdf || 0) + dyPdf);
+}
+
+function updateFieldStyle(fieldName, key, value) {
+  if (!placedFields[fieldName]) return;
+  if (key === 'fontSize') {
+    const parsed = Number(value);
+    placedFields[fieldName].fontSize = Number.isFinite(parsed) ? Math.max(6, Math.min(72, parsed)) : 10;
+  } else if (key === 'color') {
+    placedFields[fieldName].color = value || '#000000';
+  } else if (key === 'align') {
+    placedFields[fieldName].align = value || 'left';
+  }
+  renderConfiguredFields();
+  redrawOverlayMarkers();
+}
+
+function removeField(fieldName) {
+  if (selectedFieldName === fieldName) {
+    selectedFieldName = null;
+  }
+  delete placedFields[fieldName];
+  renderConfiguredFields();
+  redrawOverlayMarkers();
+}
+
+function renderConfiguredFields() {
+  configuredFields.querySelectorAll('.configured-field-row').forEach((node) => node.remove());
+  const entries = Object.entries(placedFields);
+
+  if (!entries.length) {
+    noFieldsMessage.style.display = 'block';
+    return;
+  }
+
+  noFieldsMessage.style.display = 'none';
+  entries.forEach(([fieldName, config]) => {
+    const isSelected = selectedFieldName === fieldName;
+    const hasCustomStyle = Number(config.fontSize || 10) !== 10 || (config.color || '#000000').toLowerCase() !== '#000000';
+    const styleBadgeLabel = hasCustomStyle ? 'Styled' : 'Default Style';
+    const styleBadgeCss = hasCustomStyle
+      ? 'background:rgba(63,185,80,.16);border:1px solid rgba(63,185,80,.6);color:#7ee787;'
+      : 'background:rgba(139,148,158,.16);border:1px solid rgba(139,148,158,.55);color:#c9d1d9;';
+
+    const row = document.createElement('div');
+    row.className = 'configured-field-row';
+    row.style.cssText = `display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px;margin-bottom:6px;border:1px solid ${isSelected ? 'var(--blue)' : 'var(--border)'};border-radius:var(--radius);background:${isSelected ? 'rgba(56,139,253,.12)' : 'var(--bg-card)'};cursor:pointer`;
+    row.innerHTML = `
+      <div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-weight:600;font-size:12px">${config.label}</div>
+          <span style="padding:1px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.3px;${styleBadgeCss}">${styleBadgeLabel}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim)">Page ${config.page + 1} at (${config.x}, ${config.yPdf})</div>
+        <div style="margin-top:6px">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;flex-wrap:wrap">
+            <label style="font-size:11px;color:var(--text-dim);min-width:16px">Pg</label>
+            <input type="number" min="1" max="${Math.max(1, totalPages)}" value="${Math.max(1, Number(config.page || 0) + 1)}" data-key="page" data-field="${fieldName}" style="width:40px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)" />
+            <label style="font-size:11px;color:var(--text-dim);min-width:10px">X</label>
+            <input type="number" min="0" value="${Math.round(config.x || 0)}" data-key="x" data-field="${fieldName}" style="width:52px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)" />
+            <button type="button" title="Nudge left 1px" onclick="event.stopPropagation();microNudge('${fieldName}',-1,0)" style="padding:1px 5px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer;line-height:1">◄</button>
+            <button type="button" title="Nudge right 1px" onclick="event.stopPropagation();microNudge('${fieldName}',1,0)" style="padding:1px 5px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer;line-height:1">►</button>
+            <label style="font-size:11px;color:var(--text-dim);min-width:10px">Y</label>
+            <input type="number" min="0" value="${Math.round(config.yPdf || 0)}" data-key="yPdf" data-field="${fieldName}" style="width:52px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)" />
+            <button type="button" title="Nudge up 1px" onclick="event.stopPropagation();microNudge('${fieldName}',0,1)" style="padding:1px 5px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer;line-height:1">▲</button>
+            <button type="button" title="Nudge down 1px" onclick="event.stopPropagation();microNudge('${fieldName}',0,-1)" style="padding:1px 5px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);cursor:pointer;line-height:1">▼</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <label style="font-size:11px;color:var(--text-dim);min-width:28px">Size</label>
+            <input type="number" min="6" max="72" value="${config.fontSize || 10}" data-key="fontSize" data-field="${fieldName}" style="width:50px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text)" />
+            <label style="font-size:11px;color:var(--text-dim);min-width:32px">Color</label>
+            <input type="color" value="${config.color || '#000000'}" data-key="color" data-field="${fieldName}" style="width:52px;height:24px;border:1px solid var(--border);border-radius:4px;background:transparent;padding:0" />
+            <label style="font-size:11px;color:var(--text-dim);min-width:28px">Align</label>
+            ${['left','center','right'].map(a => {
+              const active = (config.align || 'left') === a;
+              const icons = { left: '⬅ L', center: '↔ C', right: '➡ R' };
+              return `<button type="button" data-key="align" data-field="${fieldName}" data-value="${a}" style="padding:2px 7px;font-size:11px;border:1px solid ${active ? 'var(--blue)' : 'var(--border)'};border-radius:4px;background:${active ? 'rgba(56,139,253,.2)' : 'var(--bg-input)'};color:${active ? 'var(--blue)' : 'var(--text)'};cursor:pointer">${icons[a]}</button>`;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-icon" style="padding:4px 8px">Remove</button>
+    `;
+    row.addEventListener('click', () => selectField(fieldName));
+    row.querySelectorAll('input[data-key]').forEach((input) => {
+      input.addEventListener('click', (event) => event.stopPropagation());
+      input.addEventListener('input', (event) => {
+        const key = event.target.dataset.key;
+        if (key === 'page') {
+          updateFieldPage(fieldName, event.target.value);
+          return;
+        }
+        if (key === 'x' || key === 'yPdf') {
+          const nextX = key === 'x' ? Number(event.target.value) : Number(placedFields[fieldName].x || 0);
+          const nextY = key === 'yPdf' ? Number(event.target.value) : Number(placedFields[fieldName].yPdf || 0);
+          updateFieldPosition(fieldName, nextX, nextY);
+          return;
+        }
+        updateFieldStyle(fieldName, key, event.target.value);
+      });
+    });
+    row.querySelectorAll('button[data-key="align"]').forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        updateFieldStyle(fieldName, 'align', btn.dataset.value);
+      });
+    });
+    row.querySelector('button').addEventListener('click', (event) => {
+      event.stopPropagation();
+      removeField(fieldName);
+    });
+    configuredFields.appendChild(row);
+  });
+}
+
+function redrawOverlayMarkers() {
+  overlayLayer.innerHTML = '';
+  Object.entries(placedFields).forEach(([fieldName, config]) => {
+    if (config.page !== currentPage - 1) {
+      return;
+    }
+    const marker = document.createElement('div');
+    marker.textContent = config.label;
+    marker.draggable = true;
+    const yTop = Math.max(0, Math.round(pdfCanvas.height - config.yPdf));
+    const markerColor = config.color || '#000000';
+    const markerFontSize = Number(config.fontSize || 10);
+    const isSelected = selectedFieldName === fieldName;
+    const align = config.align || 'left';
+    const transformMap = { left: 'translate(0, -50%)', center: 'translate(-50%, -50%)', right: 'translate(-100%, -50%)' };
+    const alignTransform = transformMap[align] || transformMap.left;
+    const alignIcon = align === 'center' ? '≡' : align === 'right' ? '▶' : '◀';
+    marker.style.cssText = `position:absolute;left:${snapValue(config.x)}px;top:${snapValue(yTop)}px;transform:${alignTransform};padding:4px 8px;background:${isSelected ? 'rgba(56,139,253,.28)' : 'rgba(56,139,253,.18)'};border:${isSelected ? '2px' : '1px'} solid var(--blue);color:${markerColor};border-radius:999px;font-size:${markerFontSize}px;font-weight:600;cursor:grab;user-select:none`;
+    marker.textContent = `${alignIcon} ${config.label}`;
+    marker.addEventListener('dragstart', (event) => {
+      draggedFieldName = fieldName;
+      event.dataTransfer.setData('text/plain', fieldName);
+      event.dataTransfer.effectAllowed = 'move';
+    });
+    marker.addEventListener('click', (event) => {
+      event.stopPropagation();
+      selectField(fieldName, { jumpToPage: false });
+    });
+    const del = document.createElement('span');
+    del.textContent = '×';
+    del.title = 'Delete field';
+    del.style.cssText = 'margin-left:6px;padding:0 5px;border-radius:50%;background:rgba(248,81,73,.85);color:#fff;font-size:11px;line-height:14px;cursor:pointer;display:inline-block';
+    del.addEventListener('click', (e) => { e.stopPropagation(); removeField(fieldName); });
+    marker.appendChild(del);
+    overlayLayer.appendChild(marker);
+  });
+
+  Object.values(staticTexts).forEach((s) => {
+    if (s.page !== currentPage - 1) return;
+    const yTop = Math.max(0, Math.round(pdfCanvas.height - s.yPdf));
+    const isSel = selectedStaticId === s.id;
+    const align = s.align || 'left';
+    const transformMap = { left: 'translate(0, -100%)', center: 'translate(-50%, -100%)', right: 'translate(-100%, -100%)' };
+    const m = document.createElement('div');
+    m.draggable = true;
+    m.style.cssText = `position:absolute;left:${snapValue(s.x)}px;top:${snapValue(yTop)}px;transform:${transformMap[align]||transformMap.left};padding:${s.padY}px ${s.padX}px;background:${s.bgColor || 'transparent'};color:${s.color};font-family:Helvetica,Arial,sans-serif;font-weight:700;font-size:${s.fontSize}px;line-height:1;border:${isSel ? '2px dashed var(--blue)' : '1px dashed rgba(63,185,80,.7)'};cursor:grab;user-select:none;white-space:nowrap`;
+    if (s.width)  m.style.width  = `${s.width}px`;
+    if (s.height) m.style.height = `${s.height}px`;
+    m.textContent = s.text || '∅';
+    m.title = `Static text — page ${s.page+1}`;
+    m.addEventListener('dragstart', (event) => {
+      draggedStaticId = s.id;
+      event.dataTransfer.setData('text/plain', '');
+      event.dataTransfer.effectAllowed = 'move';
+    });
+    m.addEventListener('click', (event) => {
+      event.stopPropagation();
+      selectedStaticId = s.id;
+      renderStaticList();
+      redrawOverlayMarkers();
+    });
+    const sdel = document.createElement('span');
+    sdel.textContent = '×';
+    sdel.title = 'Delete static text';
+    sdel.style.cssText = 'position:absolute;top:-8px;right:-8px;width:16px;height:16px;border-radius:50%;background:rgba(248,81,73,.95);color:#fff;font-size:12px;line-height:16px;text-align:center;cursor:pointer;font-family:Arial,sans-serif;font-weight:700';
+    sdel.addEventListener('click', (e) => { e.stopPropagation(); removeStatic(s.id); });
+    m.style.position = 'absolute';
+    m.appendChild(sdel);
+    overlayLayer.appendChild(m);
+  });
+}
+
+function resetBuilder() {
+  document.getElementById('template-name').value = '';
+  pdfUpload.value = '';
+  pdfDocument = null;
+  selectedFieldName = null;
+  currentPage = 1;
+  totalPages = 1;
+  pdfStatus.textContent = 'Upload a PDF to preview it and place overlay fields.';
+  previewMeta.textContent = 'Waiting for PDF';
+  pdfEmptyState.style.display = 'flex';
+  pdfStage.style.display = 'none';
+  toggleAllTrailers(false);
+  Object.keys(placedFields).forEach((key) => delete placedFields[key]);
+  Object.keys(staticTexts).forEach((key) => delete staticTexts[key]);
+  selectedStaticId = null;
+  stopStaticPlacement();
+  renderConfiguredFields();
+  renderStaticList();
+  redrawOverlayMarkers();
+}
+
+document.addEventListener('keydown', (event) => {
+  const tag = (event.target && event.target.tagName) ? event.target.tagName.toLowerCase() : '';
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || (event.target && event.target.isContentEditable)) {
+    return;
+  }
+
+  // Delete / Backspace removes the currently selected marker (field or static text)
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    if (selectedStaticId && staticTexts[selectedStaticId]) {
+      event.preventDefault();
+      removeStatic(selectedStaticId);
+      return;
+    }
+    if (selectedFieldName && placedFields[selectedFieldName]) {
+      event.preventDefault();
+      removeField(selectedFieldName);
+      return;
+    }
+    return;
+  }
+
+  if (!selectedFieldName || !placedFields[selectedFieldName]) {
+    return;
+  }
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+    return;
+  }
+
+  event.preventDefault();
+  let step;
+  if (event.ctrlKey) {
+    step = 1; // Ctrl = always 1px micro-nudge, ignores grid
+  } else {
+    const baseStep = gridEnabledCheckbox.checked ? getGridSize() : 1;
+    step = event.shiftKey ? baseStep * 5 : baseStep;
+  }
+
+  if (event.key === 'ArrowLeft') nudgeSelectedField(-step, 0);
+  if (event.key === 'ArrowRight') nudgeSelectedField(step, 0);
+  if (event.key === 'ArrowUp') nudgeSelectedField(0, step);
+  if (event.key === 'ArrowDown') nudgeSelectedField(0, -step);
+});
+
+async function saveTemplate() {
+  const name = document.getElementById('template-name').value.trim().toUpperCase();
+  const selectedTrailers = Array.from(document.querySelectorAll('.trailer-select:checked')).map((checkbox) => Number(checkbox.value));
+  const file = pdfUpload.files[0];
+  const overlayPositions = Object.fromEntries(
+    Object.entries(placedFields).map(([fieldName, config]) => ([
+      fieldName,
+      {
+        x: Math.round(config.x / renderScale),
+        y: Math.round(config.yPdf / renderScale),
+        page: config.page,
+        font_size: Number(config.fontSize || 10),
+        color: config.color || '#000000',
+        align: config.align || 'left',
+      },
+    ]))
+  );
+
+  const staticTextPayload = Object.values(staticTexts).map((s) => ({
+    id: s.id,
+    text: s.text || '',
+    x: Math.round(s.x / renderScale),
+    y: Math.round(s.yPdf / renderScale),
+    page: s.page,
+    font_size: Number(s.fontSize || 10),
+    color: s.color || '#000000',
+    bg_color: s.bgColor || '',
+    align: s.align || 'left',
+    pad_x: Math.round((Number(s.padX) || 0) / renderScale),
+    pad_y: Math.round((Number(s.padY) || 0) / renderScale),
+    width:  s.width  ? Math.round(Number(s.width)  / renderScale) : null,
+    height: s.height ? Math.round(Number(s.height) / renderScale) : null,
+  }));
+
+  if (!name) {
+    toast('Template name is required.', 'error');
+    return;
+  }
+  if (!selectedTrailers.length) {
+    toast('Select at least one trailer type.', 'error');
+    return;
+  }
+  if (!file && !existingTemplate) {
+    toast('Select a PDF file first.', 'error');
+    return;
+  }
+  if (!Object.keys(placedFields).length && !staticTextPayload.length) {
+    toast('Add at least one field or static text overlay.', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('name', name);
+  if (file) {
+    formData.append('pdf_file', file);
+  }
+  formData.append('trailer_type_ids', JSON.stringify(selectedTrailers));
+  formData.append('field_positions', JSON.stringify(overlayPositions));
+  formData.append('static_text', JSON.stringify(staticTextPayload));
+  if (existingTemplate) {
+    formData.append('template_id', String(existingTemplate.id));
+  }
+
+  try {
+    let response = await fetch('/api/pdf-templates/builder/save', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]')?.content || '') },
+      body: formData
+    });
+    let result = await response.json();
+
+    if (!response.ok && response.status === 409) {
+      const detail = result.detail || {};
+      const warning = detail.message || 'Template conflict detected. Overwrite existing template links?';
+      if (await confirmModal(warning, { title: 'Overwrite template?', okText: 'Overwrite', danger: true })) {
+        formData.set('overwrite', 'true');
+        if (!existingTemplate && detail.existing_template_id) {
+          formData.set('template_id', String(detail.existing_template_id));
+        }
+        response = await fetch('/api/pdf-templates/builder/save', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]')?.content || '') },
+      body: formData
+    });
+        result = await response.json();
+      }
+    }
+
+    if (!response.ok) {
+      const detail = result.detail;
+      throw new Error(typeof detail === 'string' ? detail : (detail && detail.message) || 'Failed to save template');
+    }
+
+    toast(result.message, 'success');
+    window.location.href = '/admin/pdf-templates';
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function preloadExistingTemplate() {
+  if (!existingTemplate) {
+    return;
+  }
+
+  document.getElementById('template-name').value = existingTemplate.name || '';
+  editModeBanner.classList.remove('hidden');
+  editModeBanner.textContent = `Editing template #${existingTemplate.id}. Save will update this template.`;
+
+  const selectedTrailerIds = new Set(existingTemplate.trailer_type_ids || []);
+  document.querySelectorAll('.trailer-select').forEach((checkbox) => {
+    checkbox.checked = selectedTrailerIds.has(Number(checkbox.value));
+  });
+
+  const existingPositions = (existingTemplate.template && existingTemplate.template.overlay_positions) || {};
+  Object.entries(existingPositions).forEach(([fieldName, config]) => {
+    placedFields[fieldName] = {
+      label: getFieldLabel(fieldName),
+      x: Math.round(Number(config.x || 0) * renderScale),
+      yPdf: Math.round(Number(config.y || 0) * renderScale),
+      page: Number(config.page || 0),
+      fontSize: Number(config.font_size || config.fontSize || 10),
+      color: config.color || '#000000',
+      align: config.align || 'left',
+    };
+  });
+  renderConfiguredFields();
+
+  const existingStatic = (existingTemplate.template && existingTemplate.template.static_text) || [];
+  existingStatic.forEach((s) => {
+    const id = s.id || makeStaticId();
+    staticTexts[id] = {
+      id,
+      text: s.text || '',
+      x: Math.round(Number(s.x || 0) * renderScale),
+      yPdf: Math.round(Number(s.y || 0) * renderScale),
+      page: Number(s.page || 0),
+      fontSize: Number(s.font_size || 10),
+      color:    s.color    || '#000000',
+      bgColor:  s.bg_color != null ? s.bg_color : '#FFFFFF',
+      align:    s.align    || 'left',
+      padX: Math.round(Number(s.pad_x || 0) * renderScale),
+      padY: Math.round(Number(s.pad_y || 0) * renderScale),
+      width:  s.width  ? Math.round(Number(s.width)  * renderScale) : null,
+      height: s.height ? Math.round(Number(s.height) * renderScale) : null,
+    };
+  });
+  renderStaticList();
+
+  try {
+    const response = await fetch(`/api/pdf-templates/${existingTemplate.id}/source-pdf`);
+    if (!response.ok) {
+      throw new Error('Could not load existing template PDF');
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    pdfDocument = await pdfjsLib.getDocument({ data: bytes }).promise;
+    totalPages = pdfDocument.numPages;
+    currentPage = 1;
+    await renderPDFPage(currentPage);
+    previewMeta.textContent = `Editing ${existingTemplate.name}`;
+    pdfStatus.textContent = 'Loaded existing template PDF. Upload another PDF if you want to replace it.';
+  } catch (error) {
+    pdfStatus.textContent = error.message;
+  }
+}
+
+if (existingTemplate) {
+  if (window.pdfjsLib) {
+    preloadExistingTemplate();
+  } else {
+    pdfjsScript.addEventListener('load', preloadExistingTemplate);
+  }
+}
+</script>
+{% endblock %}

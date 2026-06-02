@@ -1,0 +1,196 @@
+{% extends "pdf_templates/base.html" %}
+
+{% block content %}
+<!-- Page 1: Main specifications -->
+<div class="position-relative">
+    <!-- Background image if needed -->
+    {% if background_image %}
+    <img src="{{ background_image }}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; opacity: 0.1;">
+    {% endif %}
+
+    <!-- Header -->
+    <div class="header">
+        <h1>{{ trailer_name }} COSTING REPORT</h1>
+        <div class="subtitle">Report #{{ record_id }} | {{ created_at.strftime('%d %B %Y') }}</div>
+    </div>
+
+    <!-- Precise positioned data overlay -->
+    <div class="data-overlay explosive-trailer-type">
+        RE: {{ trailer_name }}
+    </div>
+
+    <div class="data-overlay explosive-length">
+        Length: {{ dimensions.length }} m
+    </div>
+
+    <div class="data-overlay explosive-width">
+        Width: {{ dimensions.width }} m
+    </div>
+
+    <div class="data-overlay explosive-height">
+        Height: {{ dimensions.height }} m
+    </div>
+
+    <div class="data-overlay explosive-price">
+        PRICE: R {{ "%.2f"|format(result.grand_total) }}
+    </div>
+
+    <!-- Additional specifications -->
+    <div style="margin-top: 350pt;">
+        <h3 style="color: #388BFD; margin-bottom: 10pt;">TECHNICAL SPECIFICATIONS</h3>
+
+        <table class="data-table">
+            <tr>
+                <th>Parameter</th>
+                <th>Value</th>
+                <th>Parameter</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>External Length</td>
+                <td>{{ dimensions.length }} m</td>
+                <td>Internal Length</td>
+                <td>{{ "%.2f"|format(dimensions.length - 0.2) }} m</td>
+            </tr>
+            <tr>
+                <td>External Width</td>
+                <td>{{ dimensions.width }} m</td>
+                <td>Internal Width</td>
+                <td>{{ "%.2f"|format(dimensions.width - 0.2) }} m</td>
+            </tr>
+            <tr>
+                <td>External Height</td>
+                <td>{{ dimensions.height }} m</td>
+                <td>Internal Height</td>
+                <td>{{ "%.2f"|format(dimensions.height - 0.3) }} m</td>
+            </tr>
+            <tr>
+                <td>Number of Axles</td>
+                <td>{{ dimensions.num_axles }}</td>
+                <td>Number of Doors</td>
+                <td>{{ dimensions.num_doors }}</td>
+            </tr>
+        </table>
+    </div>
+</div>
+
+<!-- Page 2: Material Breakdown -->
+<div class="page-break">
+    <div class="header">
+        <h1>MATERIAL BREAKDOWN</h1>
+        <div class="subtitle">{{ trailer_name }} | Report #{{ record_id }}</div>
+    </div>
+
+    <table class="data-table" style="margin-top: 30pt;">
+        <thead>
+            <tr>
+                <th style="width: 15%;">Category</th>
+                <th style="width: 25%;">Material</th>
+                <th style="width: 15%;">Formula</th>
+                <th style="width: 10%;">Quantity</th>
+                <th style="width: 10%;">Unit</th>
+                <th style="width: 12%;">Unit Price</th>
+                <th style="width: 13%;">Line Cost</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in result.items %}
+            <tr>
+                <td>{{ item.category }}</td>
+                <td>{{ item.material[:25] }}{% if item.material|length > 25 %}...{% endif %}</td>
+                <td style="font-size: 8pt;">{{ item.formula[:15] }}{% if item.formula|length > 15 %}...{% endif %}</td>
+                <td class="text-right">{{ "%.2f"|format(item.quantity) }}</td>
+                <td>{{ item.unit }}</td>
+                <td class="text-right">R {{ "%.2f"|format(item.unit_price) }}</td>
+                <td class="text-right font-bold">R {{ "%.2f"|format(item.line_cost) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Page 3: Cost Summary -->
+<div class="page-break">
+    <div class="header">
+        <h1>COST SUMMARY</h1>
+        <div class="subtitle">{{ trailer_name }} | Report #{{ record_id }}</div>
+    </div>
+
+    <div style="margin-top: 50pt;">
+        <table class="data-table" style="max-width: 400pt; margin: 0 auto;">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th class="text-right">Total Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for category, total in result.category_totals.items() %}
+                <tr>
+                    <td>{{ category }}</td>
+                    <td class="text-right font-bold">R {{ "%.2f"|format(total) }}</td>
+                </tr>
+                {% endfor %}
+                <tr style="border-top: 2pt solid #388BFD;">
+                    <td colspan="2" style="height: 10pt;"></td>
+                </tr>
+                <tr>
+                    <td><strong>Cost per m²</strong></td>
+                    <td class="text-right font-bold">R {{ "%.2f"|format(result.cost_per_sqm) }}</td>
+                </tr>
+                <tr style="background: #388BFD; color: white;">
+                    <td><strong>TOTAL MANUFACTURING COST</strong></td>
+                    <td class="text-right font-bold" style="font-size: 12pt;">R {{ "%.2f"|format(result.grand_total) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Summary box -->
+    <div class="summary-box" style="margin-top: 50pt;">
+        <h3 style="margin: 0 0 15pt 0; color: #388BFD;">FINAL QUOTATION</h3>
+        <div class="total-price">
+            R {{ "%.2f"|format(result.grand_total) }}
+        </div>
+        <p style="margin: 10pt 0 0 0; font-size: 9pt; color: #666;">
+            This quotation is valid for 30 days from {{ created_at.strftime('%d %B %Y') }}
+        </p>
+    </div>
+</div>
+
+<!-- Page 4: Terms and Conditions -->
+<div class="page-break">
+    <div class="header">
+        <h1>TERMS AND CONDITIONS</h1>
+        <div class="subtitle">{{ trailer_name }} | Report #{{ record_id }}</div>
+    </div>
+
+    <div style="margin-top: 50pt; line-height: 1.6;">
+        <h3 style="color: #388BFD; margin-bottom: 15pt;">Payment Terms</h3>
+        <ul style="margin: 0 0 20pt 20pt;">
+            <li>50% deposit required upon order confirmation</li>
+            <li>50% balance due before delivery</li>
+            <li>All payments to be made in South African Rand</li>
+        </ul>
+
+        <h3 style="color: #388BFD; margin-bottom: 15pt;">Delivery Terms</h3>
+        <ul style="margin: 0 0 20pt 20pt;">
+            <li>Delivery within 8-12 weeks from deposit receipt</li>
+            <li>Delivery to customer's specified location</li>
+            <li>Customer responsible for offloading</li>
+        </ul>
+
+        <h3 style="color: #388BFD; margin-bottom: 15pt;">Warranty</h3>
+        <ul style="margin: 0 0 20pt 20pt;">
+            <li>12 month structural warranty</li>
+            <li>6 month component warranty</li>
+            <li>Warranty void if modifications made without approval</li>
+        </ul>
+    </div>
+
+    <div class="footer">
+        <p>This document is confidential and intended solely for the addressee.</p>
+        <p>Generated on {{ created_at.strftime('%d %B %Y at %H:%M') }} by {{ user.username if user else 'System' }}</p>
+    </div>
+</div>
+{% endblock %}

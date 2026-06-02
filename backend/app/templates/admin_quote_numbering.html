@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Quote Numbering{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Quote Numbering{% endblock %}
+
+{% block content %}
+<style>
+  .qn-grid { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+  .qn-card {
+    background: var(--bg-panel,#161b22); border:1px solid var(--border,#30363d);
+    border-radius:8px; padding:18px;
+  }
+  .qn-card h3 {
+    color: var(--blue-hi,#58a6ff); text-transform:uppercase; letter-spacing:1px;
+    font-size:11px; margin: 0 0 12px; border-bottom:1px solid var(--border,#30363d);
+    padding-bottom:6px;
+  }
+  .qn-row { margin-bottom:14px; }
+  .qn-row label { display:block; font-size:11px; color:var(--text-dim,#8b949e);
+                  text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+  .qn-row input {
+    width:100%; padding:8px 10px; background:#0d1117; color:#c9d1d9;
+    border:1px solid var(--border,#30363d); border-radius:6px;
+    font-family: var(--font-mono); font-size:13px;
+  }
+  .qn-preview {
+    background:#0d1117; border:1px dashed var(--border,#30363d); border-radius:6px;
+    padding:10px 12px; font-family: var(--font-mono); font-size:14px; color:#3fb950;
+    min-height: 22px;
+  }
+  .qn-help { color: var(--text-dim,#8b949e); font-size:12px; line-height:1.5; }
+  .qn-help code { background:#0d1117; padding:1px 5px; border-radius:3px;
+                  border:1px solid var(--border,#30363d); color:#79c0ff; }
+  .qn-actions { display:flex; gap:8px; margin-top:12px; }
+  .qn-status { font-size:12px; }
+  .qn-status.ok  { color:#3fb950; }
+  .qn-status.err { color:#f85149; }
+  .ph-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .ph-list code { cursor:pointer; }
+  .ph-list code:hover { background:#1e2638; }
+</style>
+
+<div class="qn-grid">
+  <!-- Settings -->
+  <div class="qn-card">
+    <h3>Format Template</h3>
+    <div class="qn-row">
+      <label for="qn-template">Template</label>
+      <input id="qn-template" type="text" value="{{ counter.format_template }}" />
+    </div>
+    <div class="qn-row">
+      <label>Live preview (sample: Burt / 2547 / EXPLOSIVE)</label>
+      <div class="qn-preview" id="qn-preview">…</div>
+      <div id="qn-status" class="qn-status"></div>
+    </div>
+
+    <h3 style="margin-top:18px">Counter</h3>
+    <div class="qn-row">
+      <label for="qn-next">Next value (this number is used on the very next save)</label>
+      <input id="qn-next" type="number" min="1" value="{{ counter.next_value }}" />
+    </div>
+
+    <div class="qn-actions">
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+      <button class="btn btn-secondary" onclick="loadSettings()">Reload</button>
+    </div>
+    <div id="qn-save-status" class="qn-status" style="margin-top:8px"></div>
+  </div>
+
+  <!-- Help -->
+  <div class="qn-card">
+    <h3>Placeholders</h3>
+    <div class="qn-help">
+      Click a placeholder to insert it into the template:
+      <div class="ph-list" id="ph-list">
+        {% for p in placeholders %}<code onclick="insertPh('{{ p }}')">{{ '{' + p + '}' }}</code>{% endfor %}
+      </div>
+    </div>
+
+    <h3 style="margin-top:18px">Notes</h3>
+    <div class="qn-help">
+      <ul style="padding-left:18px;margin:0;line-height:1.8">
+        <li>The counter is <strong>global</strong> — every saved quote increments it by one, regardless of user.</li>
+        <li>A quote number is <strong>assigned once</strong> on first save and never changes — re-saves keep the original.</li>
+        <li>Changing the template only affects quotes numbered <strong>after</strong> the change.</li>
+        <li>Use Python format specs for padding, e.g. <code>{{ '{counter:04d}' }}</code> → 2547 becomes <code>2547</code>, 7 becomes <code>0007</code>.</li>
+        <li>Default template is <code>{{ '{user_initial}{counter}/{month}/{year}' }}</code> producing <code>B2547/04/2026</code>.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+async function api(method, url, data) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (data !== undefined) opts.body = JSON.stringify(data);
+  const res = await fetch(url, opts);
+  const txt = await res.text();
+  let j; try { j = txt ? JSON.parse(txt) : {}; } catch { j = {raw: txt}; }
+  if (!res.ok) throw new Error(j.detail || j.error || `HTTP ${res.status}`);
+  return j;
+}
+
+async function refreshPreview() {
+  const tpl = document.getElementById('qn-template').value;
+  const status = document.getElementById('qn-status');
+  const pv = document.getElementById('qn-preview');
+  try {
+    const r = await api('POST', '/api/quote-numbering/preview', {format_template: tpl});
+    if (r.ok) { pv.textContent = r.preview; status.className='qn-status ok'; status.textContent='Template OK.'; }
+    else      { pv.textContent = '—';        status.className='qn-status err'; status.textContent = r.error; }
+  } catch(e) {
+    status.className='qn-status err'; status.textContent = e.message;
+  }
+}
+
+function insertPh(name) {
+  const el = document.getElementById('qn-template');
+  const start = el.selectionStart || el.value.length;
+  const end   = el.selectionEnd   || el.value.length;
+  const ins = '{' + name + '}';
+  el.value = el.value.slice(0, start) + ins + el.value.slice(end);
+  el.focus();
+  el.selectionStart = el.selectionEnd = start + ins.length;
+  refreshPreview();
+}
+
+async function loadSettings() {
+  const r = await api('GET', '/api/quote-numbering');
+  document.getElementById('qn-template').value = r.format_template;
+  document.getElementById('qn-next').value     = r.next_value;
+  document.getElementById('qn-preview').textContent = r.preview;
+  document.getElementById('qn-status').textContent = '';
+}
+
+async function saveSettings() {
+  const tpl  = document.getElementById('qn-template').value;
+  const next = parseInt(document.getElementById('qn-next').value, 10);
+  const status = document.getElementById('qn-save-status');
+  status.className = 'qn-status'; status.textContent = 'Saving…';
+  try {
+    const r = await api('PUT', '/api/quote-numbering',
+                        {format_template: tpl, next_value: next});
+    document.getElementById('qn-preview').textContent = r.preview;
+    status.className = 'qn-status ok'; status.textContent = 'Saved.';
+  } catch(e) {
+    status.className = 'qn-status err'; status.textContent = 'Failed: ' + e.message;
+  }
+}
+
+document.getElementById('qn-template').addEventListener('input', refreshPreview);
+refreshPreview();
+</script>
+{% endblock %}

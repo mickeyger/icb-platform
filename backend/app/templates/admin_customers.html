@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}Customers{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Customers{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary btn-sm" onclick="openModal('modal-add-customer')">+ Add Customer</button>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Customer List</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <input class="form-control" id="search-input" placeholder="Search…"
+        oninput="filterTable()" style="width:220px;padding:5px 10px;font-size:12px"/>
+      <label style="font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="show-inactive" onchange="filterTable()" style="width:14px;height:14px"/>
+        Show inactive
+      </label>
+      <span id="cust-count" style="font-size:11px;color:var(--text-dim)"></span>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table id="cust-table">
+      <thead>
+        <tr>
+          <th style="width:40px;text-align:center">Active</th>
+          <th>BP Code</th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Telephone</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="cust-tbody">
+        <tr><td colspan="6" style="text-align:center;padding:24px">
+          <span class="spinner"></span> Loading…
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Add Customer Modal ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-add-customer">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Add Customer</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-add-customer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">BP Code</label>
+          <input class="form-control" id="add-bp-code" placeholder="e.g. C-TRU001"/>
+        </div>
+        <div class="form-group" style="flex:2">
+          <label class="form-label">Customer Name *</label>
+          <input class="form-control" id="add-name" placeholder="Company or person name"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-control" id="add-email" type="email" placeholder="optional"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Telephone</label>
+        <input class="form-control" id="add-telephone" placeholder="optional"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <input type="checkbox" id="add-active" checked style="width:15px;height:15px"/>
+        <label for="add-active" style="font-size:13px;cursor:pointer">Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-customer')">Cancel</button>
+      <button class="btn btn-primary" onclick="addCustomer()">Add Customer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit Customer Modal ────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-edit-customer">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Edit Customer</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-edit-customer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-cust-id"/>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">BP Code</label>
+          <input class="form-control" id="edit-bp-code"/>
+        </div>
+        <div class="form-group" style="flex:2">
+          <label class="form-label">Customer Name *</label>
+          <input class="form-control" id="edit-name"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input class="form-control" id="edit-email" type="email"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Telephone</label>
+        <input class="form-control" id="edit-telephone"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+        <input type="checkbox" id="edit-active" style="width:15px;height:15px"/>
+        <label for="edit-active" style="font-size:13px;cursor:pointer">Active</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="deleteCustomer()">Delete</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-outline" onclick="closeModal('modal-edit-customer')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCustomer()">Save</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allCustomers = [];
+
+async function loadCustomers() {
+  try {
+    allCustomers = await api('GET', '/api/customers');
+    filterTable();
+  } catch(e) { toast('Failed to load customers: ' + e.message, 'error'); }
+}
+
+function filterTable() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  const showInactive = document.getElementById('show-inactive').checked;
+  const filtered = allCustomers.filter(c => {
+    // Unchecked = active customers only; Checked = inactive customers only
+    if (showInactive ? c.is_active : !c.is_active) return false;
+    if (!q) return true;
+    return (c.name.toLowerCase().includes(q) ||
+            c.bp_code.toLowerCase().includes(q) ||
+            c.email.toLowerCase().includes(q));
+  });
+  renderTable(filtered);
+}
+
+function renderTable(custs) {
+  const tbody = document.getElementById('cust-tbody');
+  document.getElementById('cust-count').textContent = custs.length + ' customers';
+  if (!custs.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-dim)">No customers found</td></tr>';
+    return;
+  }
+  tbody.innerHTML = custs.map(c => `
+    <tr style="${!c.is_active ? 'opacity:0.45' : ''}">
+      <td style="text-align:center">
+        <input type="checkbox" ${c.is_active ? 'checked' : ''}
+          onchange="toggleActive(${c.id}, this.checked)"
+          style="width:15px;height:15px;cursor:pointer"/>
+      </td>
+      <td class="td-mono" style="color:var(--text-dim);font-size:11px">${escHtml(c.bp_code)}</td>
+      <td style="font-weight:500">${escHtml(c.name)}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${escHtml(c.email)}</td>
+      <td style="font-size:12px;color:var(--text-dim)">${escHtml(c.telephone)}</td>
+      <td class="td-actions">
+        <button class="btn btn-outline btn-sm" onclick="openEdit(${c.id})">Edit</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function toggleActive(id, active) {
+  try {
+    await api('PUT', `/api/customers/${id}`, { is_active: active });
+    const c = allCustomers.find(x => x.id === id);
+    if (c) c.is_active = active;
+    filterTable();
+  } catch(e) { toast(e.message, 'error'); loadCustomers(); }
+}
+
+async function addCustomer() {
+  const name = document.getElementById('add-name').value.trim();
+  if (!name) { toast('Customer name is required', 'error'); return; }
+  try {
+    const c = await api('POST', '/api/customers', {
+      bp_code:   document.getElementById('add-bp-code').value.trim(),
+      name,
+      email:     document.getElementById('add-email').value.trim(),
+      telephone: document.getElementById('add-telephone').value.trim(),
+      is_active: document.getElementById('add-active').checked,
+    });
+    allCustomers.push(c);
+    allCustomers.sort((a,b) => a.name.localeCompare(b.name));
+    filterTable();
+    closeModal('modal-add-customer');
+    document.getElementById('add-name').value = '';
+    document.getElementById('add-bp-code').value = '';
+    document.getElementById('add-email').value = '';
+    document.getElementById('add-telephone').value = '';
+    document.getElementById('add-active').checked = true;
+    toast('Customer added', 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openEdit(id) {
+  const c = allCustomers.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('edit-cust-id').value  = c.id;
+  document.getElementById('edit-bp-code').value  = c.bp_code;
+  document.getElementById('edit-name').value     = c.name;
+  document.getElementById('edit-email').value    = c.email;
+  document.getElementById('edit-telephone').value= c.telephone;
+  document.getElementById('edit-active').checked = c.is_active;
+  openModal('modal-edit-customer');
+}
+
+async function saveCustomer() {
+  const id   = +document.getElementById('edit-cust-id').value;
+  const name = document.getElementById('edit-name').value.trim();
+  if (!name) { toast('Customer name is required', 'error'); return; }
+  try {
+    const updated = await api('PUT', `/api/customers/${id}`, {
+      bp_code:   document.getElementById('edit-bp-code').value.trim(),
+      name,
+      email:     document.getElementById('edit-email').value.trim(),
+      telephone: document.getElementById('edit-telephone').value.trim(),
+      is_active: document.getElementById('edit-active').checked,
+    });
+    const idx = allCustomers.findIndex(x => x.id === id);
+    if (idx >= 0) allCustomers[idx] = updated;
+    filterTable();
+    closeModal('modal-edit-customer');
+    toast('Saved', 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteCustomer() {
+  const id = +document.getElementById('edit-cust-id').value;
+  if (!await confirmModal('Delete this customer? This cannot be undone.', { title: 'Delete customer', okText: 'Delete', danger: true })) return;
+  try {
+    await api('DELETE', `/api/customers/${id}`);
+    allCustomers = allCustomers.filter(x => x.id !== id);
+    filterTable();
+    closeModal('modal-edit-customer');
+    toast('Customer deleted', 'success');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadCustomers();
+</script>
+{% endblock %}

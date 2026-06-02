@@ -1,0 +1,788 @@
+{% extends "base.html" %}
+{% block title %}Trailer Templates{% endblock %}
+{% block head %}
+<style>
+  /* ── Trailer list view modes ──────────────────────────── */
+  .tt-view-btn { padding:3px 8px; font-size:13px; line-height:1; }
+  .tt-view-btn.active { background:rgba(56,139,253,.2); color:var(--blue); border-color:var(--blue); }
+
+  /* Tile view */
+  .tt-tile { transition:border-color .15s, background .15s; }
+  .tt-tile:hover { border-color:var(--blue) !important; background:rgba(56,139,253,.06) !important; }
+  .tt-tile.selected { border-color:var(--blue) !important; background:rgba(56,139,253,.14) !important; }
+
+  /* Details view */
+  .tt-details-row:hover td { background:var(--bg-panel); }
+  .tt-details-row.selected td { background:rgba(56,139,253,.12); }
+  .tt-details-row td { transition:background .12s; }
+</style>
+<link rel="stylesheet" href="/static/css/driver.css"/>
+{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Trailer Templates{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-outline btn-sm" onclick="openModal('modal-import-sheet')" title="Import trailer type from Excel sheet">⇩ Import from Excel</button>
+  <button class="btn btn-primary btn-sm" onclick="openModal('modal-add-trailer')">+ New Body Type</button>
+{% endblock %}
+
+{% block content %}
+<script type="application/json" id="help-page-context">{"page":"body_templates","description":"Body Templates admin — left list of body types, right pane shows the selected body's BOM grouped by section. Add/edit BOM items, sections, options here."}</script>
+<div style="display:grid;grid-template-columns:260px 1fr;gap:16px;min-height:75vh">
+
+  <!-- Left: Trailer list -->
+  <div class="card" style="display:flex;flex-direction:column;max-height:80vh">
+    <div class="panel-header">
+      <span>Body Types <span id="tt-count" style="font-size:10px;color:var(--text-dim)"></span></span>
+      <div style="display:flex;gap:2px">
+        <button class="btn btn-icon tt-view-btn" data-view="list"    title="List view"    onclick="setTTView('list')">≡</button>
+        <button class="btn btn-icon tt-view-btn" data-view="tiles"   title="Tiles view"   onclick="setTTView('tiles')">⊞</button>
+        <button class="btn btn-icon tt-view-btn" data-view="details" title="Details view" onclick="setTTView('details')">≣</button>
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:8px" id="trailer-list">
+      <div style="color:var(--text-dim);font-size:12px;padding:12px;text-align:center">
+        <span class="spinner"></span> Loading…
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: BOM editor -->
+  <div class="card" style="display:flex;flex-direction:column;max-height:80vh">
+    <div class="panel-header">
+      <span id="bom-title">Select a trailer type</span>
+      <div style="display:flex;gap:6px;align-items:center" id="bom-actions">
+        <button class="btn btn-outline btn-sm hidden" id="btn-rename" onclick="renameTrailer()">Rename</button>
+        <button class="btn btn-outline btn-sm hidden" id="btn-dup" onclick="duplicateTrailer()">Duplicate</button>
+        <button class="btn btn-danger btn-sm hidden" id="btn-del" onclick="deleteTrailer()">Delete Type</button>
+        <button class="btn btn-outline btn-sm" id="btn-mark-radio" onclick="markSelectedBOMRadio()"
+          title="Make the selected rows mutually-exclusive radio choices on the calculator"
+          style="display:none">◉ Mark as radio</button>
+        <button class="btn btn-outline btn-sm" id="btn-mark-checkbox" onclick="markSelectedBOMMulti()"
+          title="Make the selected rows independent tick-box choices on the calculator"
+          style="display:none">☑ Mark as tick boxes</button>
+        <button class="btn btn-outline btn-sm" id="btn-mark-always" onclick="markSelectedBOMAlways()"
+          title="Reset the selected rows back to always-include"
+          style="display:none">↺ Reset to always</button>
+        <button class="btn btn-danger btn-sm" id="btn-del-selected" onclick="deleteSelectedBOM()"
+          style="display:none">Delete Selected (<span id="sel-count">0</span>)</button>
+        <button class="btn btn-outline btn-sm hidden" id="btn-bom-sort" onclick="toggleBOMSort()"
+          style="font-size:11px;letter-spacing:.5px">A–Z</button>
+        <button class="btn btn-outline btn-sm hidden" id="btn-collapse-all" onclick="toggleCollapseAll()"
+          style="font-size:11px">Collapse All</button>
+        <button class="btn btn-primary btn-sm hidden" id="btn-add-bom" onclick="openAddBOM()">+ Add Item</button>
+      </div>
+    </div>
+    <!-- Default dimensions bar -->
+    <div id="dims-bar" class="hidden" style="padding:10px 16px;background:var(--bg-panel);
+      border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+        color:var(--text-dim);white-space:nowrap">Default Dimensions</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--text-dim)">Length (m)</label>
+        <input type="number" id="tt-length" class="form-control" step="0.1" min="0"
+          style="width:80px;padding:4px 8px;font-size:12px" placeholder="—"
+          onchange="saveDimensions()"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--text-dim)">Width (m)</label>
+        <input type="number" id="tt-width" class="form-control" step="0.05" min="0"
+          style="width:72px;padding:4px 8px;font-size:12px" placeholder="—"
+          onchange="saveDimensions()"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <label style="font-size:11px;color:var(--text-dim)">Height (m)</label>
+        <input type="number" id="tt-height" class="form-control" step="0.05" min="0"
+          style="width:72px;padding:4px 8px;font-size:12px" placeholder="—"
+          onchange="saveDimensions()"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:8px;
+        padding-left:12px;border-left:1px solid var(--border)">
+        <label style="font-size:11px;color:var(--text-dim);white-space:nowrap">Markup %</label>
+        <input type="number" id="tt-markup" class="form-control" step="0.5" min="0" max="100"
+          style="width:72px;padding:4px 8px;font-size:12px" placeholder="0"
+          onchange="saveDimensions()"/>
+      </div>
+      <span id="dims-saved" style="font-size:11px;color:var(--green);opacity:0;
+        transition:opacity .4s">✓ Saved</span>
+      <!-- Phase 3 per-trailer opt-in for the Configurator's new gating logic. -->
+      <label style="display:inline-flex;align-items:center;gap:6px;margin-left:auto;
+        padding:4px 10px;border:1px solid var(--border);border-radius:4px;cursor:pointer;
+        font-size:11px;color:var(--text-dim);user-select:none" id="tt-cfgv2-label"
+        title="When ON, the calculator honours the Configurator's new gating rules
+        (Unassigned tray, top-level gates, per-item conditions) for this trailer.
+        OFF = legacy gating only. Toggleable for gradual rollout.">
+        <input type="checkbox" id="tt-cfgv2" style="cursor:pointer;accent-color:var(--blue)"
+          onchange="saveConfiguratorV2()"/>
+        <span>Use Configurator v2 logic</span>
+      </label>
+    </div>
+    <div style="flex:1;overflow-y:auto" id="bom-wrap">
+      <div style="padding:24px;color:var(--text-dim);font-size:13px;text-align:center">
+        Select a trailer type from the list to view and edit its bill of materials.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Body Type Modal ─────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-add-trailer">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">New Body Type</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-add-trailer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Body Type Name</label>
+        <input class="form-control" id="new-tt-name" placeholder="e.g. Flatdeck Trailer"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input class="form-control" id="new-tt-desc"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-trailer')">Cancel</button>
+      <button class="btn btn-primary" onclick="addTrailerType()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add BOM Item Modal ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-add-bom">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title">Add BOM Item</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-add-bom')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Step 1: Find material -->
+      <div style="background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:12px;margin-bottom:12px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:8px">Step 1 — Select Material</div>
+        <div class="form-row" style="margin-bottom:8px">
+          <div class="form-group" style="margin-bottom:0">
+            <select id="bom-cat-filter" onchange="filterBomMats()" style="font-size:12px">
+              <option value="">All Categories</option>
+              {% for c in categories %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <input class="form-control" id="bom-mat-search" placeholder="Search…"
+              oninput="filterBomMats()" style="font-size:12px"/>
+          </div>
+        </div>
+        <select id="bom-mat-select" size="7" style="width:100%;font-size:12px;
+          background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);
+          color:var(--text);padding:4px" onchange="onMatSelected()">
+        </select>
+        <div id="selected-mat-info" style="margin-top:6px;font-size:12px;color:var(--text-dim);
+          font-family:var(--font-mono);min-height:18px"></div>
+      </div>
+
+      <!-- Step 2: Section -->
+      <div class="form-group">
+        <label class="form-label">BOM Section</label>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <select id="bom-section" class="form-control" style="font-size:12px;flex:1">
+            <option value="">— pick a section —</option>
+          </select>
+          <button type="button" class="btn btn-outline" style="font-size:11px;white-space:nowrap"
+            onclick="createBOMSection('bom-section')">+ New</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Formula & options -->
+      <div>
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:8px">Step 3 — Quantity Formula</div>
+        <div class="form-group">
+          <label class="form-label">Formula Expression</label>
+          <input class="form-control" id="bom-formula" value="1"
+            placeholder="e.g. length * width  or  num_axles * 4"/>
+          <div class="form-hint">
+            Variables: length, width, height, wall_area, roof_area, floor_area,
+            surface_area, total_panel_area, num_axles, num_doors, insulation_thickness
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Waste / Overage %</label>
+            <input class="form-control" type="number" id="bom-waste" value="0" min="0" max="100"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <input class="form-control" id="bom-notes" placeholder="Optional note"/>
+          </div>
+        </div>
+        <!-- Formula quick-picks -->
+        <div style="margin-top:4px">
+          <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Quick formulas:</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            {% for f in ['1','num_axles','num_axles * 4','num_axles * 2','num_doors',
+              'num_doors * 4','length','length * 2','length * 4','wall_area',
+              'roof_area','floor_area','surface_area','total_panel_area',
+              'surface_area * insulation_thickness'] %}
+            <code onclick="document.getElementById('bom-formula').value='{{ f }}'"
+              style="cursor:pointer;background:var(--bg-input);border:1px solid var(--border);
+              padding:2px 7px;border-radius:3px;font-size:11px;color:var(--blue-hi)">{{ f }}</code>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add-bom')">Cancel</button>
+      <button class="btn btn-primary" onclick="addBOMItem()">Add to BOM</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit BOM Item Modal ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-edit-bom">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-bom-title">Edit BOM Item</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-edit-bom')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-bom-id"/>
+      <input type="hidden" id="edit-bom-mat-id"/>
+
+      <!-- Phase 2 transition notice: body-option fields below are still editable
+           here, but the Configurator is the authoritative editor going forward.
+           When the configurator is fully production-ready, this modal will
+           switch the body-option fields to read-only. -->
+      <div style="background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.35);
+                  border-radius:var(--radius);padding:8px 12px;margin-bottom:14px;
+                  font-size:12px;line-height:1.45;display:flex;gap:8px;align-items:flex-start;">
+        <span style="color:var(--blue-hi);font-size:14px;line-height:1">ℹ</span>
+        <span style="color:var(--text)">
+          Body options, gates and inclusion rules are now managed in the
+          <a href="/admin/configurator-preview" target="_blank" rel="noopener"
+             style="color:var(--blue-hi);text-decoration:underline;font-weight:500">Body Configurator</a>.
+          Editing the body-option fields below still works as a fallback, but
+          changes may diverge from the Configurator's gate structure — prefer
+          the Configurator for new work.
+        </span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Material Name</label>
+        <input class="form-control" id="edit-bom-mat-name-input" type="text"
+          placeholder="Material name" autocomplete="off"/>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="edit-bom-mat-info"></div>
+      </div>
+      <div class="form-group" id="edit-bom-replace-row">
+        <label class="form-label">Replace with
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400;margin-left:4px">— swap to another material from the same category</span>
+        </label>
+        <select id="edit-bom-replace-select" class="form-control" style="font-size:12px"
+          onchange="onBomReplaceSelect(this)">
+          <option value="">— keep current —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">BOM Section</label>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <select id="edit-bom-section" class="form-control" style="font-size:12px;flex:1">
+            <option value="">— pick a section —</option>
+          </select>
+          <button type="button" class="btn btn-outline" style="font-size:11px;white-space:nowrap"
+            onclick="createBOMSection('edit-bom-section')">+ New</button>
+        </div>
+      </div>
+      <!-- Calculator 2 default exclusion -->
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+          <input type="checkbox" id="edit-bom-calc2-excluded"
+            style="width:15px;height:15px;cursor:pointer;accent-color:var(--red)"/>
+          <span class="form-label" style="margin:0">Exclude from Calculator 2 by default</span>
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400">
+            — the exclude tick starts ON in Calculator 2, leaving this row out of the costing
+          </span>
+        </label>
+      </div>
+      <!-- Body-option rows: read-only legacy "Linked items" list. Shown only
+           when the row is already flagged is_body_option. Body options are
+           defined in the Body Configurator, not from this modal. -->
+      <div id="edit-bom-opt-fields" style="display:none">
+        <div class="form-group" id="edit-bom-linked-from-row">
+          <label class="form-label">Linked items
+            <span style="font-size:10px;color:var(--text-dim);font-weight:400;margin-left:4px">
+              — BOM rows that activate when this option is selected on the calculator
+            </span>
+          </label>
+          <div id="edit-bom-linked-from-list"
+            style="font-size:11px;padding:6px 8px;background:var(--bg-input);
+              border:1px solid var(--border);border-radius:3px;min-height:24px"></div>
+        </div>
+      </div>
+      <!-- Editable value input for Body Variable rows -->
+      <div class="form-group js-show-for-variable" id="edit-bom-variable-readonly" style="display:none">
+        <label class="form-label">Variable value (m)</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" step="0.001" min="0"
+            id="edit-bom-variable-value-input"
+            class="form-control"
+            style="font-family:var(--font-mono);font-size:14px;color:#58a6ff;background:#0d2140;border:1px solid #388bfd;max-width:160px"/>
+          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">
+            token: <code id="edit-bom-variable-token-display" style="color:#58a6ff">{NAME}</code>
+          </span>
+        </div>
+        <div class="form-hint" style="margin-top:6px">
+          Stays in sync with the value shown in the calculator's Body Options panel. Reference in BOM formulas as <code>{NAME}</code>.
+        </div>
+      </div>
+      <div class="form-group js-hide-for-variable">
+        <label class="form-label">Formula</label>
+        <input class="form-control" id="edit-bom-formula"/>
+        <div class="form-hint">
+          Variables: length, width, height, wall_area, roof_area, floor_area,
+          surface_area, total_panel_area, num_axles, num_doors, insulation_thickness
+        </div>
+        <div id="edit-bom-var-chips" style="display:none;margin-top:6px">
+          <div style="font-size:10px;color:var(--text-dim);letter-spacing:.5px;margin-bottom:4px">
+            BODY VARIABLES — highlight a number in the formula above, then click a chip to replace it
+          </div>
+          <div id="edit-bom-var-chips-list" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+        </div>
+      </div>
+      <div class="form-row js-hide-for-variable">
+        <div class="form-group">
+          <label class="form-label">Waste %</label>
+          <input class="form-control" type="number" id="edit-bom-waste" min="0"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <input class="form-control" id="edit-bom-notes"/>
+        </div>
+      </div>
+      <!-- Skin formula pricing -->
+      <div class="form-group js-hide-for-variable" style="border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:0">
+          <input type="checkbox" id="edit-bom-skin-toggle"
+            onchange="onSkinFormulaToggle(this.checked)"
+            style="width:15px;height:15px;cursor:pointer;accent-color:var(--blue)"/>
+          <span class="form-label" style="margin:0">Price from Skin Formula</span>
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400">
+            — computed cost per m² replaces material price
+          </span>
+        </label>
+        <div id="edit-bom-skin-fields" style="display:none;margin-top:10px">
+          <div class="form-row" style="margin-bottom:0">
+            <div class="form-group" style="flex:3">
+              <label class="form-label" style="font-size:11px">Formula</label>
+              <select class="form-control" id="edit-bom-skin-formula-id" style="font-size:12px"
+                onchange="onSkinFormulaChange()">
+                <option value="">— select a skin formula —</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label class="form-label" style="font-size:11px">Region</label>
+              <select class="form-control" id="edit-bom-skin-region" style="font-size:12px"
+                onchange="onSkinFormulaChange()">
+                <option value="standard">Standard</option>
+                <option value="kzn">KZN</option>
+                <option value="sap">SAP</option>
+              </select>
+            </div>
+          </div>
+          <div id="edit-bom-skin-cost" style="font-size:12px;color:var(--text-dim);margin-top:4px;font-family:var(--font-mono)"></div>
+        </div>
+      </div>
+      <!-- Taping block pricing -->
+      <div class="form-group js-hide-for-variable" style="border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:0">
+          <input type="checkbox" id="edit-bom-taping-toggle"
+            onchange="onTapingBlockToggle(this.checked)"
+            style="width:15px;height:15px;cursor:pointer;accent-color:var(--amber,#f0a500)"/>
+          <span class="form-label" style="margin:0">Price from Taping Block</span>
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400">
+            — cost per block replaces material price
+          </span>
+        </label>
+        <div id="edit-bom-taping-fields" style="display:none;margin-top:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label" style="font-size:11px">Taping Block</label>
+            <select class="form-control" id="edit-bom-taping-block-id" style="font-size:12px"
+              onchange="onTapingBlockChange()">
+              <option value="">— select a taping block —</option>
+            </select>
+          </div>
+          <div id="edit-bom-taping-cost" style="font-size:12px;color:var(--text-dim);margin-top:4px;font-family:var(--font-mono)"></div>
+        </div>
+      </div>
+      <!-- Floor plate pricing -->
+      <div class="form-group js-hide-for-variable" style="border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:0">
+          <input type="checkbox" id="edit-bom-floor-toggle"
+            onchange="onFloorPlateToggle(this.checked)"
+            style="width:15px;height:15px;cursor:pointer;accent-color:#3d9970"/>
+          <span class="form-label" style="margin:0">⊞ Price from Floor Plate</span>
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400">
+            — assembly cost replaces material price
+          </span>
+        </label>
+        <div id="edit-bom-floor-fields" style="display:none;margin-top:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label" style="font-size:11px">Floor Plate Assembly</label>
+            <select class="form-control" id="edit-bom-floor-plate-id" style="font-size:12px"
+              onchange="onFloorPlateChange()">
+              <option value="">— select a floor plate —</option>
+            </select>
+          </div>
+          <div id="edit-bom-floor-cost" style="font-size:12px;color:var(--text-dim);margin-top:4px;font-family:var(--font-mono)"></div>
+        </div>
+      </div>
+      <!-- Mounting cleat pricing -->
+      <div class="form-group js-hide-for-variable" style="border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:0">
+          <input type="checkbox" id="edit-bom-cleat-toggle"
+            onchange="onMountingCleatToggle(this.checked)"
+            style="width:15px;height:15px;cursor:pointer;accent-color:#4a90d9"/>
+          <span class="form-label" style="margin:0">⊟ Price from Mounting Cleat</span>
+          <span style="font-size:10px;color:var(--text-dim);font-weight:400">
+            — assembly cost replaces material price
+          </span>
+        </label>
+        <div id="edit-bom-cleat-fields" style="display:none;margin-top:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label" style="font-size:11px">Mounting Cleat Assembly</label>
+            <select class="form-control" id="edit-bom-mounting-cleat-id" style="font-size:12px"
+              onchange="onMountingCleatChange()">
+              <option value="">— select a mounting cleat —</option>
+            </select>
+          </div>
+          <div id="edit-bom-cleat-cost" style="font-size:12px;color:var(--text-dim);margin-top:4px;font-family:var(--font-mono)"></div>
+        </div>
+      </div>
+      <!-- Quick picks -->
+      <div style="margin-top:4px">
+        <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">Quick formulas:</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          {% for f in ['1','num_axles','num_axles * 4','num_doors','num_doors * 4',
+            'length','length * 2','length * 4','wall_area','roof_area','floor_area',
+            'surface_area','total_panel_area','surface_area * insulation_thickness'] %}
+          <code onclick="document.getElementById('edit-bom-formula').value='{{ f }}'"
+            style="cursor:pointer;background:var(--bg-input);border:1px solid var(--border);
+            padding:2px 7px;border-radius:3px;font-size:11px;color:var(--blue-hi)">{{ f }}</code>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="deleteBOMItem()">Remove</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-outline" onclick="closeModal('modal-edit-bom')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBOMItem()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Copy BOM Item(s) to Another Body Type Modal ─────────────── -->
+<div class="modal-backdrop hidden" id="modal-copy-bom-to-trailer">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title">Copy to Another Body Type</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-copy-bom-to-trailer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">
+        Select the items to copy and the body type to copy them into. Items already
+        present in the target are disabled.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Items to copy</label>
+        <div id="copy-bom-items-list" style="display:flex;flex-direction:column;gap:6px;
+          background:var(--bg-panel);border:1px solid var(--border);border-radius:var(--radius);
+          padding:8px 10px"></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Target body type</label>
+        <select id="copy-bom-target" class="form-control" style="font-size:12px"
+          onchange="onCopyBOMTargetChanged()">
+          <option value="">— select a body type —</option>
+        </select>
+        <div id="copy-bom-target-hint" style="font-size:11px;color:var(--text-dim);
+          margin-top:6px;min-height:14px"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-copy-bom-to-trailer')">Cancel</button>
+      <button class="btn btn-primary" id="copy-bom-confirm-btn"
+        onclick="confirmCopyBOMToTrailer()">Copy</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Link Section to Body Option Modal ─────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-link-section-to-option">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title">Link Section to Body Option</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-link-section-to-option')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+        Every regular item in <b><span id="link-sec-name"></span></b>
+        (<span id="link-sec-count">0</span> items) will get its
+        <code>body_option_linked</code> pointed at the option you choose below.
+        Rows already linked to a different option are skipped.
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="link-sec-mode" id="link-sec-mode-existing" value="existing"
+                 onchange="onLinkSecModeChange()" checked>
+          Use an existing body option on this trailer
+        </label>
+        <select id="link-sec-existing" class="form-control" style="font-size:12px;margin-top:6px"></select>
+        <div id="link-sec-existing-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px;min-height:14px"></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="radio" name="link-sec-mode" id="link-sec-mode-new" value="new"
+                 onchange="onLinkSecModeChange()">
+          Create a new body option
+        </label>
+        <div id="link-sec-new-fields" style="margin-top:6px;display:none">
+          <input type="text" id="link-sec-new-name" class="form-control"
+                 style="font-size:13px;margin-bottom:6px" placeholder="Body option name">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);cursor:pointer">
+            <input type="checkbox" id="link-sec-new-default" checked>
+            Selected by default on new quotes
+          </label>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:6px">
+            Group: <code><span id="link-sec-new-group"></span></code>
+            (taken from the section name; you can rename it later on the row)
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-link-section-to-option')">Cancel</button>
+      <button class="btn btn-primary" id="link-sec-confirm-btn" onclick="confirmLinkSectionToOption()">Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Link Section to Body Option · Result Modal ─────────────────── -->
+<div class="modal-backdrop hidden" id="modal-link-section-result">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="link-result-title">Link Section to Body Option</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-link-section-result')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="link-result-summary" style="font-size:13px;color:var(--text);margin-bottom:12px;line-height:1.5"></div>
+      <div id="link-result-skipped-wrap" style="display:none">
+        <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">
+          Skipped <span id="link-result-skip-count">0</span>
+        </div>
+        <div id="link-result-skipped" style="font-size:12px;background:var(--bg-panel);border:1px solid var(--border);
+          border-radius:var(--radius);padding:8px 12px;max-height:240px;overflow:auto;font-family:var(--font-mono)"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end">
+      <button class="btn btn-primary" style="min-width:80px"
+        onclick="closeModal('modal-link-section-result')">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Import from Excel Sheet Modal ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-import-sheet">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <span class="modal-title">⇩ Import Body Type from Excel Sheet</span>
+      <button class="btn btn-icon" onclick="closeImportModal()">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Step 1: File + Sheet -->
+      <div id="import-step-1">
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+          Paste the full path to an Excel workbook and select a sheet to parse.
+          Only sections with a non-zero TOTAL are imported.
+        </div>
+        <div class="form-group">
+          <label class="form-label">Excel file path</label>
+          <input class="form-control" id="import-excel-path" type="text"
+            placeholder="C:\Users\...\GRP Costings 2018.xlsx" autocomplete="off"/>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <div class="form-group" style="flex:1;margin:0">
+            <label class="form-label">Sheet name</label>
+            <select class="form-control" id="import-sheet-name" style="font-size:12px">
+              <option value="">— load sheets first —</option>
+            </select>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="loadSheetList()" style="margin-bottom:2px">Load Sheets</button>
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label class="form-label">Trailer type name <span style="color:var(--text-dim)">(leave blank to use sheet name)</span></label>
+          <input class="form-control" id="import-tt-name" type="text" placeholder="e.g. UP TO 2.3 CHILLER BODY"/>
+        </div>
+      </div>
+
+      <!-- Step 2: Preview -->
+      <div id="import-step-2" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--text-head)" id="import-preview-title"></span>
+          <button class="btn btn-outline btn-sm" onclick="showImportStep(1)">← Change</button>
+        </div>
+        <div style="display:flex;gap:16px;margin-bottom:10px;font-size:12px">
+          <span>Defaults: <strong id="import-dims"></strong></span>
+          <span>Sections: <strong id="import-sect-count"></strong></span>
+          <span>Items: <strong id="import-item-count"></strong></span>
+          <span style="color:var(--text-dim)">Skipped: <span id="import-skipped"></span></span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:auto;max-height:320px">
+          <table style="width:100%;font-size:11px;border-collapse:collapse" id="import-preview-table">
+            <thead>
+              <tr style="background:var(--bg-panel);position:sticky;top:0">
+                <th style="padding:6px 10px;text-align:left;color:var(--text-dim)">Section / Material</th>
+                <th style="padding:6px 10px;text-align:left;color:var(--text-dim)">Formula</th>
+                <th style="padding:6px 10px;text-align:right;color:var(--text-dim)">Price</th>
+                <th style="padding:6px 10px;text-align:left;color:var(--text-dim)">UOM</th>
+                <th style="padding:6px 10px;text-align:right;color:var(--text-dim)">Sect. Total</th>
+              </tr>
+            </thead>
+            <tbody id="import-preview-body"></tbody>
+          </table>
+        </div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+          <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="import-replace"> Replace if trailer name already exists
+          </label>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-footer" id="import-footer">
+      <button class="btn btn-outline" onclick="closeImportModal()">Cancel</button>
+      <button class="btn btn-primary" id="import-action-btn" onclick="runImportAction()">Preview</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/admin_templates.js?v=15"></script>
+<script src="/static/js/driver.js.iife.js"></script>
+<script>
+(function () {
+  const params  = new URLSearchParams(window.location.search);
+  if (params.get('tour') !== 'skin-unlink') return;
+
+  const ttId    = parseInt(params.get('tt')) || null;
+  const rawType = params.get('type');
+  const type    = rawType === 'taping' ? 'taping' : rawType === 'floor' ? 'floor' : rawType === 'cleat' ? 'cleat' : 'skin';
+  const backUrl = params.get('back') ? decodeURIComponent(params.get('back')) : null;
+
+  const isSkin   = type === 'skin';
+  const isFloor  = type === 'floor';
+  const isCleat  = type === 'cleat';
+  const badgeHtml = isSkin
+    ? '<b style="color:#58a6ff">◎ SKIN</b>'
+    : isFloor
+      ? '<b style="color:#3d9970">⊞ FLOOR</b>'
+      : isCleat
+        ? '<b style="color:#4a90d9">⊟ CLEAT</b>'
+        : '<b style="color:#f0a500">⊡ TAPING</b>';
+  const toggleId   = isSkin ? '#edit-bom-skin-toggle' : isFloor ? '#edit-bom-floor-toggle' : isCleat ? '#edit-bom-cleat-toggle' : '#edit-bom-taping-toggle';
+  const dropdownId = isSkin ? '#edit-bom-skin-fields' : isFloor ? '#edit-bom-floor-fields' : isCleat ? '#edit-bom-cleat-fields' : '#edit-bom-taping-fields';
+  const badgeGone  = isSkin ? '◎ SKIN' : isFloor ? '⊞ FLOOR' : isCleat ? '⊟ CLEAT' : '⊡ TAPING';
+
+  function waitFor(check, cb, attempts) {
+    if (attempts <= 0) return;
+    if (check()) { cb(); return; }
+    setTimeout(() => waitFor(check, cb, attempts - 1), 150);
+  }
+
+  function launchTour() {
+    if (ttId && typeof selectTrailer === 'function' && trailerMap[ttId]) {
+      selectTrailer(ttId);
+    }
+
+    const driverObj = window.driver.js.driver({
+      showProgress: true,
+      allowClose: true,
+      nextBtnText: 'Next →',
+      prevBtnText: '← Back',
+      doneBtnText: backUrl ? '← Back to Quote' : 'Done ✓',
+      onDestroyStarted: () => {
+        driverObj.destroy();
+        if (backUrl) window.location.href = backUrl;
+      },
+      onNextClick: () => {
+        const idx = driverObj.getActiveIndex();
+        // Step 1 (BOM): guard — edit modal must be open before advancing
+        if (idx === 1) {
+          const modal = document.getElementById('modal-edit-bom');
+          if (!modal || modal.classList.contains('hidden')) {
+            if (typeof toast === 'function')
+              toast('Click Edit on a ' + badgeGone + ' item first, then click Next →', 'info');
+            return;
+          }
+        }
+        driverObj.moveNext();
+      },
+      steps: [
+        {
+          element: '#trailer-list',
+          popover: {
+            title: '① Select your trailer type',
+            description: 'The trailer type is already highlighted. If not, click it in this panel to load its BOM on the right.',
+            side: 'right',
+            align: 'start',
+          },
+        },
+        {
+          element: '#bom-wrap',
+          popover: {
+            title: '② Find the item with the ' + badgeGone + ' badge',
+            description: 'Scroll through the BOM to find the item — it shows a ' + badgeHtml + ' badge. Click the <b>Edit</b> button on that row to open the dialog, then click Next →',
+            side: 'top',
+            align: 'start',
+          },
+        },
+        {
+          element: toggleId,
+          popover: {
+            title: '③ Uncheck to unlink',
+            description: 'Click this checkbox to <b>uncheck</b> it. This removes the ' + (isSkin ? 'skin formula' : isFloor ? 'floor plate' : isCleat ? 'mounting cleat' : 'taping block') + ' link — the item will revert to its standard material price.',
+            side: 'bottom',
+            align: 'start',
+          },
+        },
+        {
+          element: '#modal-edit-bom .btn-primary',
+          popover: {
+            title: '④ Save the change',
+            description: 'Click <b>Save Changes</b>. The ' + badgeGone + ' badge will disappear from this BOM row.',
+            side: 'top',
+            align: 'end',
+          },
+        },
+      ],
+    });
+
+    driverObj.drive();
+  }
+
+  waitFor(
+    () => typeof trailerMap !== 'undefined' && Object.keys(trailerMap).length > 0,
+    launchTour,
+    40
+  );
+})();
+</script>
+{% endblock %}

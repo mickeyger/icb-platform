@@ -1,0 +1,2337 @@
+{% extends "base.html" %}
+{% block title %}Body Designer{% endblock %}
+
+{% block head %}
+<style>
+/* ── Layout ────────────────────────────────────────────────────── */
+.designer-wrap {
+  display: grid;
+  grid-template-columns: 260px 1fr 310px;
+  gap: 12px;
+  height: calc(100vh - 116px);
+  overflow: hidden;
+}
+.designer-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel-head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.panel-body { flex: 1; overflow-y: auto; }
+
+/* ── Material palette ───────────────────────────────────────────── */
+.palette-search {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.mat-card {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; margin: 0 6px 3px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; cursor: grab; user-select: none;
+  transition: border-color .15s, background .15s;
+}
+.mat-card:hover  { border-color: var(--blue); background: var(--bg-card); }
+.mat-card.dragging { opacity: .45; }
+.mat-card-name   { font-size: 11px; color: var(--text); flex: 1; min-width: 0;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mat-card-unit   { font-size: 9px; color: var(--text-dim); white-space: nowrap; }
+.mat-card-price  { font-size: 9px; color: var(--blue-hi); font-family: var(--font-mono); white-space: nowrap; }
+.drag-grip       { color: var(--text-dim); font-size: 12px; cursor: grab; }
+
+/* ── SVG container ──────────────────────────────────────────────── */
+.svg-wrap {
+  padding: 16px 16px 8px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#trailer-svg { width: 100%; height: auto; display: block; }
+
+/* Zone hit-areas */
+.zone-hit {
+  cursor: pointer;
+  transition: all .18s;
+}
+.zone-hit rect.zone-fill {
+  transition: opacity .18s, filter .18s;
+  opacity: .18;
+}
+.zone-hit:hover rect.zone-fill  { opacity: .42; }
+.zone-hit.active rect.zone-fill { opacity: .70; filter: drop-shadow(0 0 6px var(--zc,#888)); }
+.zone-hit text { pointer-events: none; font-family: var(--font-sans); }
+
+/* ── Zone legend bar ────────────────────────────────────────────── */
+#zone-legend {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 8px 14px; flex-shrink: 0;
+}
+.legend-chip {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer; font-size: 10px;
+  transition: border-color .15s, background .15s;
+}
+.legend-chip:hover  { border-color: var(--border-hi); }
+.legend-chip.active { border-color: var(--zc, #888); background: rgba(255,255,255,.05); }
+.legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.legend-count {
+  background: rgba(255,255,255,.1); border-radius: 10px;
+  padding: 0 5px; font-size: 9px; color: var(--text-dim);
+}
+
+/* ── Zone detail bar (below SVG) ────────────────────────────────── */
+#zone-detail-bar {
+  padding: 10px 14px; font-size: 11px; color: var(--text-dim);
+  border-top: 1px solid var(--border); flex-shrink: 0;
+  min-height: 38px;
+}
+
+/* ── Drop overlay on SVG zone ───────────────────────────────────── */
+.zone-hit.drag-over rect.zone-fill { opacity: .85 !important; }
+
+/* ── Zone config panel ──────────────────────────────────────────── */
+#zone-config-body { padding: 12px; }
+.zone-empty-state {
+  text-align: center; padding: 40px 20px;
+  color: var(--text-dim); font-size: 12px; line-height: 1.8;
+}
+.zone-section-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 12px 0 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.zone-drop-target {
+  min-height: 48px; border: 1.5px dashed var(--border);
+  border-radius: 5px; padding: 8px;
+  font-size: 11px; color: var(--text-dim);
+  text-align: center; transition: border-color .15s, background .15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.zone-drop-target.drag-over {
+  border-color: var(--blue); background: rgba(56,139,253,.08);
+  color: var(--blue);
+}
+.bo-item, .bom-item {
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 4px; padding: 7px 8px; margin-bottom: 4px;
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11px;
+}
+.bo-item { align-items: center; }
+.bo-item .mat-name  { flex: 1; font-size: 11px; min-width: 0;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bom-item .mat-name { font-size: 11px; font-weight: 500; color: var(--text); }
+.subgroup-badge {
+  font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  color: var(--blue-hi); white-space: nowrap;
+}
+.btn-rm {
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px;
+  transition: color .12s; flex-shrink: 0;
+}
+.btn-rm:hover { color: var(--red); }
+
+/* ── Cost-preview click → left panel focus flash ───────────────── */
+@keyframes itemFlash {
+  0%   { box-shadow: 0 0 0 2px var(--blue); background: rgba(56,139,253,.22); }
+  80%  { box-shadow: 0 0 0 2px var(--blue); background: rgba(56,139,253,.08); }
+  100% { box-shadow: none; background: var(--bg-input); }
+}
+.item-flash { animation: itemFlash 1s ease-out forwards; }
+.cp-bo-row:hover td, .cp-bom-row:hover td { background: rgba(255,255,255,.04); cursor: pointer; }
+
+.mini-input {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text); font-size: 10px;
+  padding: 2px 5px; outline: none; transition: border-color .12s;
+}
+.mini-input:focus { border-color: var(--blue); }
+
+/* ── Inline add forms ───────────────────────────────────────────── */
+.inline-add-form {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 5px; padding: 10px; margin-top: 6px;
+}
+
+/* ── Zone accordion (right panel) ───────────────────────────────── */
+.zone-section {
+  border: 1px solid var(--border); border-radius: 6px;
+  margin-bottom: 5px; overflow: hidden;
+  transition: border-color .15s;
+}
+.zone-section.active { border-color: var(--zc, var(--border)); }
+.zone-section-hdr {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px; cursor: pointer; user-select: none;
+  background: var(--bg-input); transition: background .15s;
+}
+.zone-section-hdr:hover { background: var(--bg-card); }
+.zone-section.active .zone-section-hdr { background: rgba(255,255,255,.03); }
+.zone-section-body {
+  padding: 8px 10px; border-top: 1px solid var(--border);
+}
+.zone-collapsed-summary {
+  padding: 3px 10px 5px; font-size: 10px; color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ── BOM Inspector ──────────────────────────────────────────── */
+#bom-inspector {
+  border: 1.5px dashed var(--border);
+  border-radius: 5px;
+  margin: 0 14px 8px;
+  padding: 9px 12px;
+  transition: border-color .15s, background .15s;
+  flex-shrink: 0;
+  min-height: 50px;
+}
+#bom-inspector.drag-over {
+  border-color: var(--blue);
+  background: rgba(56,139,253,.07);
+}
+#bom-inspector.has-item {
+  border-style: solid;
+  border-color: var(--border-hi, #4a5568);
+}
+.inspector-hint {
+  text-align: center; font-size: 11px; color: var(--text-dim);
+  padding: 4px 0; pointer-events: none;
+}
+.inspector-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px 18px; margin-top: 8px;
+}
+.inspector-field { display: flex; flex-direction: column; gap: 2px; }
+.inspector-lbl {
+  font-size: 9px; font-weight: 700; letter-spacing: .8px;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.inspector-val { font-size: 12px; color: var(--text); }
+
+/* ── Centre toasts on this page ────────────────────────────────── */
+#toast-container {
+  top: auto !important;
+  bottom: 28px !important;
+  right: 0 !important;
+  left: 0 !important;
+  transform: none !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  align-items: center !important;
+}
+
+/* ── Cost Preview ───────────────────────────────────────────────── */
+#cost-preview {
+  flex: 1; overflow: hidden;           /* total stays pinned at bottom */
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+#cost-preview-body { flex: 1; overflow-y: auto; min-height: 0; }
+.cp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px 4px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.cp-zone-hd {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px 4px;
+  background: var(--bg-input);
+  border-top: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 1;
+}
+.cp-tbl { width: 100%; border-collapse: collapse; }
+.cp-tbl td { padding: 2px 8px; vertical-align: middle; font-size: 10px; }
+.cp-sub-lbl td {
+  padding: 4px 8px 1px 14px !important;
+  font-size: 9px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--text-dim);
+}
+.cp-bo-row td:first-child { padding-left: 18px !important; color: var(--text); }
+.cp-bom-row td:first-child { padding-left: 18px !important; color: var(--text); font-weight: 500; }
+.cp-meta { color: var(--text-dim) !important; font-size: 9px !important; white-space: nowrap; }
+.cp-price {
+  text-align: right; white-space: nowrap;
+  color: var(--blue-hi, #58a6ff) !important;
+  font-family: var(--font-mono) !important;
+}
+.cp-subtotal td {
+  border-top: 1px solid var(--border);
+  padding-top: 4px !important; padding-bottom: 5px !important;
+  color: var(--text-dim); font-size: 10px;
+}
+.cp-subtotal .cp-price { color: var(--text) !important; font-weight: 600; }
+.cp-grand {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 12px; border-top: 2px solid var(--border-hi, #4a5568);
+  flex-shrink: 0;
+}
+.cp-empty {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 16px; text-align: center;
+  font-size: 11px; color: var(--text-dim); line-height: 1.8;
+}
+
+/* ── Save modal ─────────────────────────────────────────────────── */
+.modal-backdrop { position:fixed;inset:0;background:rgba(0,0,0,.6);
+  display:flex;align-items:center;justify-content:center;z-index:1000; }
+.modal-backdrop.hidden { display:none; }
+.modal { background:var(--bg-card);border:1px solid var(--border);
+  border-radius:8px;width:460px;max-width:96vw;box-shadow:var(--shadow); }
+.modal-header { display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px;border-bottom:1px solid var(--border); }
+.modal-title { font-size:14px;font-weight:600;color:var(--text-head); }
+.modal-body   { padding:18px; }
+.modal-footer { display:flex;gap:8px;padding:14px 18px;
+  border-top:1px solid var(--border);justify-content:flex-end; }
+.form-group   { margin-bottom:12px; }
+.form-label   { display:block;font-size:11px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin-bottom:5px; }
+.form-control { width:100%;background:var(--bg-input);border:1px solid var(--border);
+  border-radius:4px;color:var(--text);font-size:13px;padding:7px 10px;
+  outline:none;box-sizing:border-box;transition:border-color .12s; }
+.form-control:focus { border-color:var(--blue); }
+.form-row { display:flex;gap:10px; }
+.form-row .form-group { flex:1; }
+</style>
+{% endblock %}
+
+{% block breadcrumb %}<strong>Admin</strong> / Body Designer{% endblock %}
+
+{% block topbar_actions %}
+  <span id="hdr-zone-label"
+    style="font-size:11px;color:var(--text-dim);letter-spacing:.5px;margin-right:4px">
+    Click a zone on the trailer to begin
+  </span>
+  <span id="hdr-type-chip" style="display:none;font-size:11px;color:var(--text-dim);
+    background:var(--bg-input);border:1px solid var(--border);border-radius:4px;
+    padding:3px 10px;cursor:pointer;margin-right:2px" onclick="openSetupModal()" title="Edit body type details">
+  </span>
+  <button class="btn btn-outline btn-sm" onclick="openResetModal()" title="Clear all zones and start fresh">↺ Reset</button>
+  <button class="btn btn-primary btn-sm" id="btn-main-action" onclick="onMainAction()">✦ Create Body Type</button>
+{% endblock %}
+
+{% block content %}
+<div class="designer-wrap">
+
+  <!-- ── LEFT: Zone Config Panel ──────────────────────────────── -->
+  <div class="designer-panel">
+    <div class="panel-head" id="zone-panel-head">Zone Configuration</div>
+    <div class="panel-body" id="zone-config-body">
+      <div class="zone-empty-state">
+        Click any zone on the trailer<br>to configure its body options<br>and BOM items.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CENTER: SVG Trailer + Legend ──────────────────────────── -->
+  <div class="designer-panel" style="overflow:hidden">
+    <div class="svg-wrap">
+      <svg id="trailer-svg" viewBox="0 0 880 295" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="hatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.06)" stroke-width="2"/>
+          </pattern>
+          <filter id="glow-f" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- ── Chassis & undercarriage ───────────────────────── -->
+        <!-- Main chassis rail -->
+        <rect x="58" y="230" width="764" height="13" rx="3" fill="#1e2530" stroke="#3a4555" stroke-width="1"/>
+        <!-- Rear overhang / bogie mount -->
+        <rect x="580" y="238" width="160" height="8" rx="2" fill="#232d3a"/>
+        <!-- Landing gear legs -->
+        <rect x="118" y="230" width="7" height="28" rx="2" fill="#2a3545"/>
+        <rect x="134" y="230" width="7" height="28" rx="2" fill="#2a3545"/>
+        <rect x="112" y="255" width="36" height="5" rx="2" fill="#2a3545"/>
+        <!-- King pin -->
+        <circle cx="95" cy="243" r="6" fill="#1a2030" stroke="#3a5070" stroke-width="1.5"/>
+        <circle cx="95" cy="243" r="2.5" fill="#4a7090"/>
+        <!-- Rear ICC bumper -->
+        <rect x="818" y="228" width="5" height="18" rx="1" fill="#2a3545"/>
+
+        <!-- Wheel bogies (rear tandem axle) -->
+        <!-- Axle beam -->
+        <rect x="598" y="250" width="156" height="5" rx="2" fill="#2a3545"/>
+        <!-- Wheels -->
+        <g opacity=".9">
+          <circle cx="618" cy="262" r="18" fill="#14191f" stroke="#2e3a4a" stroke-width="2"/>
+          <circle cx="618" cy="262" r="11" fill="#1a2030" stroke="#3a5070" stroke-width="1.5"/>
+          <circle cx="618" cy="262" r="4"  fill="#2a4060"/>
+          <circle cx="658" cy="262" r="18" fill="#14191f" stroke="#2e3a4a" stroke-width="2"/>
+          <circle cx="658" cy="262" r="11" fill="#1a2030" stroke="#3a5070" stroke-width="1.5"/>
+          <circle cx="658" cy="262" r="4"  fill="#2a4060"/>
+          <circle cx="706" cy="262" r="18" fill="#14191f" stroke="#2e3a4a" stroke-width="2"/>
+          <circle cx="706" cy="262" r="11" fill="#1a2030" stroke="#3a5070" stroke-width="1.5"/>
+          <circle cx="706" cy="262" r="4"  fill="#2a4060"/>
+          <circle cx="746" cy="262" r="18" fill="#14191f" stroke="#2e3a4a" stroke-width="2"/>
+          <circle cx="746" cy="262" r="11" fill="#1a2030" stroke="#3a5070" stroke-width="1.5"/>
+          <circle cx="746" cy="262" r="4"  fill="#2a4060"/>
+        </g>
+
+        <!-- ── Trailer body background ─────────────────────── -->
+        <rect x="60" y="45" width="760" height="185" rx="3"
+          fill="url(#hatch)" stroke="#2e3a4a" stroke-width="1.5"/>
+
+        <!-- ── INTERACTIVE ZONES ────────────────────────────── -->
+
+        <!-- FRONT WALL -->
+        <g class="zone-hit" id="zone-FRONT" style="--zc:#8b5cf6"
+           onclick="selectZone('FRONT')"
+           ondragover="onSvgDragOver(event,'FRONT')"
+           ondrop="onSvgDrop(event,'FRONT')"
+           ondragleave="onSvgDragLeave(event,'FRONT')">
+          <rect x="60" y="45" width="60" height="185" rx="3" class="zone-fill" fill="#8b5cf6" stroke="#8b5cf6" stroke-width="1.5"/>
+          <!-- Insulation cross-section hint lines -->
+          <line x1="72" y1="55" x2="108" y2="55" stroke="rgba(139,92,246,.3)" stroke-width="1"/>
+          <line x1="72" y1="65" x2="108" y2="65" stroke="rgba(139,92,246,.3)" stroke-width="1"/>
+          <line x1="72" y1="75" x2="108" y2="75" stroke="rgba(139,92,246,.3)" stroke-width="1"/>
+          <text x="90" y="140" text-anchor="middle" font-size="9" fill="rgba(255,255,255,.7)"
+            font-weight="600" letter-spacing="1" transform="rotate(-90,90,140)">FRONT</text>
+        </g>
+
+        <!-- ROOF -->
+        <g class="zone-hit" id="zone-ROOF" style="--zc:#3b82f6"
+           onclick="selectZone('ROOF')"
+           ondragover="onSvgDragOver(event,'ROOF')"
+           ondrop="onSvgDrop(event,'ROOF')"
+           ondragleave="onSvgDragLeave(event,'ROOF')">
+          <rect x="120" y="45" width="630" height="42" class="zone-fill" fill="#3b82f6" stroke="#3b82f6" stroke-width="1.5"/>
+          <!-- Rivet dots -->
+          <circle cx="135" cy="55" r="1.5" fill="rgba(59,130,246,.5)"/>
+          <circle cx="155" cy="55" r="1.5" fill="rgba(59,130,246,.5)"/>
+          <circle cx="725" cy="55" r="1.5" fill="rgba(59,130,246,.5)"/>
+          <circle cx="735" cy="55" r="1.5" fill="rgba(59,130,246,.5)"/>
+          <text x="435" y="72" text-anchor="middle" font-size="9" fill="rgba(255,255,255,.7)"
+            font-weight="600" letter-spacing="2">ROOF</text>
+        </g>
+
+        <!-- SIDES (main panel) -->
+        <g class="zone-hit" id="zone-SIDES" style="--zc:#10b981"
+           onclick="selectZone('SIDES')"
+           ondragover="onSvgDragOver(event,'SIDES')"
+           ondrop="onSvgDrop(event,'SIDES')"
+           ondragleave="onSvgDragLeave(event,'SIDES')">
+          <rect x="120" y="87" width="630" height="101" class="zone-fill" fill="#10b981" stroke="#10b981" stroke-width="1.5"/>
+          <!-- Panel joint lines (subtle) -->
+          <line x1="120" y1="117" x2="750" y2="117" stroke="rgba(16,185,129,.15)" stroke-width="1"/>
+          <line x1="120" y1="157" x2="750" y2="157" stroke="rgba(16,185,129,.15)" stroke-width="1"/>
+          <!-- Panel bolts -->
+          <circle cx="130" cy="97"  r="1.5" fill="rgba(16,185,129,.3)"/>
+          <circle cx="130" cy="137" r="1.5" fill="rgba(16,185,129,.3)"/>
+          <circle cx="130" cy="177" r="1.5" fill="rgba(16,185,129,.3)"/>
+          <circle cx="740" cy="97"  r="1.5" fill="rgba(16,185,129,.3)"/>
+          <circle cx="740" cy="137" r="1.5" fill="rgba(16,185,129,.3)"/>
+          <circle cx="740" cy="177" r="1.5" fill="rgba(16,185,129,.3)"/>
+          <text x="435" y="142" text-anchor="middle" font-size="10" fill="rgba(255,255,255,.7)"
+            font-weight="600" letter-spacing="2">SIDES</text>
+        </g>
+
+        <!-- FLOOR -->
+        <g class="zone-hit" id="zone-FLOOR" style="--zc:#f59e0b"
+           onclick="selectZone('FLOOR')"
+           ondragover="onSvgDragOver(event,'FLOOR')"
+           ondrop="onSvgDrop(event,'FLOOR')"
+           ondragleave="onSvgDragLeave(event,'FLOOR')">
+          <rect x="120" y="188" width="630" height="42" class="zone-fill" fill="#f59e0b" stroke="#f59e0b" stroke-width="1.5"/>
+          <!-- Floor tread hints -->
+          <line x1="140" y1="208" x2="730" y2="208" stroke="rgba(245,158,11,.2)" stroke-width="1.5" stroke-dasharray="8,6"/>
+          <text x="435" y="214" text-anchor="middle" font-size="9" fill="rgba(255,255,255,.7)"
+            font-weight="600" letter-spacing="2">FLOOR</text>
+        </g>
+
+        <!-- DRD (upper rear door) -->
+        <g class="zone-hit" id="zone-DRD" style="--zc:#ef4444"
+           onclick="selectZone('DRD')"
+           ondragover="onSvgDragOver(event,'DRD')"
+           ondrop="onSvgDrop(event,'DRD')"
+           ondragleave="onSvgDragLeave(event,'DRD')">
+          <rect x="750" y="45" width="70" height="93" rx="2" class="zone-fill" fill="#ef4444" stroke="#ef4444" stroke-width="1.5"/>
+          <!-- Door reveal lines -->
+          <line x1="783" y1="50"  x2="783" y2="136" stroke="rgba(239,68,68,.4)" stroke-width="1"/>
+          <line x1="753" y1="77"  x2="818" y2="77"  stroke="rgba(239,68,68,.15)" stroke-width="1"/>
+          <!-- Door hinge marks -->
+          <rect x="752" y="57"  width="4" height="8" rx="1" fill="rgba(239,68,68,.3)"/>
+          <rect x="752" y="115" width="4" height="8" rx="1" fill="rgba(239,68,68,.3)"/>
+          <!-- Handle -->
+          <rect x="812" y="86" width="4" height="12" rx="2" fill="rgba(239,68,68,.4)"/>
+          <text x="785" y="75" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.7)"
+            font-weight="600" letter-spacing=".5">DRD</text>
+        </g>
+
+        <!-- SRD (Single Rear Door) -->
+        <g class="zone-hit" id="zone-SRD" style="--zc:#f97316"
+           onclick="selectZone('SRD')"
+           ondragover="onSvgDragOver(event,'SRD')"
+           ondrop="onSvgDrop(event,'SRD')"
+           ondragleave="onSvgDragLeave(event,'SRD')">
+          <rect x="750" y="138" width="70" height="92" rx="2" class="zone-fill" fill="#f97316" stroke="#f97316" stroke-width="1.5"/>
+          <!-- Door reveal lines -->
+          <line x1="783" y1="140" x2="783" y2="228" stroke="rgba(249,115,22,.4)" stroke-width="1"/>
+          <line x1="753" y1="183" x2="818" y2="183" stroke="rgba(249,115,22,.15)" stroke-width="1"/>
+          <rect x="752" y="148" width="4" height="8" rx="1" fill="rgba(249,115,22,.3)"/>
+          <rect x="752" y="208" width="4" height="8" rx="1" fill="rgba(249,115,22,.3)"/>
+          <rect x="812" y="178" width="4" height="12" rx="2" fill="rgba(249,115,22,.4)"/>
+          <text x="785" y="170" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.7)"
+            font-weight="600" letter-spacing=".5">SRD</text>
+        </g>
+
+        <!-- ── Outer body border overlay ──────────────────────── -->
+        <rect x="60" y="45" width="760" height="185" rx="3"
+          fill="none" stroke="#3e4f65" stroke-width="1.5"/>
+
+        <!-- Zone divider lines (on top of body) -->
+        <line x1="120" y1="45"  x2="120" y2="230" stroke="#3e4f65" stroke-width="1" stroke-dasharray="3,3"/>
+        <line x1="750" y1="45"  x2="750" y2="230" stroke="#3e4f65" stroke-width="1" stroke-dasharray="3,3"/>
+        <line x1="120" y1="87"  x2="750" y2="87"  stroke="#3e4f65" stroke-width="1" stroke-dasharray="3,3"/>
+        <line x1="120" y1="188" x2="750" y2="188" stroke="#3e4f65" stroke-width="1" stroke-dasharray="3,3"/>
+        <line x1="750" y1="138" x2="820" y2="138" stroke="#3e4f65" stroke-width="1" stroke-dasharray="3,3"/>
+      </svg>
+    </div>
+
+    <!-- BOM Item Inspector -->
+    <div id="bom-inspector"
+      ondragover="onInspectorDragOver(event)"
+      ondrop="onInspectorDrop(event)"
+      ondragleave="onInspectorDragLeave(event)">
+      <div class="inspector-hint" id="inspector-hint">⬇ Drop any material here to inspect its full detail</div>
+      <div id="inspector-content" style="display:none"></div>
+    </div>
+
+    <!-- Zone legend chips -->
+    <div id="zone-legend"></div>
+
+    <!-- Hint / status bar -->
+    <div id="zone-detail-bar">
+      Select a zone above — or drag any material from the palette directly onto the trailer.
+    </div>
+
+    <!-- ── Cost Calculator Preview ──────────────────────────── -->
+    <div id="cost-preview">
+      <div class="cp-head">
+        <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim)">✦ Cost Preview</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button onclick="expandAllCp()"  style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-dim);cursor:pointer;font-size:9px;padding:2px 7px;line-height:1.4" title="Expand all zones">⊞ All</button>
+          <button onclick="collapseAllCp()" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-dim);cursor:pointer;font-size:9px;padding:2px 7px;line-height:1.4" title="Collapse all zones">⊟ All</button>
+        </div>
+      </div>
+      <div id="cost-preview-body" style="flex:1;min-height:0"></div>
+      <div id="cost-preview-total" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- ── RIGHT: Material Palette ─────────────────────────────────── -->
+  <div class="designer-panel">
+    <div class="panel-head">Material Palette — drag onto trailer</div>
+    <div class="palette-search">
+      <input class="form-control" id="pal-search" type="search"
+        placeholder="Search materials…" oninput="filterPalette()"
+        style="font-size:12px;padding:5px 8px"/>
+      <select class="form-control" id="pal-cat" onchange="filterPalette()"
+        style="font-size:11px;padding:4px 6px">
+        <option value="">All categories</option>
+        {% for c in categories %}
+        <option value="{{ c.name }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="panel-body" id="palette-list">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+</div><!-- /.designer-wrap -->
+
+<!-- ── Body Type Setup Modal (shown on load & re-opened to edit) ── -->
+<div class="modal-backdrop" id="modal-setup">
+  <div class="modal" style="width:500px">
+    <div class="modal-header">
+      <span class="modal-title" id="setup-modal-title">✦ Create Body Type</span>
+    </div>
+    <div class="modal-body">
+      <!-- Mode toggle -->
+      <div style="display:flex;border:1px solid var(--border);border-radius:5px;overflow:hidden;margin-bottom:14px;flex-shrink:0">
+        <button id="setup-tab-new" onclick="setSetupTab('new')"
+          style="flex:1;padding:7px;font-size:11px;font-weight:600;border:none;cursor:pointer;
+            background:var(--blue);color:#fff;transition:background .15s">
+          ✦ New Design
+        </button>
+        <button id="setup-tab-dup" onclick="setSetupTab('dup')"
+          style="flex:1;padding:7px;font-size:11px;font-weight:600;border:none;cursor:pointer;
+            background:var(--bg-input);color:var(--text-dim);transition:background .15s">
+          ⧉ Duplicate Existing
+        </button>
+      </div>
+
+      <!-- Duplicate picker (hidden by default) -->
+      <div id="setup-dup-section" style="display:none;margin-bottom:14px">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Select Body Type to Duplicate</label>
+          <input class="form-control" id="dup-search" type="search" placeholder="Search…"
+            oninput="filterDupList()" style="font-size:12px;padding:5px 8px;margin-bottom:5px"/>
+          <select class="form-control" id="dup-select" size="6"
+            style="height:130px;font-size:12px" onchange="onDupSelect()">
+            <option disabled selected style="color:var(--text-dim)">Loading…</option>
+          </select>
+        </div>
+        <div id="dup-loading" style="display:none;font-size:11px;color:var(--text-dim);padding:4px 0">Loading body types…</div>
+      </div>
+
+      <p id="setup-hint" style="margin:0 0 14px;font-size:12px;color:var(--text-dim);line-height:1.6">
+        Enter the body type details and dimensions first — these are used to calculate
+        material quantities in the live cost preview as you build up each zone.
+      </p>
+      <div class="form-group">
+        <label class="form-label">Body Type Name <span style="color:var(--red)">*</span></label>
+        <input class="form-control" id="setup-name" placeholder="e.g. STANDARD CHILLER 6.1M"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <input class="form-control" id="setup-desc" placeholder="Optional description"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Length (m)</label>
+          <input class="form-control" id="setup-len" type="number" value="12" min="1" step="0.05" oninput="updateSetupPreview()"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Width (m)</label>
+          <input class="form-control" id="setup-wid" type="number" value="2.45" min="0.5" step="0.05" oninput="updateSetupPreview()"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Height (m)</label>
+          <input class="form-control" id="setup-hgt" type="number" value="2.2" min="0.5" step="0.05" oninput="updateSetupPreview()"/>
+        </div>
+      </div>
+      <div class="form-row" style="margin-top:8px">
+        <div class="form-group">
+          <label class="form-label">Markup %</label>
+          <input class="form-control" id="setup-markup" type="number" value="0" min="0" max="200" step="0.5" placeholder="0"/>
+        </div>
+      </div>
+      <div id="setup-dims-preview" style="margin-top:4px;padding:10px 12px;background:var(--bg-input);
+        border-radius:4px;font-size:11px;color:var(--text-dim);display:flex;gap:18px;flex-wrap:wrap"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="setup-skip-btn" onclick="closeSetupModal()">Skip for now</button>
+      <button class="btn btn-primary" onclick="confirmSetup()">Start Designing →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Save Modal (confirmation — dims come from state) ──────────── -->
+<div class="modal-backdrop hidden" id="modal-save">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">✦ Save Body Type</span>
+      <button class="btn btn-icon" onclick="closeSaveModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="save-type-info" style="padding:10px 12px;background:var(--bg-input);border-radius:4px;
+        font-size:12px;color:var(--text);margin-bottom:12px;line-height:1.8"></div>
+      <div id="save-summary" style="padding:10px;background:var(--bg-input);border-radius:4px;
+        font-size:11px;color:var(--text-dim);line-height:1.9"></div>
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <div class="form-row" style="margin-bottom:10px;align-items:flex-end">
+          <div class="form-group" style="flex:0 0 auto">
+            <label class="form-label">Markup %</label>
+            <input class="form-control" id="save-markup" type="number" min="0" max="200" step="0.5"
+              style="width:90px" value="0"/>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeSaveModal()">Cancel</button>
+      <button class="btn btn-primary" id="save-btn" onclick="saveTrailer()">✦ Save Body Type</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Reset Confirmation Modal ──────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-reset">
+  <div class="modal" style="width:400px">
+    <div class="modal-header">
+      <span class="modal-title">↺ Reset Design</span>
+      <button class="btn btn-icon" onclick="closeResetModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0;font-size:13px;color:var(--text);line-height:1.6">
+        This will clear all configured body options and BOM items across every zone.<br>
+        <span style="color:var(--red);font-weight:600">This cannot be undone.</span>
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeResetModal()">Cancel</button>
+      <button class="btn btn-primary" style="background:var(--red,#c0392b);border-color:var(--red,#c0392b)"
+        onclick="confirmReset()">↺ Reset All Zones</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Door Conflict Modal ────────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-door-conflict">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <span class="modal-title">⚠ Mutually Exclusive Door Types</span>
+      <button class="btn btn-icon" onclick="closeDoorConflictModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="door-conflict-msg" style="margin:0;font-size:13px;color:var(--text);line-height:1.7"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeDoorConflictModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmDoorConflict()">Switch &amp; Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Zone Mismatch Confirmation Modal ───────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-zone-mismatch">
+  <div class="modal" style="width:430px">
+    <div class="modal-header">
+      <span class="modal-title">⚠ Zone Mismatch</span>
+      <button class="btn btn-icon" onclick="cancelZoneDrop()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="zone-mismatch-msg" style="margin:0;font-size:13px;color:var(--text);line-height:1.7"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="cancelZoneDrop()">No, Cancel</button>
+      <button class="btn btn-primary" onclick="confirmZoneDrop()">Yes, Add Anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add Body Option Modal ─────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-add-bo">
+  <div class="modal" style="width:400px">
+    <div class="modal-header">
+      <span class="modal-title" id="add-bo-title">Add Body Option</span>
+      <button class="btn btn-icon" onclick="closeAddBo()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Material <span style="font-weight:400;color:var(--text-dim);text-transform:none">(Ctrl+click for multiple)</span></label>
+        <input class="form-control" id="add-bo-search" type="search" placeholder="Search…" oninput="filterBoMats()"/>
+        <select class="form-control" id="add-bo-mat" size="8" multiple
+          style="margin-top:6px;font-size:12px;height:150px">
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Sub-group</label>
+          <input class="form-control" id="add-bo-subgroup" list="subgroup-list"
+            placeholder="INSULATION, PLYWOOD…"/>
+          <datalist id="subgroup-list">
+            <option value="INSULATION"/>
+            <option value="PLYWOOD"/>
+            <option value="SURFACE"/>
+            <option value="HARDWARE"/>
+          </datalist>
+        </div>
+        <div class="form-group" style="flex:0 0 auto;padding-top:20px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-dim);margin-top:5px">
+            <input type="checkbox" id="add-bo-default" style="accent-color:var(--blue)"/>
+            Default selection
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeAddBo()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddBodyOption()">Add Option</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Add BOM Item Modal ────────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-add-bom">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <span class="modal-title" id="add-bom-title">Add BOM Item</span>
+      <button class="btn btn-icon" onclick="closeAddBom()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Material</label>
+        <input class="form-control" id="add-bom-search" type="search" placeholder="Search…" oninput="filterBomMats()"/>
+        <select class="form-control" id="add-bom-mat" size="5"
+          style="margin-top:6px;font-size:12px;height:110px">
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label class="form-label">Formula</label>
+          <input class="form-control" id="add-bom-formula" value="1" list="formula-list"/>
+          <datalist id="formula-list">
+            <option value="1"/><option value="floor_area"/><option value="wall_area"/>
+            <option value="roof_area"/><option value="surface_area"/>
+            <option value="length"/><option value="num_axles"/>
+            <option value="surface_area * insulation_thickness"/>
+          </datalist>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label class="form-label">Waste %</label>
+          <input class="form-control" id="add-bom-waste" type="number" value="0" min="0"/>
+        </div>
+      </div>
+      <div class="form-group" id="add-bom-link-row" style="display:none">
+        <label class="form-label">Linked Body Option <span style="font-weight:400;text-transform:none">(optional)</span></label>
+        <select class="form-control" id="add-bom-link" style="font-size:12px">
+          <option value="">— always show —</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeAddBom()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddBomItem()">Add Item</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Data ──────────────────────────────────────────────────────────────────────
+const ALL_MATS = {{ materials | tojson }};
+const BODY_OPT_MATS = {{ body_opt_mats | tojson }};
+const BODY_OPT_GROUPS = {{ body_opt_groups | tojson }};
+const BOM_SECTIONS = {{ bom_sections | tojson }};
+
+// ZONES is built from the database — no longer hardcoded.
+// Falls back to a sensible default set if the table is empty (first run).
+const _DEFAULT_ZONES = ['FRONT','ROOF','SIDES','FLOOR','DRD','SRD'];
+const ZONES = BODY_OPT_GROUPS.length
+  ? BODY_OPT_GROUPS.map(g => g.name)
+  : _DEFAULT_ZONES;
+
+// Maps bom_section_name (upper) → zone name, built from the DB-linked relationship.
+// Used by _applyDuplicate to assign structural BOM rows to the correct zone via FK.
+const _secToZone = {};
+BODY_OPT_GROUPS.forEach(g => {
+  if (g.bom_section_name) _secToZone[g.bom_section_name.toUpperCase()] = g.name;
+});
+
+const ZONE_META = {
+  FRONT: { label:'Front Wall',       color:'#8b5cf6', desc:'Front insulated wall panel & fittings' },
+  ROOF:  { label:'Roof',             color:'#3b82f6', desc:'Roof panel, insulation & external skin' },
+  SIDES: { label:'Side Panels',      color:'#10b981', desc:'Left & right side walls, insulation & skin' },
+  FLOOR: { label:'Floor',            color:'#f59e0b', desc:'Floor panel, finish & insulation' },
+  DRD:   { label:'Dual Rear Doors',  color:'#ef4444', desc:'Rear door assembly, hinges & seals' },
+  SRD:   { label:'Single Rear Door', color:'#f97316', desc:'Single rear door assembly — mutually exclusive with Dual Rear Doors' },
+};
+
+// Design state
+const state = {
+  zones: Object.fromEntries(ZONES.map(z => [z, { bodyOptions:[], bomItems:[] }])),
+  extraSections: {},   // { SECTION_NAME: { bomItems:[] } }
+  sectionOrder:  [],   // display order for extra sections
+  dims: { name:'', description:'', length:12, width:2.45, height:2.2 },
+  markup: 0,
+};
+// Which extra sections are expanded in the left panel (accordion)
+const _extSecExpanded = new Set();
+let _dimsConfirmed = false;
+let activeZone   = null;
+let _addBoZone   = null;
+let _addBomZone  = null;
+let filteredPal  = [...ALL_MATS];
+let _pendingDrop = null;
+
+// ── Formula evaluator ─────────────────────────────────────────────────────────
+// CSP-safe arithmetic parser — replaces Function()/eval which the CSP blocks
+function _mathEval(expr) {
+  const s = String(expr).replace(/\s+/g, '');
+  let pos = 0;
+
+  function primary() {
+    if (s[pos] === '(') {
+      pos++;
+      const v = addSub();
+      if (s[pos] === ')') pos++;
+      return v;
+    }
+    if (s[pos] === '-') { pos++; return -primary(); }
+    if (s[pos] === '+') { pos++; return primary(); }
+    const start = pos;
+    while (pos < s.length && /[\d.]/.test(s[pos])) pos++;
+    if (pos === start) throw new Error('Unexpected "' + (s[pos] || 'EOF') + '" at pos ' + pos);
+    return parseFloat(s.slice(start, pos));
+  }
+
+  function mulDiv() {
+    let v = primary();
+    while (pos < s.length && (s[pos] === '*' || s[pos] === '/')) {
+      const op = s[pos++];
+      v = op === '*' ? v * primary() : v / primary();
+    }
+    return v;
+  }
+
+  function addSub() {
+    let v = mulDiv();
+    while (pos < s.length && s[pos] !== ')' && (s[pos] === '+' || s[pos] === '-')) {
+      const op = s[pos++];
+      v = op === '+' ? v + mulDiv() : v - mulDiv();
+    }
+    return v;
+  }
+
+  return addSub();
+}
+
+function _evalFormula(formula) {
+  if (!_dimsConfirmed) return null;
+  if (formula === null || formula === undefined) return null;
+  const L = state.dims.length;
+  const W = state.dims.width;
+  const H = state.dims.height;
+  if (!L || !W || !H) return null;
+  try {
+    // Normalise: strip leading =, collapse whitespace/line-breaks
+    let f = String(formula).trim().replace(/^=/, '').replace(/[\r\n\t]+/g, ' ').trim();
+    if (!f) return null;
+    // Pure unit strings → qty 1
+    if (/^(each|m2|m²|m3|m³|lm|kg|l|set|no|nr|mm|m|ea|pc|pcs|1)$/i.test(f)) return 1;
+    // Pure numeric literal
+    const asNum = Number(f);
+    if (!isNaN(asNum) && isFinite(asNum)) return Math.max(0, +asNum.toFixed(4));
+    const vars = {
+      floor_area:           +(L * W).toFixed(4),
+      roof_area:            +(L * W).toFixed(4),
+      wall_area:            +(2 * L * H).toFixed(4),
+      side_area:            +(2 * L * H).toFixed(4),
+      surface_area:         +(2 * (L*W + L*H + W*H)).toFixed(4),
+      insulation_thickness: 0.1,
+      length: +L.toFixed(4), width: +W.toFixed(4), height: +H.toFixed(4),
+      L: +L.toFixed(4), W: +W.toFixed(4), H: +H.toFixed(4),
+      l: +L.toFixed(4), w: +W.toFixed(4), h: +H.toFixed(4),
+      num_axles: 2,
+    };
+    let expr = f;
+    // Substitute longest var names first to prevent partial matches
+    Object.entries(vars)
+      .sort((a, b) => b[0].length - a[0].length)
+      .forEach(([k, v]) => {
+        expr = expr.replace(new RegExp('\\b' + k + '\\b', 'g'), v);
+      });
+    // Check for any unresolved identifiers (letters remaining after substitution)
+    const unresolved = expr.match(/[A-Za-z_][A-Za-z0-9_]*/g);
+    if (unresolved) {
+      console.warn('[Body Designer] unresolved variables in formula:', formula,
+        '→ remaining identifiers:', unresolved, '(dims: L='+L+', W='+W+', H='+H+')');
+      return null;
+    }
+    const result = _mathEval(expr);
+    if (!isFinite(result)) {
+      console.warn('[Body Designer] formula gave non-finite result:', formula, '→', result);
+      return null;
+    }
+    if (result < 0) {
+      console.warn('[Body Designer] formula gave negative result:', formula, '→', result,
+        '(dims: L='+L+', W='+W+', H='+H+')');
+      return null;
+    }
+    return +result.toFixed(4);
+  } catch(e) {
+    console.warn('[Body Designer] formula eval error:', formula, '→', e.message);
+    return null;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escH(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function toast(msg, type='success') {
+  const t = document.createElement('div');
+  const bg = type === 'error' ? '#c0392b' : type === 'warn' ? '#92610a' : '#1e6a3a';
+  t.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+    z-index:9999;padding:10px 22px;border-radius:6px;font-size:13px;color:#fff;
+    box-shadow:0 4px 16px rgba(0,0,0,.5);white-space:nowrap;background:${bg}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), type === 'warn' ? 4800 : 3200);
+}
+
+// ── Body Type Setup Modal ─────────────────────────────────────────────────────
+let _setupTab    = 'new';
+let _dupTrailers = [];
+let _dupLoaded   = false;
+
+function onMainAction() {
+  if (_dimsConfirmed) openSaveModal(); else openSetupModal();
+}
+
+function openSetupModal() {
+  document.getElementById('setup-name').value = state.dims.name;
+  document.getElementById('setup-desc').value = state.dims.description;
+  document.getElementById('setup-len').value  = state.dims.length;
+  document.getElementById('setup-wid').value  = state.dims.width;
+  document.getElementById('setup-hgt').value  = state.dims.height;
+  document.getElementById('setup-markup').value = state.markup || 0;
+  document.getElementById('setup-modal-title').textContent = _dimsConfirmed ? '✎ Edit Body Type Details' : '✦ Create Body Type';
+  setSetupTab('new'); // always start on New tab
+  updateSetupPreview();
+  document.getElementById('modal-setup').classList.remove('hidden');
+  setTimeout(() => document.getElementById('setup-name').focus(), 60);
+}
+
+function closeSetupModal() {
+  document.getElementById('modal-setup').classList.add('hidden');
+}
+
+function setSetupTab(tab) {
+  _setupTab = tab;
+  const isNew = tab === 'new';
+  const btnNew = document.getElementById('setup-tab-new');
+  const btnDup = document.getElementById('setup-tab-dup');
+  btnNew.style.background    = isNew ? 'var(--blue)' : 'var(--bg-input)';
+  btnNew.style.color         = isNew ? '#fff'        : 'var(--text-dim)';
+  btnDup.style.background    = isNew ? 'var(--bg-input)' : 'var(--blue)';
+  btnDup.style.color         = isNew ? 'var(--text-dim)' : '#fff';
+  document.getElementById('setup-dup-section').style.display = isNew ? 'none' : '';
+  document.getElementById('setup-hint').textContent = isNew
+    ? 'Enter the body type details and dimensions first — these are used to calculate material quantities in the live cost preview as you build up each zone.'
+    : 'Select an existing body type to copy its full zone configuration. You can then rename it and adjust any zone before saving.';
+  if (!isNew && !_dupLoaded) _loadDupList();
+}
+
+async function _loadDupList() {
+  document.getElementById('dup-loading').style.display = '';
+  document.getElementById('dup-select').innerHTML = '';
+  try {
+    const r = await fetch('/api/trailers');
+    _dupTrailers = await r.json();
+    _dupLoaded   = true;
+    _renderDupList(_dupTrailers);
+  } catch {
+    toast('Could not load body types', 'error');
+  }
+  document.getElementById('dup-loading').style.display = 'none';
+}
+
+function filterDupList() {
+  const q = document.getElementById('dup-search').value.toLowerCase();
+  _renderDupList(q ? _dupTrailers.filter(t => t.name.toLowerCase().includes(q)) : _dupTrailers);
+}
+
+function _renderDupList(list) {
+  document.getElementById('dup-select').innerHTML = list.length
+    ? list.map(t =>
+        `<option value="${t.id}"
+          data-name="${escH(t.name)}" data-desc="${escH(t.description)}"
+          data-len="${t.default_length != null ? t.default_length : 12}"
+          data-wid="${t.default_width  != null ? t.default_width  : 2.45}"
+          data-hgt="${t.default_height != null ? t.default_height : 2.2}"
+          data-markup="${t.markup_percentage != null ? (t.markup_percentage * 100).toFixed(1) : 0}">
+          ${escH(t.name)}
+        </option>`).join('')
+    : `<option disabled>No body types found</option>`;
+}
+
+function onDupSelect() {
+  const opt = document.getElementById('dup-select').selectedOptions[0];
+  if (!opt || opt.disabled) return;
+  document.getElementById('setup-name').value = 'Copy of ' + opt.dataset.name;
+  document.getElementById('setup-desc').value = opt.dataset.desc || '';
+  document.getElementById('setup-len').value  = opt.dataset.len;
+  document.getElementById('setup-wid').value  = opt.dataset.wid;
+  document.getElementById('setup-hgt').value  = opt.dataset.hgt;
+  document.getElementById('setup-markup').value = opt.dataset.markup || 0;
+  updateSetupPreview();
+}
+
+// Map a BOM row's section to a zone key.
+// Primary: use the DB-linked _secToZone map (bom_section_name → zone FK relationship).
+// Fallback: exact zone name match, prefix match, then name-inference.
+function _zoneFromBomRow(row) {
+  const sec = (row.bom_section || '').trim().toUpperCase();
+  if (sec && _secToZone[sec]) return _secToZone[sec];
+  if (sec && ZONES.includes(sec)) return sec;
+  const prefixMatch = ZONES.find(z => sec.startsWith(z));
+  if (prefixMatch) return prefixMatch;
+  return _inferZoneFromName(row.material_name);
+}
+
+async function _applyDuplicate(ttId) {
+  const r = await fetch(`/api/trailers/${ttId}/bom`);
+  if (!r.ok) throw new Error('Failed to load body type BOM');
+  const rows = await r.json();
+
+  ZONES.forEach(z => { state.zones[z] = { bodyOptions:[], bomItems:[] }; });
+  state.extraSections = {};
+  state.sectionOrder  = [];
+  _extSecExpanded.clear();
+
+  rows.filter(row => row.is_body_option).forEach(row => {
+    const zone = (row.body_option_group || '').toUpperCase();
+    if (!ZONES.includes(zone)) return;
+    state.zones[zone].bodyOptions.push({
+      materialId:   row.material_id,
+      materialName: row.material_name,
+      subgroup:     row.body_option_subgroup || null,
+      isDefault:    !!row.body_option_default,
+      sortOrder:    row.sort_order ?? 0,
+    });
+  });
+
+  rows.filter(row => !row.is_body_option).forEach(row => {
+    const zone = _zoneFromBomRow(row);
+    if (zone && ZONES.includes(zone)) {
+      state.zones[zone].bomItems.push({
+        materialId:   row.material_id,
+        materialName: row.material_name,
+        formula:      row.formula || '1',
+        wastePct:     row.waste_pct || 0,
+        linkedOption: row.body_option_linked || '',
+        sortOrder:    row.sort_order ?? 0,
+      });
+    } else {
+      // Row belongs to a non-zone section (ALUMINIUM, SPRAY PAINTING, etc.)
+      const secName = (row.bom_section || '').toUpperCase() || 'MISC';
+      if (!state.extraSections[secName]) {
+        state.extraSections[secName] = { bomItems: [] };
+        state.sectionOrder.push(secName);
+        _extSecExpanded.add(secName);
+      }
+      state.extraSections[secName].bomItems.push({
+        materialId:   row.material_id,
+        materialName: row.material_name,
+        formula:      row.formula || '1',
+        wastePct:     row.waste_pct || 0,
+        linkedOption: row.body_option_linked || '',
+        sortOrder:    row.sort_order ?? 0,
+      });
+    }
+  });
+}
+
+function updateSetupPreview() {
+  const L = +document.getElementById('setup-len').value || 0;
+  const W = +document.getElementById('setup-wid').value || 0;
+  const H = +document.getElementById('setup-hgt').value || 0;
+  const fa = (L * W).toFixed(2);
+  const wa = (2 * L * H).toFixed(2);
+  const ra = (L * W).toFixed(2);
+  document.getElementById('setup-dims-preview').innerHTML = `
+    <span>📐 <b>${L.toFixed(3)}</b> × <b>${W.toFixed(3)}</b> × <b>${H.toFixed(3)}</b> m</span>
+    <span>Floor: <b>${fa} m²</b></span>
+    <span>Walls: <b>${wa} m²</b></span>
+    <span>Roof: <b>${ra} m²</b></span>`;
+}
+
+async function confirmSetup() {
+  const name = document.getElementById('setup-name').value.trim();
+  if (!name) {
+    document.getElementById('setup-name').focus();
+    document.getElementById('setup-name').style.borderColor = 'var(--red)';
+    return;
+  }
+  document.getElementById('setup-name').style.borderColor = '';
+
+  // If duplicating, validate selection then load BOM before closing
+  if (_setupTab === 'dup') {
+    const sel = document.getElementById('dup-select');
+    if (!sel.value || sel.selectedOptions[0]?.disabled) {
+      toast('Select a body type to duplicate', 'error'); return;
+    }
+    const btn = document.querySelector('#modal-setup .btn-primary');
+    btn.disabled = true; btn.textContent = 'Loading…';
+    try {
+      await _applyDuplicate(+sel.value);
+    } catch {
+      toast('Failed to load body type — please try again', 'error');
+      btn.disabled = false; btn.textContent = 'Start Designing →';
+      return;
+    }
+    btn.disabled = false; btn.textContent = 'Start Designing →';
+  }
+
+  state.dims.name        = name;
+  state.dims.description = document.getElementById('setup-desc').value.trim();
+  state.dims.length      = +document.getElementById('setup-len').value || 12;
+  state.dims.width       = +document.getElementById('setup-wid').value || 2.45;
+  state.dims.height      = +document.getElementById('setup-hgt').value || 2.2;
+  state.markup = parseFloat(document.getElementById('setup-markup').value) || 0;
+  _dimsConfirmed = true;
+
+  const chip = document.getElementById('hdr-type-chip');
+  chip.textContent = `✎ ${state.dims.name}  ·  ${state.dims.length.toFixed(2)} × ${state.dims.width.toFixed(2)} × ${state.dims.height.toFixed(2)} m`;
+  chip.style.display = '';
+  document.getElementById('btn-main-action').textContent = '✦ Save Body Type';
+
+  closeSetupModal();
+  renderAllZonesPanel();
+  updateLegend();
+}
+
+// ── Palette ───────────────────────────────────────────────────────────────────
+function filterPalette() {
+  const q   = document.getElementById('pal-search').value.toLowerCase();
+  const cat = document.getElementById('pal-cat').value;
+  filteredPal = ALL_MATS.filter(m =>
+    (!q   || m.name.toLowerCase().includes(q)) &&
+    (!cat || m.category === cat)
+  );
+  renderPalette();
+}
+
+function renderPalette() {
+  const list = document.getElementById('palette-list');
+  if (!filteredPal.length) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:var(--text-dim)">No materials found</div>';
+    return;
+  }
+  list.innerHTML = filteredPal.map(m => {
+    const iz = _inferZoneFromName(m.name);
+    const zoneLabel = iz && ZONE_META[iz] ? ZONE_META[iz].label : (m.category || '');
+    const tipZone = zoneLabel ? ` · Zone: ${zoneLabel}` : '';
+    return `
+    <div class="mat-card" draggable="true"
+      data-mat-id="${m.id}" data-mat-name="${escH(m.name)}" data-mat-unit="${escH(m.unit)}"
+      ondragstart="onPalDragStart(event,${m.id})"
+      ondragend="onPalDragEnd(event)"
+      title="${escH(m.name)} · ${escH(m.unit)} · R${m.price.toFixed(2)} · Category: ${escH(m.category)}${escH(tipZone)}">
+      <span class="drag-grip">⠿</span>
+      <span class="mat-card-name">${escH(m.name)}</span>
+      <span class="mat-card-unit">${escH(m.unit)}</span>
+      <span class="mat-card-price">R${m.price.toFixed(2)}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Drag & Drop (palette → SVG zone) ────────────────────────────────────────
+let _draggingMatId = null;
+
+function onPalDragStart(e, matId) {
+  _draggingMatId = matId;
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('matId', String(matId));
+  e.currentTarget.classList.add('dragging');
+}
+function onPalDragEnd(e) {
+  _draggingMatId = null;
+  e.currentTarget.classList.remove('dragging');
+}
+function onSvgDragOver(e, zone) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  document.getElementById('zone-' + zone).classList.add('drag-over');
+}
+function onSvgDragLeave(e, zone) {
+  document.getElementById('zone-' + zone).classList.remove('drag-over');
+}
+// Returns true if drop can proceed immediately; false if a confirmation modal was shown.
+// onConfirm is called when the user clicks "Yes, Add Anyway".
+function _checkZoneMismatch(mat, targetZone, onConfirm) {
+  const inferred = _inferZoneFromName(mat.name);
+  if (inferred && inferred !== targetZone) {
+    const fromLabel = ZONE_META[inferred] ? ZONE_META[inferred].label : inferred;
+    const toLabel   = ZONE_META[targetZone] ? ZONE_META[targetZone].label : targetZone;
+    _pendingDrop = onConfirm;
+    document.getElementById('zone-mismatch-msg').innerHTML =
+      `<b>"${escH(mat.name)}"</b> belongs to the <b>${escH(fromLabel)}</b> zone but you are dropping it onto <b>${escH(toLabel)}</b>.<br><br>Do you want to add it here anyway?`;
+    document.getElementById('modal-zone-mismatch').classList.remove('hidden');
+    return false;
+  }
+  return true;
+}
+function confirmZoneDrop() {
+  document.getElementById('modal-zone-mismatch').classList.add('hidden');
+  if (_pendingDrop) { _pendingDrop(); _pendingDrop = null; }
+}
+function cancelZoneDrop() {
+  document.getElementById('modal-zone-mismatch').classList.add('hidden');
+  _pendingDrop = null;
+}
+
+function _isDuplicateBomItem(zone, matId) {
+  const list = ZONES.includes(zone)
+    ? state.zones[zone]?.bomItems
+    : state.extraSections[zone]?.bomItems;
+  return list ? list.some(item => item.materialId === matId) : false;
+}
+
+function onSvgDrop(e, zone) {
+  e.preventDefault();
+  document.getElementById('zone-' + zone).classList.remove('drag-over');
+  const matId = +e.dataTransfer.getData('matId');
+  if (!matId) return;
+  const mat = ALL_MATS.find(m => m.id === matId);
+  if (!mat) return;
+  const doAdd = () => {
+    if (_isDuplicateBomItem(zone, mat.id)) {
+      toast(`"${mat.name}" is already in ${ZONE_META[zone].label}`, 'error'); return;
+    }
+    const formula = _guessFormula(zone);
+    state.zones[zone].bomItems.push({ materialId: mat.id, materialName: mat.name, formula, wastePct: 0, linkedOption: '' });
+    selectZone(zone);
+    updateLegend();
+    toast(`"${mat.name}" added to ${ZONE_META[zone].label}`);
+  };
+  if (_checkZoneMismatch(mat, zone, doAdd)) doAdd();
+}
+
+// Drag over the panel drop targets
+function onPanelDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+function onPanelDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+function onPanelDropZone(e, zone) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const matId = +e.dataTransfer.getData('matId');
+  if (!matId) return;
+  const mat = ALL_MATS.find(m => m.id === matId);
+  if (!mat) return;
+  const isZone = ZONES.includes(zone);
+  const label  = isZone && ZONE_META[zone] ? ZONE_META[zone].label : zone;
+  const doAdd = () => {
+    if (_isDuplicateBomItem(zone, mat.id)) {
+      toast(`"${mat.name}" is already in ${label}`, 'error'); return;
+    }
+    const formula = isZone ? _guessFormula(zone) : '1';
+    if (isZone) {
+      state.zones[zone].bomItems.push({ materialId: mat.id, materialName: mat.name, formula, wastePct: 0, linkedOption: '' });
+      if (activeZone !== zone) selectZone(zone); else renderAllZonesPanel();
+    } else {
+      state.extraSections[zone].bomItems.push({ materialId: mat.id, materialName: mat.name, formula, wastePct: 0, linkedOption: '' });
+      _extSecExpanded.add(zone);
+      renderAllZonesPanel();
+    }
+    updateLegend();
+    toast(`"${mat.name}" added to ${label}`);
+  };
+  if (isZone && _checkZoneMismatch(mat, zone, doAdd)) doAdd();
+  else if (!isZone) doAdd();
+}
+
+// ── BOM Inspector ─────────────────────────────────────────────────────────────
+function onInspectorDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  document.getElementById('bom-inspector').classList.add('drag-over');
+}
+function onInspectorDragLeave(e) {
+  document.getElementById('bom-inspector').classList.remove('drag-over');
+}
+function onInspectorDrop(e) {
+  e.preventDefault();
+  const insp = document.getElementById('bom-inspector');
+  insp.classList.remove('drag-over');
+  const matId = +e.dataTransfer.getData('matId');
+  if (!matId) return;
+  const mat = ALL_MATS.find(m => m.id === matId);
+  if (!mat) return;
+
+  const inferredZone = _inferZoneFromName(mat.name);
+  const zoneMeta     = inferredZone ? ZONE_META[inferredZone] : null;
+  const categoryLabel = zoneMeta ? zoneMeta.label : (mat.category || '—');
+  const zoneColor     = zoneMeta ? zoneMeta.color : 'var(--text-dim)';
+  const zoneDot       = zoneMeta
+    ? `<span style="width:8px;height:8px;border-radius:2px;background:${zoneColor};
+        display:inline-block;flex-shrink:0;vertical-align:middle;margin-right:4px"></span>`
+    : '';
+
+  insp.classList.add('has-item');
+  document.getElementById('inspector-hint').style.display = 'none';
+  document.getElementById('inspector-content').style.display = 'block';
+  document.getElementById('inspector-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-head);flex:1;min-width:0;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escH(mat.name)}">
+        ${zoneDot}${escH(mat.name)}
+      </div>
+      <button onclick="clearInspector()" style="background:none;border:none;
+        color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;flex-shrink:0;line-height:1"
+        title="Clear inspector">✕</button>
+    </div>
+    <div class="inspector-grid">
+      <div class="inspector-field">
+        <span class="inspector-lbl">Zone / Category</span>
+        <span class="inspector-val">${zoneDot}${escH(categoryLabel)}</span>
+      </div>
+      <div class="inspector-field">
+        <span class="inspector-lbl">Unit of Measure</span>
+        <span class="inspector-val">${escH(mat.unit || '—')}</span>
+      </div>
+      <div class="inspector-field">
+        <span class="inspector-lbl">Price / Unit</span>
+        <span class="inspector-val" style="color:var(--blue-hi,#58a6ff);font-family:var(--font-mono)">
+          R ${mat.price.toFixed(2)}
+        </span>
+      </div>
+      <div class="inspector-field">
+        <span class="inspector-lbl">Material Category</span>
+        <span class="inspector-val">${escH(mat.category || '—')}</span>
+      </div>
+    </div>`;
+}
+function clearInspector() {
+  const insp = document.getElementById('bom-inspector');
+  insp.classList.remove('has-item');
+  document.getElementById('inspector-hint').style.display = '';
+  document.getElementById('inspector-content').style.display = 'none';
+  document.getElementById('inspector-content').innerHTML = '';
+}
+
+function _guessFormula(zone) {
+  const f = { ROOF:'roof_area', SIDES:'wall_area', FLOOR:'floor_area', FRONT:'1', DRD:'1', SRD:'1' };
+  return f[zone] || '1';
+}
+
+// ── Zone-name prefix inference (mirrors Python _BODY_OPT_PREFIXES) ───────────
+const _ZONE_PREFIXES = [
+  ['1ST ROW','FLOOR'],['2ND ROW','FLOOR'],['3CR12','FLOOR'],
+  ['18MM','FLOOR'],['12MM','FLOOR'],['19MM','FLOOR'],
+  ['BIRCH','FLOOR'],['FINN','FLOOR'],['PHENO','FLOOR'],
+  ['KICK','FLOOR'],['TREAD','FLOOR'],['RICE','FLOOR'],['ALU','FLOOR'],
+  ['FRONT','FRONT'],['DRD','DRD'],['SRD','SRD'],
+  ['SIDES','SIDES'],['SIDE','SIDES'],['ROOF','ROOF'],['FLOOR','FLOOR'],
+];
+function _inferZoneFromName(name) {
+  const up = (name||'').toUpperCase().trim();
+  for (const [pfx, zone] of _ZONE_PREFIXES)
+    if (up.startsWith(pfx)) return zone;
+  return null;
+}
+
+// ── DRD / SRD mutual-exclusion helpers ───────────────────────────────────────
+const DOOR_PAIR = { DRD:'SRD', SRD:'DRD' };
+let _pendingDoorZone = null;
+
+function _zoneHasContent(z) {
+  return state.zones[z].bodyOptions.length > 0 || state.zones[z].bomItems.length > 0;
+}
+
+// ── Zone Selection ────────────────────────────────────────────────────────────
+function selectZone(zone) {
+  closeAddBo();
+  closeAddBom();
+
+  // Toggle: clicking the already-open zone collapses it
+  if (activeZone === zone) {
+    activeZone = null;
+    ZONES.forEach(z => { const el = document.getElementById('zone-' + z); if (el) el.classList.remove('active'); });
+    document.querySelectorAll('.legend-chip').forEach(c => c.classList.remove('active'));
+    document.getElementById('zone-panel-head').textContent = 'Zone Configuration';
+    document.getElementById('hdr-zone-label').textContent  = 'Click a zone on the trailer to begin';
+    renderAllZonesPanel();
+    updateLegend();
+    return;
+  }
+
+  // DRD ↔ SRD mutual exclusion: auto-swap — clear the other door zone,
+  // then pre-populate this zone with its defaults if it's currently empty.
+  const other = DOOR_PAIR[zone];
+  if (other && _zoneHasContent(other)) {
+    state.zones[other] = { bodyOptions:[], bomItems:[] };
+    if (!_zoneHasContent(zone)) {
+      _boMatsForZone(zone).forEach((mat, idx) => {
+        state.zones[zone].bodyOptions.push({
+          materialId:   mat.id,
+          materialName: mat.name,
+          subgroup:     mat.subgroup || null,
+          isDefault:    idx === 0,
+        });
+      });
+    }
+    toast(`Swapped to ${ZONE_META[zone].label} — ${ZONE_META[other].label} cleared`);
+    updateLegend();
+  }
+
+  _activateZone(zone);
+}
+
+function _activateZone(zone) {
+  activeZone = zone;
+  // Expand only this zone in cost preview; collapse all others
+  _cpExpanded.clear();
+  _cpExpanded.add(zone);
+  // Set the category filter to this zone's category (names match: FRONT, ROOF, etc.)
+  document.getElementById('pal-cat').value = zone;
+  filterPalette();
+  const meta = ZONE_META[zone];
+  ZONES.forEach(z => {
+    const el = document.getElementById('zone-' + z);
+    if (el) el.classList.toggle('active', z === zone);
+  });
+  document.querySelectorAll('.legend-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.zone === zone);
+    if (c.dataset.zone === zone) c.style.setProperty('--zc', meta.color);
+  });
+  document.getElementById('zone-panel-head').innerHTML =
+    `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${meta.color};margin-right:6px;vertical-align:middle"></span>${meta.label}`;
+  document.getElementById('hdr-zone-label').textContent = meta.label + ' — ' + meta.desc;
+  const zs = state.zones[zone];
+  document.getElementById('zone-detail-bar').textContent =
+    `${zs.bodyOptions.length} body option${zs.bodyOptions.length!==1?'s':''} · ${zs.bomItems.length} BOM item${zs.bomItems.length!==1?'s':''} configured`;
+  renderAllZonesPanel();
+}
+
+function confirmDoorConflict() {
+  const other = DOOR_PAIR[_pendingDoorZone];
+  state.zones[other] = { bodyOptions:[], bomItems:[] };
+  document.getElementById('modal-door-conflict').classList.add('hidden');
+  _activateZone(_pendingDoorZone);
+  updateLegend();
+  _pendingDoorZone = null;
+}
+function closeDoorConflictModal() {
+  _pendingDoorZone = null;
+  document.getElementById('modal-door-conflict').classList.add('hidden');
+}
+
+// ── Zone Config Panel — all zones accordion ───────────────────────────────────
+function _renderZoneSection(zone) {
+  const zs      = state.zones[zone];
+  const meta    = ZONE_META[zone];
+  const isActive = (zone === activeZone);
+  const cnt     = zs.bodyOptions.length + zs.bomItems.length;
+
+  // Is this zone locked by its exclusive partner?
+  const partner = DOOR_PAIR[zone];
+  const isLocked = partner && _zoneHasContent(partner);
+
+  // Body options rows — grouped by subgroup; each subgroup gets its own radio group
+  let boRows;
+  if (!zs.bodyOptions.length) {
+    boRows = `<div style="font-size:11px;color:var(--text-dim);padding:3px 0">None — click + Add</div>`;
+  } else {
+    const _sgOrder = [], _sgMap = {};
+    zs.bodyOptions.forEach((opt, i) => {
+      const sg = opt.subgroup || '';
+      if (!_sgMap[sg]) { _sgMap[sg] = []; _sgOrder.push(sg); }
+      _sgMap[sg].push({ opt, i });
+    });
+    boRows = _sgOrder.map(sg => {
+      const sgItems    = _sgMap[sg];
+      const radioName  = `bo-dflt-${zone}-${sg || '__none__'}`;
+      const sgHeading  = sg
+        ? `<div style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+              color:var(--blue-hi);padding:5px 0 2px">${escH(sg)}</div>`
+        : '';
+      return sgHeading + sgItems.map(({opt, i}) => `
+        <div class="bo-item" id="bo-item-${zone}-${i}">
+          <input type="radio" name="${radioName}" ${opt.isDefault?'checked':''}
+            onchange="setBoDefault('${zone}',${i})"
+            style="accent-color:${meta.color};cursor:pointer;flex-shrink:0" title="Default for this subgroup">
+          <span class="mat-name">${escH(opt.materialName)}</span>
+          <button class="btn-rm" onclick="removeBodyOption('${zone}',${i})" title="Remove">×</button>
+        </div>`).join('');
+    }).join('');
+  }
+
+  // BOM items rows
+  const dropAttrs = `ondragover="onPanelDragOver(event)" ondrop="onPanelDropZone(event,'${zone}')" ondragleave="onPanelDragLeave(event)"`;
+  let bomRows;
+  if (!zs.bomItems.length) {
+    bomRows = `<div class="zone-drop-target" ${dropAttrs}>Drop a material here or click + Add</div>`;
+  } else {
+    const linkOpts = zs.bodyOptions.map(o =>
+      `<option value="${escH(o.materialName)}">${escH(o.materialName)}</option>`).join('');
+    bomRows = `<div ${dropAttrs}>` + zs.bomItems.map((item, i) => `
+      <div class="bom-item" id="bom-item-${zone}-${i}">
+        <div style="flex:1;min-width:0">
+          <div class="mat-name">${escH(item.materialName)}</div>
+          <div style="display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap">
+            <span style="font-size:9px;color:var(--text-dim)">formula</span>
+            <input class="mini-input" value="${escH(item.formula)}" placeholder="1"
+              oninput="updateBom('${zone}',${i},'formula',this.value)"
+              style="width:110px" list="formula-list"/>
+            <span style="font-size:9px;color:var(--text-dim)">waste</span>
+            <input class="mini-input" type="number" value="${item.wastePct}" min="0"
+              onchange="updateBom('${zone}',${i},'wastePct',+this.value)"
+              style="width:42px"/>
+            <span style="font-size:9px;color:var(--text-dim)">%</span>
+            ${linkOpts?`<select class="mini-input" title="Link to body option"
+              onchange="updateBom('${zone}',${i},'linkedOption',this.value)"
+              style="font-size:10px;padding:2px 4px;max-width:120px">
+              <option value="">— always —</option>${linkOpts}
+              </select>`:''}
+          </div>
+        </div>
+        <button class="btn-rm" onclick="removeBomItem('${zone}',${i})" title="Remove">×</button>
+      </div>`).join('') + `</div>`;
+  }
+
+  const summary = zs.bodyOptions.slice(0,5).map(o=>escH(o.materialName)).join(', ')
+    + (zs.bodyOptions.length > 5 ? ` +${zs.bodyOptions.length-5} more` : '');
+
+  // Locked state (other door zone has content)
+  if (isLocked) {
+    return `<div class="zone-section" id="zs-${zone}" style="--zc:${meta.color};opacity:.55">
+      <div class="zone-section-hdr" onclick="selectZone('${zone}')"
+        style="cursor:not-allowed" title="Clear ${ZONE_META[partner].label} first">
+        <span style="width:8px;height:8px;border-radius:2px;background:${meta.color};flex-shrink:0;display:inline-block"></span>
+        <span style="flex:1;font-size:11px;font-weight:600;color:var(--text)">${meta.label}</span>
+        <span style="font-size:9px;color:var(--text-dim);font-style:italic">locked — clear ${ZONE_META[partner].label} first</span>
+        <span style="font-size:11px;margin-left:6px">🔒</span>
+      </div>
+    </div>`;
+  }
+
+  const groupMeta  = BODY_OPT_GROUPS.find(g => g.name === zone);
+  const secName    = groupMeta && groupMeta.bom_section_name ? groupMeta.bom_section_name : null;
+  const secBadge   = secName
+    ? `<span style="font-size:9px;color:var(--text-dim);background:var(--bg-panel);
+        border:1px solid var(--border);border-radius:3px;padding:0 4px;white-space:nowrap;
+        margin-left:4px" title="Linked BOM section">§ ${escH(secName)}</span>`
+    : '';
+
+  return `<div class="zone-section ${isActive?'active':''}" id="zs-${zone}" style="--zc:${meta.color}">
+    <div class="zone-section-hdr" onclick="selectZone('${zone}')">
+      <span style="width:8px;height:8px;border-radius:2px;background:${meta.color};flex-shrink:0;display:inline-block"></span>
+      <span style="flex:1;font-size:11px;font-weight:600;color:var(--text)">${meta.label}${secBadge}</span>
+      ${cnt?`<span class="legend-count">${cnt}</span>`:''}
+      <span style="font-size:10px;color:var(--text-dim);margin-left:2px">${isActive?'▾':'▸'}</span>
+    </div>
+    ${isActive ? `
+      <div class="zone-section-body">
+        <div class="zone-section-hd">
+          <span>Body Options</span>
+          <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px"
+            onclick="openAddBodyOption('${zone}')">+ Add</button>
+        </div>
+        ${boRows}
+        <div class="zone-section-hd" style="margin-top:12px">
+          <span>BOM Items</span>
+          <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px"
+            onclick="openAddBomItem('${zone}')">+ Add</button>
+        </div>
+        ${bomRows}
+      </div>`
+    : (summary ? `<div class="zone-collapsed-summary">${summary}</div>` : '')}
+  </div>`;
+}
+
+function renderAllZonesPanel() {
+  const OR_DIV = `<div style="display:flex;align-items:center;gap:8px;margin:2px 0;padding:0 4px">
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+    <span style="font-size:10px;font-weight:700;color:var(--text-dim);letter-spacing:1px">OR</span>
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>`;
+
+  let parts = [];
+  ZONES.forEach(zone => {
+    if (zone === 'SRD') parts.push(OR_DIV);
+    parts.push(_renderZoneSection(zone));
+  });
+
+  // Additional (non-zone) sections
+  if (state.sectionOrder.length) {
+    parts.push(`<div style="display:flex;align-items:center;gap:8px;margin:8px 0 4px;padding:0 4px">
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <span style="font-size:9px;font-weight:700;color:var(--text-dim);letter-spacing:1px;text-transform:uppercase">Additional Sections</span>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+    </div>`);
+    state.sectionOrder.forEach(secName => parts.push(_renderExtraSection(secName)));
+  }
+
+  // "Add Section" inline picker
+  const avail = _availBomSections();
+  parts.push(`<div style="padding:6px 4px 4px">
+    <div style="display:flex;gap:5px;align-items:center">
+      <input class="form-control" id="new-sec-input" list="avail-sections-list"
+        placeholder="+ Add section…" style="flex:1;font-size:11px;padding:4px 7px"
+        onkeydown="if(event.key==='Enter')addExtraSection()"/>
+      <datalist id="avail-sections-list">${avail.map(n=>`<option value="${escH(n)}">`).join('')}</datalist>
+      <button class="btn btn-outline btn-sm" onclick="addExtraSection()"
+        style="white-space:nowrap;padding:4px 10px">+</button>
+    </div>
+  </div>`);
+
+  document.getElementById('zone-config-body').innerHTML = `<div style="padding:8px">${parts.join('')}</div>`;
+  renderCostPreview();
+}
+
+// ── Body Options ─────────────────────────────────────────────────────────────
+function _boMatsForZone(zone) {
+  // Name-inference is the canonical check — a DB group value of 'FLOOR' on
+  // an item like "0661-0631 RIVETS" is a mis-classification from an imported
+  // trailer BOM and must be excluded.  Only items whose names independently
+  // confirm the zone via _inferZoneFromName are considered canonical.
+  const byName = BODY_OPT_MATS.filter(m => _inferZoneFromName(m.name) === zone);
+  if (byName.length) return byName;
+
+  // Fallback (should be rare): DB group match without a name confirmation
+  const byGroup = BODY_OPT_MATS.filter(m => m.group === zone);
+  if (byGroup.length) return byGroup;
+
+  return BODY_OPT_MATS;
+}
+
+function openAddBodyOption(zone) {
+  _addBoZone = zone;
+  document.getElementById('add-bo-title').textContent = 'Add Body Option — ' + ZONE_META[zone].label;
+  document.getElementById('add-bo-search').value = '';
+  document.getElementById('add-bo-subgroup').value = '';
+  document.getElementById('add-bo-default').checked = state.zones[zone].bodyOptions.length === 0;
+  populateBoMats(_boMatsForZone(zone));
+  document.getElementById('modal-add-bo').classList.remove('hidden');
+}
+function closeAddBo() { document.getElementById('modal-add-bo').classList.add('hidden'); }
+
+function filterBoMats() {
+  const q = document.getElementById('add-bo-search').value.toLowerCase();
+  const base = _boMatsForZone(_addBoZone);
+  populateBoMats(q ? base.filter(m => m.name.toLowerCase().includes(q)) : base);
+}
+function populateBoMats(list) {
+  document.getElementById('add-bo-mat').innerHTML =
+    list.map(m => `<option value="${m.id}" data-subgroup="${escH(m.subgroup)}">${escH(m.name)} · ${escH(m.unit)}</option>`).join('');
+  // Auto-fill subgroup from first option when list loads
+  const sel = document.getElementById('add-bo-mat');
+  const updateSubgroup = () => {
+    const first = sel.options[Array.from(sel.options).findIndex(o => o.selected)];
+    if (first && first.dataset.subgroup && !document.getElementById('add-bo-subgroup').value)
+      document.getElementById('add-bo-subgroup').value = first.dataset.subgroup;
+  };
+  sel.onchange = updateSubgroup;
+}
+function confirmAddBodyOption() {
+  const sel      = document.getElementById('add-bo-mat');
+  const selected = Array.from(sel.selectedOptions);
+  if (!selected.length) { toast('Select at least one material', 'error'); return; }
+  const manualSubgroup = document.getElementById('add-bo-subgroup').value.trim().toUpperCase() || null;
+  const markDefault    = document.getElementById('add-bo-default').checked;
+  let added = 0;
+  selected.forEach((opt, idx) => {
+    const mat = ALL_MATS.find(m => m.id === +opt.value);
+    if (!mat) return;
+    const sg = manualSubgroup || (opt.dataset.subgroup || null);
+    state.zones[_addBoZone].bodyOptions.push({
+      materialId:   mat.id,
+      materialName: mat.name,
+      subgroup:     sg || null,
+      isDefault:    markDefault && idx === 0,
+    });
+    added++;
+  });
+  closeAddBo();
+  selectZone(_addBoZone);
+  updateLegend();
+  if (added > 1) toast(`${added} options added to ${ZONE_META[_addBoZone].label}`);
+}
+function setBoDefault(zone, idx) {
+  const targetSg = state.zones[zone].bodyOptions[idx].subgroup || '';
+  state.zones[zone].bodyOptions.forEach((o, i) => {
+    if ((o.subgroup || '') === targetSg) o.isDefault = (i === idx);
+  });
+}
+function removeBodyOption(zone, idx) {
+  state.zones[zone].bodyOptions.splice(idx, 1);
+  renderAllZonesPanel();
+  updateLegend();
+}
+
+// ── BOM Items ─────────────────────────────────────────────────────────────────
+function openAddBomItem(zone) {
+  _addBomZone = zone;
+  const isZone = ZONES.includes(zone);
+  const label  = isZone && ZONE_META[zone] ? ZONE_META[zone].label : zone;
+  document.getElementById('add-bom-title').textContent = 'Add BOM Item — ' + label;
+  document.getElementById('add-bom-search').value = '';
+  document.getElementById('add-bom-formula').value = isZone ? _guessFormula(zone) : '1';
+  document.getElementById('add-bom-waste').value = '0';
+  populateBomMats(ALL_MATS);
+  const linkRow = document.getElementById('add-bom-link-row');
+  const linkSel = document.getElementById('add-bom-link');
+  const bopts   = isZone ? state.zones[zone].bodyOptions : [];
+  if (bopts.length) {
+    linkSel.innerHTML = '<option value="">— always show —</option>' +
+      bopts.map(o => `<option value="${escH(o.materialName)}">${escH(o.materialName)}</option>`).join('');
+    linkRow.style.display = '';
+  } else {
+    linkRow.style.display = 'none';
+  }
+  document.getElementById('modal-add-bom').classList.remove('hidden');
+}
+function closeAddBom() { document.getElementById('modal-add-bom').classList.add('hidden'); }
+
+function filterBomMats() {
+  const q = document.getElementById('add-bom-search').value.toLowerCase();
+  populateBomMats(ALL_MATS.filter(m => m.name.toLowerCase().includes(q)));
+}
+function populateBomMats(list) {
+  document.getElementById('add-bom-mat').innerHTML =
+    list.map(m => `<option value="${m.id}">${escH(m.name)} · ${escH(m.unit)}</option>`).join('');
+}
+function confirmAddBomItem() {
+  const sel = document.getElementById('add-bom-mat');
+  if (!sel.value) { toast('Select a material first', 'error'); return; }
+  const mat = ALL_MATS.find(m => m.id === +sel.value);
+  if (!mat) return;
+  const isZone = ZONES.includes(_addBomZone);
+  const label  = isZone && ZONE_META[_addBomZone] ? ZONE_META[_addBomZone].label : _addBomZone;
+  if (_isDuplicateBomItem(_addBomZone, mat.id)) {
+    toast(`"${mat.name}" is already in ${label}`, 'error'); return;
+  }
+  const item = {
+    materialId:   mat.id,
+    materialName: mat.name,
+    formula:      document.getElementById('add-bom-formula').value.trim() || '1',
+    wastePct:     +document.getElementById('add-bom-waste').value || 0,
+    linkedOption: document.getElementById('add-bom-link').value || '',
+  };
+  if (isZone) {
+    state.zones[_addBomZone].bomItems.push(item);
+    closeAddBom();
+    selectZone(_addBomZone);
+  } else {
+    if (state.extraSections[_addBomZone]) state.extraSections[_addBomZone].bomItems.push(item);
+    closeAddBom();
+    _extSecExpanded.add(_addBomZone);
+    renderAllZonesPanel();
+  }
+  updateLegend();
+}
+function updateBom(zone, idx, field, val) {
+  const list = ZONES.includes(zone)
+    ? state.zones[zone]?.bomItems
+    : state.extraSections[zone]?.bomItems;
+  if (list && list[idx]) { list[idx][field] = val; renderCostPreview(); }
+}
+function removeBomItem(zone, idx) {
+  const list = ZONES.includes(zone)
+    ? state.zones[zone]?.bomItems
+    : state.extraSections[zone]?.bomItems;
+  if (list) list.splice(idx, 1);
+  renderAllZonesPanel();
+  updateLegend();
+}
+
+// ── Extra (non-zone) Sections ─────────────────────────────────────────────────
+function _availBomSections() {
+  const zoneSet  = new Set(ZONES);
+  const added    = new Set(state.sectionOrder);
+  return BOM_SECTIONS.map(s => s.name.toUpperCase()).filter(n => !zoneSet.has(n) && !added.has(n));
+}
+
+function addExtraSection() {
+  const inp  = document.getElementById('new-sec-input');
+  const name = (inp.value || '').trim().toUpperCase();
+  if (!name) { inp.focus(); return; }
+  if (ZONES.includes(name)) { toast('That name is already a zone section', 'warn'); inp.value = ''; return; }
+  if (state.extraSections[name]) { toast(`Section "${name}" already added`, 'warn'); inp.value = ''; return; }
+  state.extraSections[name] = { bomItems: [] };
+  state.sectionOrder.push(name);
+  _extSecExpanded.add(name);
+  inp.value = '';
+  renderAllZonesPanel();
+}
+
+async function removeExtraSection(name) {
+  const sec = state.extraSections[name];
+  if (sec && sec.bomItems.length) {
+    if (!await confirmModal(`Remove section "${name}" and its ${sec.bomItems.length} item(s)?`, {title:'Remove Section',okText:'Remove',danger:true})) return;
+  }
+  delete state.extraSections[name];
+  state.sectionOrder = state.sectionOrder.filter(n => n !== name);
+  _extSecExpanded.delete(name);
+  renderAllZonesPanel();
+  updateLegend();
+}
+
+function toggleExtraSection(name) {
+  if (_extSecExpanded.has(name)) {
+    _extSecExpanded.delete(name);
+  } else {
+    _extSecExpanded.add(name);
+    // Filter palette to the matching material category (case-insensitive match)
+    const catSel = document.getElementById('pal-cat');
+    const match  = Array.from(catSel.options).find(o => o.value.toUpperCase() === name.toUpperCase());
+    catSel.value = match ? match.value : '';
+    filterPalette();
+  }
+  renderAllZonesPanel();
+}
+
+function _renderExtraSection(secName) {
+  const sec    = state.extraSections[secName];
+  const cnt    = sec.bomItems.length;
+  const isExp  = _extSecExpanded.has(secName);
+  const safeId = secName.replace(/[^A-Z0-9]/g, '_');
+  const dropAttrs = `ondragover="onPanelDragOver(event)" ondrop="onPanelDropZone(event,'${escH(secName)}')" ondragleave="onPanelDragLeave(event)"`;
+
+  let bomRows;
+  if (!sec.bomItems.length) {
+    bomRows = `<div class="zone-drop-target" ${dropAttrs}>Drop a material here or click + Add</div>`;
+  } else {
+    bomRows = `<div ${dropAttrs}>` + sec.bomItems.map((item, i) => `
+      <div class="bom-item" id="bom-item-${safeId}-${i}">
+        <div style="flex:1;min-width:0">
+          <div class="mat-name">${escH(item.materialName)}</div>
+          <div style="display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap">
+            <span style="font-size:9px;color:var(--text-dim)">formula</span>
+            <input class="mini-input" value="${escH(item.formula)}" placeholder="1"
+              oninput="updateBom('${escH(secName)}',${i},'formula',this.value)"
+              style="width:110px" list="formula-list"/>
+            <span style="font-size:9px;color:var(--text-dim)">waste</span>
+            <input class="mini-input" type="number" value="${item.wastePct}" min="0"
+              onchange="updateBom('${escH(secName)}',${i},'wastePct',+this.value)"
+              style="width:42px"/>
+            <span style="font-size:9px;color:var(--text-dim)">%</span>
+          </div>
+        </div>
+        <button class="btn-rm" onclick="removeBomItem('${escH(secName)}',${i})" title="Remove">×</button>
+      </div>`).join('') + `</div>`;
+  }
+
+  const summary = sec.bomItems.slice(0, 4).map(o => escH(o.materialName)).join(', ')
+    + (sec.bomItems.length > 4 ? ` +${sec.bomItems.length - 4} more` : '');
+
+  return `<div class="zone-section" id="zs-x-${safeId}" style="--zc:#6b7280">
+    <div class="zone-section-hdr" onclick="toggleExtraSection('${escH(secName)}')">
+      <span style="width:8px;height:8px;border-radius:2px;background:#6b7280;flex-shrink:0;display:inline-block"></span>
+      <span style="flex:1;font-size:11px;font-weight:600;color:var(--text)">${escH(secName)}</span>
+      ${cnt ? `<span class="legend-count">${cnt}</span>` : ''}
+      <span style="font-size:10px;color:var(--text-dim);margin-left:2px">${isExp ? '▾' : '▸'}</span>
+      <button class="btn-rm" onclick="event.stopPropagation();removeExtraSection('${escH(secName)}')"
+        title="Remove section" style="margin-left:4px;font-size:13px">×</button>
+    </div>
+    ${isExp ? `
+      <div class="zone-section-body">
+        <div class="zone-section-hd">
+          <span>BOM Items</span>
+          <button class="btn btn-outline btn-sm" style="font-size:10px;padding:2px 8px"
+            onclick="openAddBomItem('${escH(secName)}')">+ Add</button>
+        </div>
+        ${bomRows}
+      </div>`
+    : (summary ? `<div class="zone-collapsed-summary">${summary}</div>` : '')}
+  </div>`;
+}
+
+// ── Cost Preview ──────────────────────────────────────────────────────────────
+const _cpExpanded = new Set(); // zones currently expanded; default = all collapsed
+
+function toggleCpZone(zone) {
+  if (_cpExpanded.has(zone)) _cpExpanded.delete(zone);
+  else _cpExpanded.add(zone);
+  renderCostPreview();
+}
+function expandAllCp()  {
+  ZONES.forEach(z => _cpExpanded.add(z));
+  state.sectionOrder.forEach(n => _cpExpanded.add('__x__' + n));
+  renderCostPreview();
+}
+function collapseAllCp(){ _cpExpanded.clear(); renderCostPreview(); }
+
+function renderCostPreview() {
+  const body  = document.getElementById('cost-preview-body');
+  const total = document.getElementById('cost-preview-total');
+  if (!body || !total) return;
+
+  let grandTotal = 0;
+  let hasContent = false;
+  const parts = [];
+
+  ZONES.forEach(zone => {
+    const zs   = state.zones[zone];
+    const meta = ZONE_META[zone];
+    if (!zs.bodyOptions.length && !zs.bomItems.length) return;
+    hasContent = true;
+    const isExp = _cpExpanded.has(zone);
+
+    // Calc zone BOM total — uses real qty×price when dims confirmed, unit price otherwise
+    const zoneBomTotal = zs.bomItems.reduce((sum, item) => {
+      const mat   = ALL_MATS.find(m => m.id === item.materialId);
+      const price = mat ? mat.price : 0;
+      if (_dimsConfirmed) {
+        const qty = _evalFormula(item.formula);
+        if (qty === null) return sum; // formula unresolvable — exclude from total
+        return sum + qty * price * (1 + (item.wastePct || 0) / 100);
+      }
+      return sum + price;
+    }, 0);
+    grandTotal += zoneBomTotal;
+
+    const countBadge = `<span style="font-size:9px;color:var(--text-dim);margin-right:4px">${zs.bodyOptions.length} opt · ${zs.bomItems.length} BOM</span>`;
+    const priceTag   = zoneBomTotal > 0
+      ? `<span style="font-size:10px;font-family:var(--font-mono);color:var(--blue-hi,#58a6ff);margin-right:6px">R ${zoneBomTotal.toFixed(2)}</span>`
+      : '';
+
+    // Zone header — always visible, clickable
+    parts.push(`<div class="cp-zone-hd" onclick="toggleCpZone('${zone}')" style="cursor:pointer">
+      <span style="width:8px;height:8px;border-radius:2px;background:${meta.color};flex-shrink:0;display:inline-block"></span>
+      <span style="font-size:10px;font-weight:700;color:var(--text);letter-spacing:.5px;text-transform:uppercase;flex:1">${escH(meta.label)}</span>
+      ${isExp ? '' : countBadge}
+      ${isExp ? '' : priceTag}
+      <span style="font-size:10px;color:var(--text-dim)">${isExp ? '▾' : '▸'}</span>
+    </div>`);
+
+    if (!isExp) return; // collapsed — header only
+
+    parts.push(`<table class="cp-tbl">`);
+
+    // Body Options
+    if (zs.bodyOptions.length) {
+      const boCols = _dimsConfirmed ? 5 : 4;
+      parts.push(`<tr class="cp-sub-lbl"><td colspan="${boCols}">Body Options</td></tr>`);
+      zs.bodyOptions.forEach(opt => {
+        const mat   = ALL_MATS.find(m => m.id === opt.materialId);
+        const price = mat ? mat.price : 0;
+        const star  = opt.isDefault
+          ? `<span style="color:${meta.color};margin-right:3px" title="Default">★</span>`
+          : `<span style="margin-right:3px;opacity:0">★</span>`;
+        const sg = opt.subgroup
+          ? `<span style="font-size:8px;padding:1px 4px;border-radius:2px;background:var(--bg-panel);border:1px solid var(--border);color:var(--blue-hi);margin-left:4px">${escH(opt.subgroup)}</span>`
+          : '';
+        // When dims confirmed use 5 cols; insert empty qty cell to align with BOM rows
+        const extraCell = _dimsConfirmed ? `<td></td>` : '';
+        parts.push(`<tr class="cp-bo-row" onclick="focusCpItem('${zone}','bo',${zs.bodyOptions.indexOf(opt)})" title="Go to item in panel">
+          <td>${star}${escH(opt.materialName)}${sg}</td>
+          <td class="cp-meta">${mat ? escH(mat.unit) : ''}</td>
+          ${extraCell}
+          <td class="cp-meta" style="text-align:right">per unit</td>
+          <td class="cp-price">R ${price.toFixed(2)}</td>
+        </tr>`);
+      });
+    }
+
+    // BOM Items
+    if (zs.bomItems.length) {
+      const colSpan = _dimsConfirmed ? 5 : 4;
+      parts.push(`<tr class="cp-sub-lbl"><td colspan="${colSpan}">BOM Items</td></tr>`);
+      zs.bomItems.forEach(item => {
+        const mat   = ALL_MATS.find(m => m.id === item.materialId);
+        const price = mat ? mat.price : 0;
+        const qty   = _evalFormula(item.formula);
+        const wasteMul = 1 + (item.wastePct || 0) / 100;
+        const lineTotal = qty !== null ? qty * price * wasteMul : null;
+        const link  = item.linkedOption
+          ? `<span style="font-size:8px;color:var(--text-dim);margin-left:4px">if ${escH(item.linkedOption.split(' ')[0])}…</span>`
+          : '';
+        const wasteTag = item.wastePct > 0 ? `<span style="font-size:8px;color:var(--text-dim)"> +${item.wastePct}%</span>` : '';
+        const formulaTag = item.formula && item.formula !== '1'
+          ? `<br><span style="font-size:8px;color:var(--text-dim);font-family:var(--font-mono);opacity:.75">${escH(item.formula)}</span>`
+          : '';
+        const qtyCell = _dimsConfirmed
+          ? `<td class="cp-meta" style="text-align:right" title="${qty === null ? 'Formula could not be evaluated: ' + escH(item.formula) : ''}">${qty !== null ? qty.toFixed(3) : '<span style="color:var(--red,#c0392b)">⚠ —</span>'}</td>`
+          : '';
+        const priceCell = _dimsConfirmed
+          ? `<td class="cp-price">R ${price.toFixed(2)}</td>
+             <td class="cp-price" style="color:var(--text)!important">R ${lineTotal !== null ? lineTotal.toFixed(2) : '—'}</td>`
+          : `<td class="cp-meta" style="text-align:right">${escH(item.formula)}</td>
+             <td class="cp-price">R ${price.toFixed(2)}</td>`;
+        parts.push(`<tr class="cp-bom-row" onclick="focusCpItem('${zone}','bom',${zs.bomItems.indexOf(item)})" title="Go to item in panel">
+          <td>${escH(item.materialName)}${link}${wasteTag}${formulaTag}</td>
+          <td class="cp-meta">${mat ? escH(mat.unit) : ''}</td>
+          ${qtyCell}${priceCell}
+        </tr>`);
+      });
+      const subtotalVal = _dimsConfirmed ? zoneBomTotal.toFixed(2) : zoneBomTotal.toFixed(2);
+      parts.push(`<tr class="cp-subtotal">
+        <td colspan="${colSpan - 1}" style="text-align:right;font-size:9px;color:var(--text-dim)">Zone subtotal</td>
+        <td class="cp-price" style="color:var(--text)!important;font-weight:600">R ${subtotalVal}</td>
+      </tr>`);
+    }
+
+    parts.push(`</table>`);
+  });
+
+  // Extra (non-zone) sections in cost preview
+  state.sectionOrder.forEach(secName => {
+    const sec = state.extraSections[secName];
+    if (!sec || !sec.bomItems.length) return;
+    hasContent = true;
+    const isExp = _cpExpanded.has('__x__' + secName);
+
+    const secBomTotal = sec.bomItems.reduce((sum, item) => {
+      const mat   = ALL_MATS.find(m => m.id === item.materialId);
+      const price = mat ? mat.price : 0;
+      if (_dimsConfirmed) {
+        const qty = _evalFormula(item.formula);
+        if (qty === null) return sum;
+        return sum + qty * price * (1 + (item.wastePct || 0) / 100);
+      }
+      return sum + price;
+    }, 0);
+    grandTotal += secBomTotal;
+
+    const countBadge = `<span style="font-size:9px;color:var(--text-dim);margin-right:4px">${sec.bomItems.length} BOM</span>`;
+    const priceTag   = secBomTotal > 0
+      ? `<span style="font-size:10px;font-family:var(--font-mono);color:var(--blue-hi,#58a6ff);margin-right:6px">R ${secBomTotal.toFixed(2)}</span>`
+      : '';
+
+    parts.push(`<div class="cp-zone-hd" onclick="toggleCpZone('__x__${escH(secName)}')" style="cursor:pointer">
+      <span style="width:8px;height:8px;border-radius:2px;background:#6b7280;flex-shrink:0;display:inline-block"></span>
+      <span style="font-size:10px;font-weight:700;color:var(--text);letter-spacing:.5px;text-transform:uppercase;flex:1">${escH(secName)}</span>
+      ${isExp ? '' : countBadge}
+      ${isExp ? '' : priceTag}
+      <span style="font-size:10px;color:var(--text-dim)">${isExp ? '▾' : '▸'}</span>
+    </div>`);
+
+    if (!isExp) return;
+
+    const colSpan = _dimsConfirmed ? 5 : 4;
+    parts.push(`<table class="cp-tbl"><tr class="cp-sub-lbl"><td colspan="${colSpan}">BOM Items</td></tr>`);
+    sec.bomItems.forEach(item => {
+      const mat   = ALL_MATS.find(m => m.id === item.materialId);
+      const price = mat ? mat.price : 0;
+      const qty   = _evalFormula(item.formula);
+      const wasteMul  = 1 + (item.wastePct || 0) / 100;
+      const lineTotal = qty !== null ? qty * price * wasteMul : null;
+      const wasteTag  = item.wastePct > 0 ? `<span style="font-size:8px;color:var(--text-dim)"> +${item.wastePct}%</span>` : '';
+      const formulaTag = item.formula && item.formula !== '1'
+        ? `<br><span style="font-size:8px;color:var(--text-dim);font-family:var(--font-mono);opacity:.75">${escH(item.formula)}</span>` : '';
+      const qtyCell = _dimsConfirmed
+        ? `<td class="cp-meta" style="text-align:right">${qty !== null ? qty.toFixed(3) : '<span style="color:var(--red,#c0392b)">⚠ —</span>'}</td>` : '';
+      const priceCell = _dimsConfirmed
+        ? `<td class="cp-price">R ${price.toFixed(2)}</td><td class="cp-price" style="color:var(--text)!important">R ${lineTotal !== null ? lineTotal.toFixed(2) : '—'}</td>`
+        : `<td class="cp-meta" style="text-align:right">${escH(item.formula)}</td><td class="cp-price">R ${price.toFixed(2)}</td>`;
+      parts.push(`<tr class="cp-bom-row">
+        <td>${escH(item.materialName)}${wasteTag}${formulaTag}</td>
+        <td class="cp-meta">${mat ? escH(mat.unit) : ''}</td>
+        ${qtyCell}${priceCell}
+      </tr>`);
+    });
+    parts.push(`<tr class="cp-subtotal">
+      <td colspan="${colSpan - 1}" style="text-align:right;font-size:9px;color:var(--text-dim)">Section subtotal</td>
+      <td class="cp-price" style="color:var(--text)!important;font-weight:600">R ${secBomTotal.toFixed(2)}</td>
+    </tr></table>`);
+  });
+
+  if (!hasContent) {
+    body.innerHTML = `<div class="cp-empty">
+      Add body options &amp; BOM items to zones<br>to see a live cost preview here
+      <span style="font-size:9px;margin-top:4px;opacity:.55">Prices shown per unit — quantities calculated<br>from trailer dimensions at costing time</span>
+    </div>`;
+    total.style.display = 'none';
+    return;
+  }
+
+  body.innerHTML = parts.join('');
+  total.style.display = '';
+  const totalLabel    = _dimsConfirmed ? 'Calculated Total' : 'Indicative Total';
+  const totalSubtitle = _dimsConfirmed
+    ? `${state.dims.length.toFixed(2)}m × ${state.dims.width.toFixed(2)}m × ${state.dims.height.toFixed(2)}m · formulas applied`
+    : 'unit prices only · set dimensions to calculate';
+  total.innerHTML = `
+    <div class="cp-grand">
+      <div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-dim)">${totalLabel}</div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:1px">${totalSubtitle}</div>
+      </div>
+      <div style="font-size:15px;font-weight:700;color:var(--text-head);font-family:var(--font-mono)">R ${grandTotal.toFixed(2)}</div>
+    </div>`;
+}
+
+// ── Legend ────────────────────────────────────────────────────────────────────
+function updateLegend() {
+  const leg = document.getElementById('zone-legend');
+  leg.innerHTML = ZONES.map(z => {
+    const meta  = ZONE_META[z];
+    const zs    = state.zones[z];
+    const count = zs.bodyOptions.length + zs.bomItems.length;
+    return `<div class="legend-chip ${activeZone===z?'active':''}"
+      data-zone="${z}" style="--zc:${meta.color}"
+      onclick="selectZone('${z}')">
+      <div class="legend-dot" style="background:${meta.color}"></div>
+      <span style="color:var(--text-dim)">${meta.label}</span>
+      <span class="legend-count">${count}</span>
+    </div>`;
+  }).join('');
+  // Update detail bar if zone is active
+  if (activeZone) {
+    const zs = state.zones[activeZone];
+    document.getElementById('zone-detail-bar').textContent =
+      `${zs.bodyOptions.length} body option${zs.bodyOptions.length!==1?'s':''} · ${zs.bomItems.length} BOM item${zs.bomItems.length!==1?'s':''} configured`;
+  }
+}
+
+// ── Cost Preview → Left Panel focus ──────────────────────────────────────────
+function focusCpItem(zone, type, idx) {
+  // Switch to the zone (expands it in the left panel and re-renders)
+  selectZone(zone);
+  // After re-render, scroll the target item into view and flash it
+  requestAnimationFrame(() => {
+    const el = document.getElementById(`${type}-item-${zone}-${idx}`);
+    if (!el) return;
+    const panel = document.getElementById('zone-config-body');
+    panel.scrollTo({ top: el.offsetTop - panel.offsetTop - 8, behavior: 'smooth' });
+    el.classList.remove('item-flash');
+    void el.offsetWidth; // force reflow to restart animation
+    el.classList.add('item-flash');
+    setTimeout(() => el.classList.remove('item-flash'), 1100);
+  });
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+function openSaveModal() {
+  if (!_dimsConfirmed) { openSetupModal(); return; }
+  const d = state.dims;
+  const L = d.length.toFixed(2), W = d.width.toFixed(2), H = d.height.toFixed(2);
+  document.getElementById('save-type-info').innerHTML =
+    `<b style="font-size:13px">${escH(d.name)}</b>${d.description ? `<br><span style="color:var(--text-dim)">${escH(d.description)}</span>` : ''}
+     <br><span style="color:var(--text-dim);font-size:11px">${L} m × ${W} m × ${H} m &nbsp;·&nbsp; Floor ${(d.length*d.width).toFixed(2)} m² &nbsp;·&nbsp; Walls ${(2*d.length*d.height).toFixed(2)} m²</span>`;
+  document.getElementById('save-markup').value = state.markup || 0;
+  let summaryLines = [];
+  ZONES.forEach(z => {
+    const zs = state.zones[z];
+    if (!zs.bodyOptions.length && !zs.bomItems.length) return;
+    summaryLines.push(`<b>${ZONE_META[z].label}</b>: ${zs.bodyOptions.length} option${zs.bodyOptions.length!==1?'s':''}, ${zs.bomItems.length} BOM item${zs.bomItems.length!==1?'s':''}`);
+  });
+  state.sectionOrder.forEach(secName => {
+    const sec = state.extraSections[secName];
+    if (!sec || !sec.bomItems.length) return;
+    summaryLines.push(`<b>${escH(secName)}</b>: ${sec.bomItems.length} BOM item${sec.bomItems.length!==1?'s':''}`);
+  });
+  document.getElementById('save-summary').innerHTML =
+    summaryLines.length
+      ? summaryLines.join('<br>')
+      : '<span style="color:var(--red)">No zones configured yet — add some items first.</span>';
+  document.getElementById('modal-save').classList.remove('hidden');
+}
+function closeSaveModal() { document.getElementById('modal-save').classList.add('hidden'); }
+
+async function saveTrailer() {
+  const d = state.dims;
+  if (!d.name) { toast('Body type name is required', 'error'); closeSaveModal(); openSetupModal(); return; }
+
+  const markupPct = parseFloat(document.getElementById('save-markup').value) || 0;
+  const payload = {
+    name:              d.name,
+    description:       d.description,
+    default_length:    d.length,
+    default_width:     d.width,
+    default_height:    d.height,
+    markup_percentage: markupPct / 100,
+    zones: {},
+  };
+  ZONES.forEach(z => {
+    payload.zones[z] = {
+      body_options: state.zones[z].bodyOptions.map(o => ({
+        material_id: o.materialId, subgroup: o.subgroup, is_default: o.isDefault,
+        sort_order: o.sortOrder ?? 0,
+      })),
+      bom_items: state.zones[z].bomItems.map(i => ({
+        material_id: i.materialId, formula: i.formula,
+        waste_pct: i.wastePct, linked_option: i.linkedOption || null,
+        sort_order: i.sortOrder ?? 0,
+      })),
+    };
+  });
+  const extraPayload = {};
+  state.sectionOrder.forEach(secName => {
+    const sec = state.extraSections[secName];
+    if (sec && sec.bomItems.length) {
+      extraPayload[secName] = {
+        bom_items: sec.bomItems.map(i => ({
+          material_id: i.materialId, formula: i.formula,
+          waste_pct: i.wastePct, linked_option: i.linkedOption || null,
+          sort_order: i.sortOrder ?? 0,
+        })),
+      };
+    }
+  });
+  payload.extra_sections = extraPayload;
+
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const r = await fetch('/api/trailer-designer/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+                 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'Save failed');
+    toast(`✦ "${data.trailer_name}" created — ${data.bom_rows} BOM rows added`);
+    closeSaveModal();
+    setTimeout(() => { window.location.href = '/admin/templates'; }, 1400);
+  } catch(e) {
+    toast(e.message, 'error');
+    btn.disabled = false; btn.textContent = '✦ Create Body Type';
+  }
+}
+
+function openResetModal() {
+  document.getElementById('modal-reset').classList.remove('hidden');
+}
+function closeResetModal() {
+  document.getElementById('modal-reset').classList.add('hidden');
+}
+function confirmReset() {
+  closeResetModal();
+  ZONES.forEach(z => { state.zones[z] = { bodyOptions:[], bomItems:[] }; });
+  state.extraSections = {};
+  state.sectionOrder  = [];
+  state.dims = { name:'', description:'', length:12, width:2.45, height:2.2 };
+  state.markup = 0;
+  _dimsConfirmed = false;
+  _cpExpanded.clear();
+  _extSecExpanded.clear();
+  activeZone = null;
+  document.querySelectorAll('.zone-hit').forEach(el => el.classList.remove('active'));
+  document.getElementById('zone-panel-head').textContent = 'Zone Configuration';
+  document.getElementById('hdr-zone-label').textContent = 'Click a zone on the trailer to begin';
+  document.getElementById('zone-detail-bar').textContent = 'Select a zone above — or drag any material from the palette directly onto the trailer.';
+  document.getElementById('hdr-type-chip').style.display = 'none';
+  document.getElementById('btn-main-action').textContent = '✦ Create Body Type';
+  renderAllZonesPanel();
+  updateLegend();
+  openSetupModal();
+}
+
+// kept for internal callers that pass through _activateZone
+function resetDesign() { openResetModal(); }
+
+// ── Default body-option pre-population ───────────────────────────────────────
+function initDefaultBodyOptions() {
+  const zoneSet = new Set(ZONES);
+  BODY_OPT_MATS.forEach(mat => {
+    // Use name-inference exclusively — DB group values from imported trailer
+    // BOMs are unreliable (e.g. rivets stored as FLOOR body options).
+    const zone = _inferZoneFromName(mat.name);
+    if (!zone || !zoneSet.has(zone)) return;
+    const zs = state.zones[zone];
+    zs.bodyOptions.push({
+      materialId:   mat.id,
+      materialName: mat.name,
+      subgroup:     mat.subgroup || null,
+      isDefault:    zs.bodyOptions.length === 0,
+    });
+  });
+  // Enforce DRD/SRD mutual exclusion on init: DRD takes priority
+  if (_zoneHasContent('DRD') && _zoneHasContent('SRD')) {
+    state.zones['SRD'] = { bodyOptions:[], bomItems:[] };
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+initDefaultBodyOptions();
+renderPalette();
+renderAllZonesPanel();   // also calls renderCostPreview()
+updateLegend();
+// Auto-show setup modal on first load so dims are captured before designing
+openSetupModal();
+</script>
+{% endblock %}

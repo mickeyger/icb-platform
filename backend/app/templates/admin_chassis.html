@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+{% block title %}Chassis Options{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Chassis Options{% endblock %}
+
+{% block content %}
+<style>
+  .ch-tabs { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid var(--border); }
+  .ch-tab {
+    padding:8px 16px; cursor:pointer; color:var(--text-dim);
+    border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0;
+    font-size:12px; letter-spacing:.05em; text-transform:uppercase;
+  }
+  .ch-tab.active { color:var(--blue-hi); background:var(--bg-panel); border-color:var(--border); }
+  .ch-pane { display:none; }
+  .ch-pane.active { display:block; }
+  .ch-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .ch-table th { text-align:left; padding:8px 10px; color:var(--text-dim);
+                  text-transform:uppercase; letter-spacing:.04em; font-size:10px;
+                  border-bottom:1px solid var(--border); }
+  .ch-table td { padding:6px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  .ch-table input, .ch-table select {
+    width:100%; padding:5px 8px; background:#0d1117; color:#c9d1d9;
+    border:1px solid var(--border); border-radius:4px; font-size:12px;
+    font-family: var(--font-mono);
+  }
+  .ch-table input.ch-num { text-align:right; font-family: var(--font-mono); }
+  .ch-table tr.dirty td { background: rgba(56,139,253,.06); }
+  .ch-table tr.inactive { opacity:.45; }
+  .ch-actions { white-space:nowrap; text-align:right; }
+  .ch-kind-pill {
+    display:inline-block; padding:2px 8px; border-radius:10px;
+    font-size:10px; letter-spacing:.04em; text-transform:uppercase;
+    background: rgba(56,139,253,.15); color: var(--blue-hi);
+    border: 1px solid rgba(56,139,253,.3);
+  }
+  .ch-kind-pill.k-suspension   { background: rgba(46,160,67,.15); color:#4ade80; border-color:rgba(46,160,67,.3); }
+  .ch-kind-pill.k-brake        { background: rgba(255,179,64,.15); color:#ffb340; border-color:rgba(255,179,64,.3); }
+  .ch-kind-pill.k-tyre         { background: rgba(248,81,73,.15); color:#ff6b6b; border-color:rgba(248,81,73,.3); }
+  .ch-kind-pill.k-rim          { background: rgba(187,93,255,.15); color:#bb5dff; border-color:rgba(187,93,255,.3); }
+  .ch-kind-pill.k-lifting_axle { background: rgba(104,180,255,.15); color:#68b4ff; border-color:rgba(104,180,255,.3); }
+  .ch-kind-pill.k-steel        { background: rgba(140,140,140,.18); color:#bbb; border-color:rgba(140,140,140,.3); }
+  .ch-kind-pill.k-running_gear { background: rgba(56,139,253,.15); color:var(--blue-hi); border-color:rgba(56,139,253,.3); }
+  .ch-add-row { background: rgba(56,139,253,.04); }
+</style>
+
+<div class="ch-tabs">
+  <div class="ch-tab active" data-pane="opts">Selectable Options ({{ options|length }})</div>
+  <div class="ch-tab" data-pane="consts">Constant Items ({{ constants|length }})</div>
+</div>
+
+<!-- ───────── Options ───────── -->
+<div class="ch-pane active" id="pane-opts">
+  <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+    These rows populate the Calculator's chassis dropdowns. <code>Axle count</code> is
+    used by suspensions + brakes (per-axle pricing). <code>Tyre style</code> filters
+    tyres / rims into Dual or Super Single sets.
+  </p>
+  <table class="ch-table" id="tbl-opts">
+    <thead>
+      <tr>
+        <th style="width:120px">Kind</th>
+        <th>Label</th>
+        <th style="width:90px">Axles</th>
+        <th style="width:120px">Tyre style</th>
+        <th style="width:110px;text-align:right">Price (R)</th>
+        <th style="width:70px;text-align:right">Sort</th>
+        <th style="width:60px;text-align:center">Active</th>
+        <th class="ch-actions"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in options %}
+      <tr data-id="{{ o.id }}" class="opt-row{% if not o.is_active %} inactive{% endif %}">
+        <td><span class="ch-kind-pill k-{{ o.kind }}">{{ o.kind|replace('_',' ') }}</span></td>
+        <td><input type="text" class="f-label" value="{{ o.label }}"></td>
+        <td>
+          <select class="f-axle">
+            <option value=""    {% if o.axle_count is none %}selected{% endif %}>—</option>
+            <option value="1"   {% if o.axle_count == 1 %}selected{% endif %}>1</option>
+            <option value="2"   {% if o.axle_count == 2 %}selected{% endif %}>2</option>
+            <option value="3"   {% if o.axle_count == 3 %}selected{% endif %}>3</option>
+          </select>
+        </td>
+        <td>
+          <select class="f-style">
+            <option value=""              {% if not o.tyre_style %}selected{% endif %}>—</option>
+            <option value="dual"          {% if o.tyre_style == 'dual' %}selected{% endif %}>Dual</option>
+            <option value="super_single"  {% if o.tyre_style == 'super_single' %}selected{% endif %}>Super single</option>
+          </select>
+        </td>
+        <td><input type="number" step="0.01" class="f-price ch-num" value="{{ '%.2f'|format(o.price or 0) }}"></td>
+        <td><input type="number" class="f-sort ch-num" value="{{ o.sort_order or 0 }}"></td>
+        <td style="text-align:center">
+          <input type="checkbox" class="f-active" {% if o.is_active %}checked{% endif %}>
+        </td>
+        <td class="ch-actions">
+          <button class="btn btn-sm btn-primary" onclick="saveOpt(this)">Save</button>
+          <button class="btn btn-sm btn-danger"  onclick="deleteOpt(this)">✕</button>
+        </td>
+      </tr>
+      {% endfor %}
+      <tr class="ch-add-row">
+        <td colspan="8">
+          <button class="btn btn-sm btn-success" onclick="addOpt()">+ New option</button>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ───────── Constants ───────── -->
+<div class="ch-pane" id="pane-consts">
+  <p style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+    These items are included in every chassis. Final qty =
+    <code>qty/m × chassis_length + qty_constant</code>. Set <code>qty/m</code> to 0
+    for fixed quantities.
+  </p>
+  <table class="ch-table" id="tbl-consts">
+    <thead>
+      <tr>
+        <th style="width:130px">Category</th>
+        <th>Name</th>
+        <th style="width:90px;text-align:right">Qty / m</th>
+        <th style="width:90px;text-align:right">Qty const</th>
+        <th style="width:110px;text-align:right">Unit price (R)</th>
+        <th style="width:70px;text-align:right">Sort</th>
+        <th style="width:60px;text-align:center">Active</th>
+        <th class="ch-actions"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in constants %}
+      <tr data-id="{{ c.id }}" class="const-row{% if not c.is_active %} inactive{% endif %}">
+        <td><span class="ch-kind-pill k-{{ c.category }}">{{ c.category|replace('_',' ') }}</span></td>
+        <td><input type="text" class="f-name" value="{{ c.name }}"></td>
+        <td><input type="number" step="0.01" class="f-qpm ch-num" value="{{ '%.2f'|format(c.qty_per_metre or 0) }}"></td>
+        <td><input type="number" step="0.01" class="f-qc  ch-num" value="{{ '%.2f'|format(c.qty_constant or 0) }}"></td>
+        <td><input type="number" step="0.01" class="f-up  ch-num" value="{{ '%.2f'|format(c.unit_price or 0) }}"></td>
+        <td><input type="number" class="f-sort ch-num" value="{{ c.sort_order or 0 }}"></td>
+        <td style="text-align:center">
+          <input type="checkbox" class="f-active" {% if c.is_active %}checked{% endif %}>
+        </td>
+        <td class="ch-actions">
+          <button class="btn btn-sm btn-primary" onclick="saveConst(this)">Save</button>
+          <button class="btn btn-sm btn-danger"  onclick="deleteConst(this)">✕</button>
+        </td>
+      </tr>
+      {% endfor %}
+      <tr class="ch-add-row">
+        <td colspan="8">
+          <button class="btn btn-sm btn-success" onclick="addConst()">+ New constant</button>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+document.querySelectorAll('.ch-tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.ch-tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.ch-pane').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('pane-' + t.dataset.pane).classList.add('active');
+}));
+
+function _hdrs() {
+  return {
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+  };
+}
+
+async function saveOpt(btn) {
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  const axle = tr.querySelector('.f-axle').value;
+  const style = tr.querySelector('.f-style').value;
+  const body = {
+    label: tr.querySelector('.f-label').value.trim(),
+    axle_count: axle === '' ? null : Number(axle),
+    tyre_style: style || null,
+    price: Number(tr.querySelector('.f-price').value) || 0,
+    sort_order: Number(tr.querySelector('.f-sort').value) || 0,
+    is_active: tr.querySelector('.f-active').checked,
+  };
+  try {
+    const r = await fetch(`/api/chassis/options/${id}`, {
+      method: 'PUT', headers: _hdrs(), body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    tr.classList.toggle('inactive', !body.is_active);
+    if (window.toast) toast('Option saved', 'success');
+  } catch (e) {
+    if (window.toast) toast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteOpt(btn) {
+  if (!await confirmModal('Delete this option?', {title:'Delete Option',okText:'Delete',danger:true})) return;
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  try {
+    const r = await fetch(`/api/chassis/options/${id}`, { method: 'DELETE', headers: _hdrs() });
+    if (!r.ok) throw new Error(r.status);
+    tr.remove();
+    if (window.toast) toast('Option deleted', 'success');
+  } catch (e) {
+    if (window.toast) toast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+async function addOpt() {
+  const kind = await promptModal('Kind? (suspension | brake | tyre | rim | lifting_axle)', 'suspension', { title: 'New chassis option' });
+  if (!kind) return;
+  const label = await promptModal('Label?', '', { title: 'New chassis option' });
+  if (!label) return;
+  try {
+    const r = await fetch('/api/chassis/options', {
+      method: 'POST', headers: _hdrs(),
+      body: JSON.stringify({ kind: kind.trim(), label: label.trim(), price: 0, is_active: true })
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    location.reload();
+  } catch (e) {
+    if (window.toast) toast('Create failed: ' + e.message, 'error');
+  }
+}
+
+async function saveConst(btn) {
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  const body = {
+    name: tr.querySelector('.f-name').value.trim(),
+    qty_per_metre: Number(tr.querySelector('.f-qpm').value) || 0,
+    qty_constant:  Number(tr.querySelector('.f-qc').value)  || 0,
+    unit_price:    Number(tr.querySelector('.f-up').value)  || 0,
+    sort_order:    Number(tr.querySelector('.f-sort').value) || 0,
+    is_active: tr.querySelector('.f-active').checked,
+  };
+  try {
+    const r = await fetch(`/api/chassis/constants/${id}`, {
+      method: 'PUT', headers: _hdrs(), body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    tr.classList.toggle('inactive', !body.is_active);
+    if (window.toast) toast('Constant saved', 'success');
+  } catch (e) {
+    if (window.toast) toast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteConst(btn) {
+  if (!await confirmModal('Delete this constant?', {title:'Delete Constant',okText:'Delete',danger:true})) return;
+  const tr = btn.closest('tr');
+  const id = tr.dataset.id;
+  try {
+    const r = await fetch(`/api/chassis/constants/${id}`, { method: 'DELETE', headers: _hdrs() });
+    if (!r.ok) throw new Error(r.status);
+    tr.remove();
+    if (window.toast) toast('Constant deleted', 'success');
+  } catch (e) {
+    if (window.toast) toast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+async function addConst() {
+  const cat = await promptModal('Category? (steel | running_gear)', 'steel', { title: 'New chassis constant' });
+  if (!cat) return;
+  const name = await promptModal('Name?', '', { title: 'New chassis constant' });
+  if (!name) return;
+  try {
+    const r = await fetch('/api/chassis/constants', {
+      method: 'POST', headers: _hdrs(),
+      body: JSON.stringify({ category: cat.trim(), name: name.trim(), is_active: true })
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || r.status);
+    location.reload();
+  } catch (e) {
+    if (window.toast) toast('Create failed: ' + e.message, 'error');
+  }
+}
+</script>
+{% endblock %}

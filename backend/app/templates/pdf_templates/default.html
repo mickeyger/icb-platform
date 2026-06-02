@@ -1,0 +1,163 @@
+{% extends "pdf_templates/base.html" %}
+
+{% block content %}
+<!-- Page 1: Main specifications -->
+<div class="position-relative">
+    <!-- Header -->
+    <div class="header">
+        <h1>{{ trailer_name }} COSTING REPORT</h1>
+        <div class="subtitle">Report #{{ record_id }} | {{ created_at.strftime('%d %B %Y') }}</div>
+    </div>
+
+    <!-- Dimensions Table -->
+    <div style="margin-top: 50pt;">
+        <h3 style="color: #388BFD; margin-bottom: 15pt;">TRAILER SPECIFICATIONS</h3>
+
+        <table class="data-table" style="max-width: 500pt;">
+            <tr>
+                <th style="width: 40%;">Parameter</th>
+                <th style="width: 30%;">Value</th>
+                <th style="width: 30%;">Unit</th>
+            </tr>
+            <tr>
+                <td>Length</td>
+                <td class="text-right">{{ dimensions.length }}</td>
+                <td>meters</td>
+            </tr>
+            <tr>
+                <td>Width</td>
+                <td class="text-right">{{ dimensions.width }}</td>
+                <td>meters</td>
+            </tr>
+            <tr>
+                <td>Height</td>
+                <td class="text-right">{{ dimensions.height }}</td>
+                <td>meters</td>
+            </tr>
+            <tr>
+                <td>Number of Axles</td>
+                <td class="text-right">{{ dimensions.num_axles }}</td>
+                <td>units</td>
+            </tr>
+            <tr>
+                <td>Number of Doors</td>
+                <td class="text-right">{{ dimensions.num_doors }}</td>
+                <td>units</td>
+            </tr>
+            {% if dimensions.insulation_thickness %}
+            <tr>
+                <td>Insulation Thickness</td>
+                <td class="text-right">{{ dimensions.insulation_thickness }}</td>
+                <td>meters</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <!-- Floor Area and Volume -->
+    {% if result.geometry %}
+    <div style="margin-top: 30pt;">
+        <h3 style="color: #388BFD; margin-bottom: 15pt;">CALCULATED DIMENSIONS</h3>
+        <table class="data-table" style="max-width: 400pt;">
+            {% for key, value in result.geometry.items() %}
+            <tr>
+                <td>{{ key.replace('_', ' ').title() }}</td>
+                <td class="text-right">{{ "%.2f"|format(value) }}</td>
+                <td>m² or m³</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Page 2: Material Breakdown -->
+<div class="page-break">
+    <div class="header">
+        <h1>MATERIAL BREAKDOWN</h1>
+        <div class="subtitle">{{ trailer_name }} | Report #{{ record_id }}</div>
+    </div>
+
+    <table class="data-table" style="margin-top: 30pt;">
+        <thead>
+            <tr>
+                <th style="width: 15%;">Category</th>
+                <th style="width: 25%;">Material</th>
+                <th style="width: 15%;">Formula</th>
+                <th style="width: 10%;">Quantity</th>
+                <th style="width: 10%;">Unit</th>
+                <th style="width: 12%;">Unit Price</th>
+                <th style="width: 13%;">Line Cost</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in result.items %}
+            <tr>
+                <td>{{ item.category }}</td>
+                <td>{{ item.material[:25] }}{% if item.material|length > 25 %}...{% endif %}</td>
+                <td style="font-size: 8pt;">{{ item.formula[:15] }}{% if item.formula|length > 15 %}...{% endif %}</td>
+                <td class="text-right">{{ "%.2f"|format(item.quantity) }}</td>
+                <td>{{ item.unit }}</td>
+                <td class="text-right">R {{ "%.2f"|format(item.unit_price) }}</td>
+                <td class="text-right font-bold">R {{ "%.2f"|format(item.line_cost) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Page 3: Cost Summary -->
+<div class="page-break">
+    <div class="header">
+        <h1>COST SUMMARY</h1>
+        <div class="subtitle">{{ trailer_name }} | Report #{{ record_id }}</div>
+    </div>
+
+    <div style="margin-top: 50pt;">
+        <table class="data-table" style="max-width: 400pt; margin: 0 auto;">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th class="text-right">Total Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for category, total in result.category_totals.items() %}
+                <tr>
+                    <td>{{ category }}</td>
+                    <td class="text-right font-bold">R {{ "%.2f"|format(total) }}</td>
+                </tr>
+                {% endfor %}
+                <tr style="border-top: 2pt solid #388BFD;">
+                    <td colspan="2" style="height: 10pt;"></td>
+                </tr>
+                <tr>
+                    <td><strong>Cost per m²</strong></td>
+                    <td class="text-right font-bold">R {{ "%.2f"|format(result.cost_per_sqm) }}</td>
+                </tr>
+                <tr style="background: #388BFD; color: white;">
+                    <td><strong>TOTAL MANUFACTURING COST</strong></td>
+                    <td class="text-right font-bold" style="font-size: 12pt;">R {{ "%.2f"|format(result.grand_total) }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Summary box -->
+    <div class="summary-box" style="margin-top: 50pt;">
+        <h3 style="margin: 0 0 15pt 0; color: #388BFD;">FINAL QUOTATION</h3>
+        <div class="total-price">
+            R {{ "%.2f"|format(result.grand_total) }}
+        </div>
+        <p style="margin: 10pt 0 0 0; font-size: 9pt; color: #666;">
+            This quotation is valid for 30 days from {{ created_at.strftime('%d %B %Y') }}
+        </p>
+    </div>
+</div>
+
+<!-- Footer on all pages -->
+<div class="footer">
+    <p>Generated by Trailer Costing System | {{ created_at.strftime('%d %B %Y at %H:%M') }}</p>
+    <p>User: {{ user.username if user else 'System' }}</p>
+</div>
+{% endblock %}

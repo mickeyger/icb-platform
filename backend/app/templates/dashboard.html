@@ -1,0 +1,850 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block breadcrumb %}<strong>Dashboard</strong>{% if user.is_admin %}&nbsp;<span title="Host: {{ db_detail }}" style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;vertical-align:middle;cursor:default;{% if 'PROD' in db_env %}background:#3a1a1a;color:#ff6b6b;border:1px solid #f44336{% else %}background:#2d4a22;color:#7ee87e;border:1px solid #4caf50{% endif %}">{% if 'PROD' in db_env %}&#x26A0; {% endif %}{{ db_env }}</span>&nbsp;<span title="All services running" style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;vertical-align:middle;cursor:default;background:#1a3a1a;color:#7ee87e;border:1px solid #4caf50">&#x2714; ONLINE</span>&nbsp;<span title="Database host / schema" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;vertical-align:middle;cursor:default;background:rgba(56,139,253,.08);color:var(--text-dim);border:1px solid rgba(56,139,253,.25);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.02em">{{ db_detail }}</span>{% endif %}{% endblock %}
+
+{% block head %}
+<style>
+  .tt-view-btn { padding:3px 8px; font-size:13px; line-height:1; }
+  .tt-view-btn.active { background:rgba(56,139,253,.2); color:var(--blue); border-color:var(--blue); }
+  .tt-dash-tile { transition:border-color .15s, background .15s; }
+  .tt-dash-tile:hover { border-color:var(--blue) !important; }
+  .tt-dash-icon-link:hover { background:var(--bg-panel); border-color:var(--blue); }
+  .tt-dash-icon-link {
+    background: linear-gradient(180deg, var(--tt-accent-soft, rgba(56,139,253,.08)) 0%, rgba(13,17,23,.06) 100%);
+    border-color: var(--tt-accent-border, rgba(56,139,253,.2)) !important;
+  }
+  .tt-dash-icon-badge {
+    background: linear-gradient(135deg, var(--tt-accent, var(--blue-hi)) 0%, var(--tt-accent-deep, var(--blue)) 100%);
+    box-shadow: 0 0 0 1px var(--tt-accent-border, rgba(56,139,253,.2));
+  }
+  .tt-dash-details-row { cursor:pointer; }
+  .tt-dash-details-row:hover td { background:var(--bg-panel); }
+  .recent-approved-row td {
+    background: rgba(63,185,80,.07);
+    border-top: 1px solid rgba(63,185,80,.14);
+    border-bottom: 1px solid rgba(63,185,80,.14);
+  }
+  .recent-approved-row:hover td {
+    background: rgba(63,185,80,.12) !important;
+  }
+  /* Body type column hosts body name + pills, ALL on one line */
+  #recent-card .body-cell {
+    white-space: nowrap;
+  }
+  #recent-card .body-name {
+    margin-right: 8px;
+  }
+  /* Customer cell sits in its own column so names align vertically; allowed to wrap */
+  #recent-card .customer-cell {
+    color: var(--text-dim);
+    white-space: normal;
+    max-width: 180px;
+    line-height: 1.3;
+  }
+  /* Customer name shown inside the pill row (replaces the dropped Customer column) */
+  .row-client {
+    display: inline-flex; align-items: center;
+    font-size: 12px; color: var(--text-dim);
+    padding: 2px 4px;
+    white-space: nowrap;
+  }
+  .row-client::before {
+    content: '·';
+    color: var(--text-faint, #586673);
+    margin-right: 6px;
+    font-weight: 700;
+  }
+  /* Icon-only buttons in the recent-actions row */
+  .btn.btn-icon-only {
+    padding: 4px 8px;
+    font-size: 13px;
+    line-height: 1;
+    min-width: 30px;
+    text-align: center;
+  }
+  #recent-tbody .td-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    align-items: center;
+  }
+  /* Admin right-click context menu on recent rows */
+  .row-context-menu {
+    position: fixed;
+    background: var(--bg-panel, #161c24);
+    border: 1px solid var(--border, #2a3441);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.55);
+    z-index: 1500;
+    min-width: 200px;
+    display: none;
+    font-size: 13px;
+  }
+  .row-context-menu.show { display: block; }
+  .row-context-menu .ctx-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+  .row-context-menu .ctx-item.danger { color: #ff6b6b; }
+  .row-context-menu .ctx-item.danger:hover { background: rgba(248,81,73,.18); }
+  .row-context-menu .ctx-hint {
+    padding: 4px 12px 6px;
+    font-size: 10px;
+    color: var(--text-faint, #586673);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    border-bottom: 1px solid var(--border, #2a3441);
+    margin-bottom: 4px;
+  }
+  #recent-tbody tr.ctx-target td {
+    background: rgba(248,81,73,.08) !important;
+  }
+  .approved-pill {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:1px 7px; border-radius:999px; font-size:10px; font-weight:700;
+    background:rgba(63,185,80,.14); border:1px solid rgba(63,185,80,.32); color:var(--green);
+    text-transform:uppercase; letter-spacing:.4px;
+  }
+  /* Clickable stat cards */
+  .stat-card[onclick], .stat-card[style*="cursor:pointer"] {
+    transition: border-color .15s, background .15s, box-shadow .15s;
+  }
+  .stat-card[onclick]:hover, .stat-card[style*="cursor:pointer"]:hover {
+    border-color: var(--blue) !important;
+    background: rgba(56,139,253,.06) !important;
+  }
+  .stat-card.stat-active {
+    border-color: var(--blue) !important;
+    background: rgba(56,139,253,.1) !important;
+    box-shadow: 0 0 0 2px rgba(56,139,253,.2);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# ── Outdated-prices alert (admin only) ── #}
+{% if outdated_count and user.is_admin %}
+<div class="alert-banner alert-warn">
+  <div class="ab-icon">⚠</div>
+  <div class="ab-body">
+    <div class="ab-title">{{ outdated_count }} material price{{ 's' if outdated_count != 1 else '' }} may be out of date</div>
+    <div class="ab-sub">Not updated in the last 90 days — review before quoting</div>
+  </div>
+  <a href="/admin/materials" class="btn btn-outline btn-sm" style="flex-shrink:0">Review Prices →</a>
+</div>
+{% endif %}
+
+{# ── Stats row ── #}
+<div class="stat-grid">
+  <div class="stat-card" id="stat-week" style="cursor:pointer" title="Click to show this week's quotes"
+       onclick="filterRecent('week', this)">
+    <div class="stat-label">Quotes This Week</div>
+    <div class="stat-value">{{ quotes_this_week }}</div>
+    <div class="stat-sub">last 7 days</div>
+  </div>
+  <div class="stat-card" id="stat-all" style="cursor:pointer" title="Click to show all quotations"
+       onclick="filterRecent('all', this)">
+    <div class="stat-label">Total Quoted</div>
+    <div class="stat-value" style="font-size:22px">R {{ '{:,.0f}'.format(total_value_quoted) }}</div>
+    <div class="stat-sub">{{ calc_count }} completed quotation{{ 's' if calc_count != 1 else '' }}</div>
+  </div>
+  <div class="stat-card" id="stat-approved" style="cursor:pointer" title="Click to show accepted quotations"
+       onclick="filterRecent('accepted', this)">
+    <div class="stat-label">Accepted Quotes</div>
+    <div class="stat-value" id="approved-value" style="font-size:22px">R {{ '{:,.0f}'.format(approved_value_quoted) }}</div>
+    <div class="stat-sub" id="approved-subtitle"><span id="approved-count">{{ approved_count }}</span> accepted quotation{{ 's' if approved_count != 1 else '' }}</div>
+  </div>
+  <div class="stat-card" id="stat-mat"
+       {% if outdated_count %}style="cursor:pointer" title="Click to review outdated prices"
+       onclick="location.href='/admin/materials?filter=outdated'"{% endif %}>
+    <div class="stat-label">Materials</div>
+    <div class="stat-value">{{ mat_count }}</div>
+    <div class="stat-sub">
+      {% if outdated_count %}<span style="color:#ffb340">{{ outdated_count }} outdated</span>
+      {% else %}all up to date{% endif %}
+    </div>
+  </div>
+  {% if user_can(user, 'dashboard.approval_rate') %}
+  <div class="stat-card" id="approval-rate-card" title="Approved quotations as a percentage of total quotations created in each period">
+    <div class="stat-label">Approval Rate</div>
+    <div style="display:flex;flex-direction:column;gap:3px;margin-top:6px;font-size:13px;line-height:1.25">
+      {% for key in ['week', 'month', 'prev'] %}
+      {% set b = approval_rates[key] %}
+      <div data-bucket="{{ key }}" style="display:flex;justify-content:space-between;gap:8px">
+        <span class="ar-label" style="color:var(--text-secondary);min-width:88px">{{ b.label }}</span>
+        <span style="font-weight:600"><span class="ar-approved">{{ b.approved }}</span> / <span class="ar-total">{{ b.total }}</span>
+          <span class="ar-pct" style="color:{% if b.pct >= 50 %}var(--green){% elif b.pct >= 25 %}#ffb340{% else %}var(--text-secondary){% endif %};font-weight:700">({{ b.pct }}%)</span>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Quick actions ── #}
+<div class="quick-actions">
+  <a href="/calculator" class="quick-action">
+    <div class="qa-icon">⚙</div>
+    <div><div class="qa-label">New Calculation</div><div class="qa-sub">Start costing a trailer</div></div>
+  </a>
+  {% if user.is_admin %}
+  <a href="/admin/materials" class="quick-action">
+    <div class="qa-icon">◈</div>
+    <div><div class="qa-label">Update Prices</div><div class="qa-sub">{{ mat_count }} materials{% if outdated_count %} · <span style="color:#ffb340">{{ outdated_count }} outdated</span>{% endif %}</div></div>
+  </a>
+  <a href="/admin/customers" class="quick-action">
+    <div class="qa-icon">👤</div>
+    <div><div class="qa-label">Customers</div><div class="qa-sub">{{ customer_count }} active</div></div>
+  </a>
+  <a href="/admin/templates" class="quick-action">
+    <div class="qa-icon">⊡</div>
+    <div><div class="qa-label">Trailer Templates</div><div class="qa-sub">{{ trailers|length }} configured</div></div>
+  </a>
+  {% endif %}
+</div>
+
+{# ── Trailer type grid ── #}
+<div class="card" style="margin-bottom:20px">
+  <div class="card-header">
+    <span class="card-title" onclick="toggleBodyTypesCard()" style="cursor:pointer;user-select:none"
+          title="Collapse / expand Body Types — more room for Recent Calculations">
+      <span id="bt-chevron" style="display:inline-block;width:12px;font-size:11px">▼</span> Body Types
+    </span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;gap:2px">
+        <button class="btn btn-icon tt-view-btn" data-view="icons"   title="Small icons"   onclick="setDashTTView('icons')">▫</button>
+        <button class="btn btn-icon tt-view-btn" data-view="list"    title="List view"     onclick="setDashTTView('list')">≡</button>
+        <button class="btn btn-icon tt-view-btn" data-view="tiles"   title="Tiles view"    onclick="setDashTTView('tiles')">⊞</button>
+        <button class="btn btn-icon tt-view-btn" data-view="details" title="Details view"  onclick="setDashTTView('details')">≣</button>
+      </div>
+      <button class="btn btn-icon tt-view-btn" id="btn-tt-sort" title="Sort A–Z"
+              onclick="toggleTTSort()" style="font-size:11px;letter-spacing:.5px">A–Z</button>
+      <a href="/calculator" class="btn btn-primary btn-sm">+ New Calculation</a>
+    </div>
+  </div>
+  <div class="card-body" id="dash-tt-body"><!-- rendered by JS --></div>
+</div>
+
+{# ── Recent calculations ── #}
+<div class="card" id="recent-card">
+  <div class="card-header">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="card-title">Recent Calculations</span>
+      <span id="recent-filter-badge" style="display:none;font-size:11px;padding:2px 8px;
+        border-radius:10px;background:rgba(56,139,253,.15);color:var(--blue);border:1px solid rgba(56,139,253,.3)">
+        <!-- filter label -->
+      </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <div class="recent-status-filters" style="display:flex;gap:4px;align-items:center">
+        <button class="btn btn-outline btn-sm recent-status-btn" data-status="pending"
+                onclick="filterRecent('pending', this)"
+                style="font-size:11px;padding:3px 9px;color:#ffb340;border-color:rgba(255,179,64,.4)">● Pending</button>
+        <button class="btn btn-outline btn-sm recent-status-btn" data-status="accepted"
+                onclick="filterRecent('accepted', this)"
+                style="font-size:11px;padding:3px 9px;color:#4ade80;border-color:rgba(46,160,67,.45)">✓ Accepted</button>
+        <button class="btn btn-outline btn-sm recent-status-btn" data-status="declined"
+                onclick="filterRecent('declined', this)"
+                style="font-size:11px;padding:3px 9px;color:#ff6b6b;border-color:rgba(248,81,73,.45)">✗ Declined</button>
+        <button class="btn btn-outline btn-sm recent-status-btn" data-status="repair"
+                onclick="filterRecent('repair', this)"
+                style="font-size:11px;padding:3px 9px;color:#4a90d9;border-color:rgba(74,144,217,.45)">🔧 Repair</button>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim)">Click ⧉ to re-open with same dimensions · right-click a row for admin actions</span>
+      <button id="recent-clear-filter" class="btn btn-outline btn-sm" style="display:none"
+              onclick="filterRecent('all', document.getElementById('stat-all'))">✕ Clear filter</button>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Body Type</th><th>Customer</th><th>Revision</th><th>User</th>
+          <th style="text-align:right">Total Cost</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="recent-tbody">
+        {% for r in recent %}
+        {% set ver = r.result_data.get('version', 1) if r.result_data else 1 %}
+        {% set rstatus = (r.status if r.status else ('accepted' if r.approved_at else 'pending')) %}
+        {% set rwhen = r.approved_at.strftime('%Y-%m-%d %H:%M') if r.approved_at else '' %}
+        {% set rby = r.approver.username if r.approver else '' %}
+        {% if rstatus == 'accepted' %}
+          {% set rtip = 'Accepted' + (' by ' ~ rby if rby else '') + (' on ' ~ rwhen if rwhen else '') %}
+        {% elif rstatus == 'declined' %}
+          {% set rtip = 'Declined' + (' by ' ~ rby if rby else '') + (' on ' ~ rwhen if rwhen else '') + ((' — ' ~ r.decline_reason) if r.decline_reason else '') %}
+        {% else %}
+          {% set rtip = 'Pending review' %}
+        {% endif %}
+        <tr{% if rstatus == 'accepted' %} class="recent-approved-row"{% endif %} title="{{ rtip }}">
+          <td class="td-mono" style="color:var(--text-dim)" title="Internal #{{ r.id }} · Created {{ r.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ r.quote_number or ('#' ~ r.id) }}</td>
+          <td class="body-cell">
+            <span class="body-name">{{ r.trailer_type.name if r.trailer_type else '—' }}</span>
+            <span class="row-pills">
+            {% if rstatus == 'accepted' %}
+              <span class="costing-state-pill state-accepted" title="{{ rtip }}">✓ Accepted</span>
+              <span class="production-state-pill prod-awaiting"
+                    title="Production line has not yet acknowledged this accepted quote">⏳ Awaiting Ack</span>
+            {% elif rstatus == 'declined' %}
+              <span class="costing-state-pill state-declined" title="{{ rtip }}">✗ Declined</span>
+            {% else %}
+              <span class="costing-state-pill state-pending" title="{{ rtip }}">● Pending</span>
+            {% endif %}
+            {% if r.is_repair %}
+              <span class="costing-state-pill" title="Repair work"
+                style="background:rgba(74,144,217,.16);color:#4a90d9;border:1px solid rgba(74,144,217,.4)">🔧 Repair</span>
+            {% endif %}
+            </span>
+          </td>
+          <td class="customer-cell">{{ r.customer.name if r.customer else '—' }}</td>
+          <td class="td-mono" style="text-align:center">
+            {% if ver > 1 %}
+            <span style="background:rgba(255,163,67,.15);color:#ffb340;border:1px solid rgba(255,163,67,.35);
+              border-radius:8px;padding:1px 6px;font-size:10px">Rev{{ ver }}</span>
+            {% else %}
+            <span style="color:var(--text-dim);font-size:11px">Rev1</span>
+            {% endif %}
+          </td>
+          <td>{{ r.user.username if r.user else '—' }}</td>
+          <td class="td-num" style="color:var(--blue-hi)">
+            {% if r.result_data %}
+              {% set gt = r.result_data.get('selling_price') or r.result_data.get('grand_total') or 0 %}
+              {% if gt %}R {{ '{:,.2f}'.format(gt | float) }}{% endif %}
+            {% endif %}
+          </td>
+          <td class="td-actions" style="white-space:nowrap">
+            <a href="/results/{{ r.id }}" class="btn btn-outline btn-sm btn-icon-only" title="View this calculation">👀</a>
+            <a href="/calculator?from={{ r.id }}" class="btn btn-outline btn-sm btn-icon-only" title="Copy dimensions into a new calculation">⧉</a>
+            {% if rstatus == 'pending' %}
+            <button class="btn btn-success btn-sm btn-icon-only" title="Accept this calculation" onclick="acceptRecentCalculation({{ r.id }}, this)">✓</button>
+            <button class="btn btn-danger btn-sm btn-icon-only" title="Decline this calculation" onclick="declineRecentCalculation({{ r.id }}, this)">✗</button>
+            {% endif %}
+            {# Admin delete moved to right-click context menu on the row #}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if user.is_admin %}
+<div class="row-context-menu" id="recentContextMenu" role="menu">
+  <div class="ctx-hint">Admin actions</div>
+  <div class="ctx-item danger" id="ctxDelete" role="menuitem">🗑  Delete calculation</div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const IS_ADMIN = {{ 'true' if user.is_admin else 'false' }};
+
+// ── Body Types card collapse ──────────────────────────────────────────────────
+// Lets the user fold away the Body Types grid for more room to see Recent
+// Calculations. State persists per browser.
+function toggleBodyTypesCard(forceState) {
+  const body = document.getElementById('dash-tt-body');
+  const chev = document.getElementById('bt-chevron');
+  if (!body) return;
+  const collapsed = forceState !== undefined ? forceState : body.style.display !== 'none';
+  body.style.display = collapsed ? 'none' : '';
+  if (chev) chev.textContent = collapsed ? '▶' : '▼';
+  try { localStorage.setItem('dash_bodytypes_collapsed', collapsed ? '1' : '0'); } catch (_) {}
+}
+try {
+  if (localStorage.getItem('dash_bodytypes_collapsed') === '1') toggleBodyTypesCard(true);
+} catch (_) {}
+
+// ── filterRecent: fetch & render the Recent Calculations table ────────────────
+let _activeFilter = 'all';
+
+function _statusOf(row) {
+  return row.status || (row.approved ? 'accepted' : 'pending');
+}
+function _statusTip(row) {
+  const st = _statusOf(row);
+  if (st === 'accepted') {
+    return `Accepted${row.approver ? ' by ' + row.approver : ''}${row.approved_at ? ' on ' + row.approved_at : ''}`;
+  }
+  if (st === 'declined') {
+    const r = row.decline_reason ? ' — ' + row.decline_reason : '';
+    return `Declined${row.approver ? ' by ' + row.approver : ''}${row.approved_at ? ' on ' + row.approved_at : ''}${r}`;
+  }
+  return 'Pending review';
+}
+function renderStatePill(row) {
+  const st = _statusOf(row);
+  const tip = escH(_statusTip(row));
+  if (st === 'accepted') {
+    return `<span class="costing-state-pill state-accepted" title="${tip}">✓ Accepted</span>`
+         + renderProductionPill(row);
+  }
+  if (st === 'declined') return `<span class="costing-state-pill state-declined" title="${tip}">✗ Declined</span>`;
+  return `<span class="costing-state-pill state-pending" title="${tip}">● Pending</span>`;
+}
+// Placeholder until the production module is live — every accepted quote is "awaiting"
+// the foreman's acknowledgement on the production board. Future: read row.production_acknowledged_at.
+function renderProductionPill(row) {
+  const ack = row && row.production_acknowledged_at;
+  if (ack) {
+    return ` <span class="production-state-pill prod-acknowledged" title="Acknowledged by production line on ${escH(ack)}">✓ Acknowledged</span>`;
+  }
+  return ` <span class="production-state-pill prod-awaiting" title="Production line has not yet acknowledged this accepted quote">⏳ Awaiting Ack</span>`;
+}
+function renderRepairPill(row) {
+  if (!row.is_repair) return '';
+  return ` <span class="costing-state-pill" title="Repair work" style="background:rgba(74,144,217,.16);color:#4a90d9;border:1px solid rgba(74,144,217,.4)">🔧 Repair</span>`;
+}
+
+function formatApprovedSubtitle(count) {
+  return `${count} accepted quotation${count === 1 ? '' : 's'}`;
+}
+
+function bumpApprovedStats(amount) {
+  const countEl = document.getElementById('approved-count');
+  const subtitleEl = document.getElementById('approved-subtitle');
+  const valueEl = document.getElementById('approved-value');
+  if (countEl) {
+    const current = Number(countEl.textContent || '0');
+    const next = current + 1;
+    countEl.textContent = String(next);
+    if (subtitleEl) subtitleEl.innerHTML = `<span id="approved-count">${next}</span> approved quotation${next === 1 ? '' : 's'}`;
+  }
+  if (valueEl && amount) {
+    const numeric = Number(String(valueEl.textContent).replace(/[^\d.-]/g, '')) || 0;
+    valueEl.textContent = 'R ' + (numeric + amount).toLocaleString('en-ZA', { maximumFractionDigits: 0 });
+  }
+}
+
+function _replaceRowPillAndButtons(row, pillHtml) {
+  if (!row) return;
+  const trailerCell = row.children[1];
+  if (trailerCell) {
+    const existing = trailerCell.querySelector('.costing-state-pill, .approved-pill');
+    if (existing) existing.outerHTML = pillHtml;
+    else trailerCell.insertAdjacentHTML('beforeend', ' ' + pillHtml);
+  }
+  const actionsCell = row.querySelector('.td-actions');
+  if (actionsCell) {
+    actionsCell.querySelectorAll('button').forEach(b => b.remove());
+  }
+}
+
+async function acceptRecentCalculation(recordId, btn) {
+  if (!recordId || !btn || btn.disabled) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Saving...';
+  try {
+    const result = await api('POST', `/api/calculations/${recordId}/accept`, {});
+    const row = btn.closest('tr');
+    if (row) {
+      row.classList.add('recent-approved-row');
+      const pill = renderStatePill({
+        status: 'accepted',
+        approved_at: result.approved_at,
+        approver: result.approver
+      });
+      _replaceRowPillAndButtons(row, pill);
+    }
+    if (!result.already_decided) {
+      const totalCell = row?.children?.[6];
+      const amount = totalCell ? Number(String(totalCell.textContent).replace(/[^\d.-]/g, '')) || 0 : 0;
+      bumpApprovedStats(amount);
+      toast(`Calculation #${recordId} accepted`, 'success');
+    } else {
+      toast(`Calculation #${recordId} already decided`, 'info');
+    }
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = original;
+    toast(err.message, 'error');
+  }
+}
+
+async function declineRecentCalculation(recordId, btn) {
+  if (!recordId || !btn || btn.disabled) return;
+  const reason = await promptModal(
+    'Why is this costing being declined? (min 5 characters)',
+    '',
+    { title: 'Decline costing', okText: 'Decline' }
+  );
+  if (reason === null) return;
+  if (reason.trim().length < 5) {
+    toast('Decline reason must be at least 5 characters', 'error');
+    return;
+  }
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Saving...';
+  try {
+    const result = await api('POST', `/api/calculations/${recordId}/decline`, { reason: reason.trim() });
+    const row = btn.closest('tr');
+    if (row) {
+      const pill = renderStatePill({
+        status: 'declined',
+        approved_at: result.approved_at,
+        approver: result.approver,
+        decline_reason: result.decline_reason || reason.trim()
+      });
+      _replaceRowPillAndButtons(row, pill);
+    }
+    toast(`Calculation #${recordId} declined`, 'success');
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = original;
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteRecentCalculation(recordId, row) {
+  if (!recordId) return;
+  const confirmed = await confirmModal(
+    `Permanently delete calculation #${recordId}? This cannot be undone.`,
+    { title: 'Delete Calculation', okText: 'Delete', okClass: 'btn-danger' }
+  );
+  if (!confirmed) return;
+  try {
+    await api('DELETE', `/api/calculations/${recordId}`);
+    if (row) row.remove();
+    toast(`Calculation #${recordId} deleted`, 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ── Admin-only right-click delete on Recent Calculations rows ──
+function _wireRecentRowContextMenu() {
+  if (!IS_ADMIN) return;
+  const tbody = document.getElementById('recent-tbody');
+  const menu  = document.getElementById('recentContextMenu');
+  if (!tbody || !menu) return;
+  let targetId = null, targetRow = null;
+
+  tbody.addEventListener('contextmenu', (e) => {
+    const row = e.target.closest('tr');
+    if (!row || !tbody.contains(row)) return;
+    const viewLink = row.querySelector('a[href^="/results/"]');
+    const m = viewLink?.getAttribute('href').match(/\/results\/(\d+)/);
+    if (!m) return;
+    e.preventDefault();
+    targetId  = parseInt(m[1], 10);
+    targetRow = row;
+
+    // Position menu; clamp to viewport
+    const mw = 200, mh = 50;
+    const x = Math.min(e.clientX, window.innerWidth  - mw - 8);
+    const y = Math.min(e.clientY, window.innerHeight - mh - 8);
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+    menu.classList.add('show');
+
+    // Briefly highlight the targeted row
+    document.querySelectorAll('#recent-tbody tr.ctx-target').forEach(r => r.classList.remove('ctx-target'));
+    row.classList.add('ctx-target');
+  });
+
+  document.addEventListener('click', () => {
+    menu.classList.remove('show');
+    document.querySelectorAll('#recent-tbody tr.ctx-target').forEach(r => r.classList.remove('ctx-target'));
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      menu.classList.remove('show');
+      document.querySelectorAll('#recent-tbody tr.ctx-target').forEach(r => r.classList.remove('ctx-target'));
+    }
+  });
+
+  document.getElementById('ctxDelete')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    menu.classList.remove('show');
+    if (targetId) await deleteRecentCalculation(targetId, targetRow);
+  });
+}
+_wireRecentRowContextMenu();
+
+async function filterRecent(filter, clickedCard) {
+  _activeFilter = filter;
+
+  // Highlight active stat card / status button
+  document.querySelectorAll('.stat-card').forEach(c => c.classList.remove('stat-active'));
+  document.querySelectorAll('.recent-status-btn').forEach(b => {
+    b.style.background = '';
+    b.style.fontWeight = '';
+  });
+  if (clickedCard) {
+    if (clickedCard.classList.contains('recent-status-btn')) {
+      clickedCard.style.background = 'rgba(56,139,253,.15)';
+      clickedCard.style.fontWeight = '700';
+    } else {
+      clickedCard.classList.add('stat-active');
+    }
+  }
+
+  // Scroll the Recent Calculations card into view smoothly
+  const recentCard = document.getElementById('recent-card');
+  if (recentCard) recentCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Show/hide filter badge + clear button
+  const badge      = document.getElementById('recent-filter-badge');
+  const clearBtn   = document.getElementById('recent-clear-filter');
+  const filterLabels = { week: 'This Week', month: 'This Month', approved: 'Approved Quotes',
+                         pending: 'Pending', accepted: 'Accepted', declined: 'Declined',
+                         repair: 'Repair', all: '' };
+  if (filter !== 'all') {
+    badge.textContent = filterLabels[filter] || filter;
+    badge.style.display = '';
+    clearBtn.style.display = '';
+  } else {
+    badge.style.display = 'none';
+    clearBtn.style.display = 'none';
+  }
+
+  // Show skeleton while loading
+  const tbody = document.getElementById('recent-tbody');
+  if (tbody) tbody.innerHTML = skeletonRows(8, 5);
+
+  try {
+    const rows = await api('GET', `/api/calculations?filter=${filter}&limit=20`);
+    if (!tbody) return;
+    if (!rows || !rows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">
+        No calculations found for this period.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const ver = r.version || 1;
+      const verBadge = ver > 1
+        ? `<span style="background:rgba(255,163,67,.15);color:#ffb340;border:1px solid rgba(255,163,67,.35);border-radius:8px;padding:1px 6px;font-size:10px">Rev${ver}</span>`
+        : `<span style="color:var(--text-dim);font-size:11px">Rev1</span>`;
+      const st = _statusOf(r);
+      const stateBtns = st === 'pending'
+        ? `<button class="btn btn-success btn-sm btn-icon-only" title="Accept this calculation" onclick="acceptRecentCalculation(${r.id}, this)">✓</button>
+           <button class="btn btn-danger btn-sm btn-icon-only" title="Decline this calculation" onclick="declineRecentCalculation(${r.id}, this)">✗</button>`
+        : '';
+      // Admin delete is handled via right-click context menu on the row
+      const deleteBtn = '';
+      const rowTip = escH(_statusTip(r));
+      return `<tr${st === 'accepted' ? ' class="recent-approved-row"' : ''} title="${rowTip}">
+        <td class="td-mono" style="color:var(--text-dim)" title="Internal #${r.id}${r.created_at ? ' · Created ' + escH(r.created_at) : ''}">${escH(r.quote_number || ('#' + r.id))}</td>
+        <td class="body-cell"><span class="body-name">${escH(r.trailer)}</span><span class="row-pills">${renderStatePill(r)}${renderRepairPill(r)}</span></td>
+        <td class="customer-cell">${escH(r.customer || '—')}</td>
+        <td class="td-mono" style="text-align:center">${verBadge}</td>
+        <td>${escH(r.user)}</td>
+        <td class="td-num" style="color:var(--blue-hi)">${
+          r.grand_total ? 'R ' + Number(r.grand_total).toLocaleString('en-ZA', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—'
+        }</td>
+        <td class="td-actions" style="white-space:nowrap">
+          <a href="/results/${r.id}" class="btn btn-outline btn-sm btn-icon-only" title="View this calculation">👀</a>
+          <a href="/calculator?from=${r.id}" class="btn btn-outline btn-sm btn-icon-only" title="Copy dimensions into a new calculation">⧉</a>
+          ${stateBtns}
+          ${deleteBtn}
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:24px">
+      Failed to load: ${escH(err.message)}</td></tr>`;
+    toast(err.message, 'error');
+  }
+}
+
+const dashTrailers = [
+  {% for t in trailers %}
+  { id: {{ t.id }}, name: {{ t.name | tojson }}, description: {{ (t.description or '') | tojson }}, markup_percentage: {{ t.markup_percentage if t.markup_percentage is not none else 'null' }} }{% if not loop.last %},{% endif %}
+  {% endfor %}
+];
+let dashTTView = localStorage.getItem('tt-view') || 'tiles';
+let dashTTSorted = localStorage.getItem('tt-sorted') === '1';
+
+function escH(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const trailerAccentPalette = [
+  { accent: '#96d0ff', deep: '#5caeff', soft: 'rgba(150,208,255,.20)', border: 'rgba(150,208,255,.34)' },
+  { accent: '#6ebcff', deep: '#388bfd', soft: 'rgba(110,188,255,.19)', border: 'rgba(110,188,255,.34)' },
+  { accent: '#529eff', deep: '#2463eb', soft: 'rgba(82,158,255,.18)', border: 'rgba(82,158,255,.34)' },
+  { accent: '#427ee8', deep: '#1d4ed8', soft: 'rgba(66,126,232,.18)', border: 'rgba(66,126,232,.34)' },
+  { accent: '#315fc7', deep: '#183a9e', soft: 'rgba(49,95,199,.18)', border: 'rgba(49,95,199,.34)' }
+];
+
+function getTrailerInitial(name) {
+  const trimmed = String(name || '').trim();
+  return (trimmed[0] || '?').toUpperCase();
+}
+
+function getTrailerAccent(name) {
+  const initial = getTrailerInitial(name);
+  const code = initial.charCodeAt(0);
+  const normalized = Number.isFinite(code) ? Math.max(65, Math.min(90, code)) : 65;
+  const groupIndex = Math.floor((normalized - 65) / 5.2);
+  return trailerAccentPalette[Math.min(groupIndex, trailerAccentPalette.length - 1)];
+}
+
+function setDashTTView(view) {
+  dashTTView = view;
+  localStorage.setItem('tt-view', view);
+  document.querySelectorAll('.tt-view-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === view));
+  renderDashTrailers();
+}
+
+function toggleTTSort() {
+  dashTTSorted = !dashTTSorted;
+  localStorage.setItem('tt-sorted', dashTTSorted ? '1' : '0');
+  document.getElementById('btn-tt-sort')?.classList.toggle('active', dashTTSorted);
+  renderDashTrailers();
+}
+
+function renderDashTrailers() {
+  const body = document.getElementById('dash-tt-body');
+  if (!dashTrailers.length) {
+    body.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px">No trailer types configured.</div>';
+    return;
+  }
+  const trailers = dashTTSorted
+    ? [...dashTrailers].sort((a, b) => a.name.localeCompare(b.name))
+    : dashTrailers;
+
+  if (dashTTView === 'icons') {
+    body.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px">
+      ${trailers.map(t => {
+        const accent = getTrailerAccent(t.name);
+        const initial = getTrailerInitial(t.name);
+        return `
+        <a href="/calculator?trailer=${t.id}" class="tt-dash-icon-link"
+           style="text-decoration:none;border:1px solid var(--border);border-radius:8px;
+             padding:8px 6px;display:flex;flex-direction:column;align-items:center;gap:6px;
+             min-height:84px;transition:all .12s;--tt-accent:${accent.accent};
+             --tt-accent-deep:${accent.deep};--tt-accent-soft:${accent.soft};
+             --tt-accent-border:${accent.border}">
+          <div class="tt-dash-icon-badge" style="width:24px;height:24px;border-radius:50%;color:#fff;
+            font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            ${escH(initial)}
+          </div>
+          <div style="font-size:10px;line-height:1.2;text-align:center;color:var(--text-head);
+            width:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+            ${escH(t.name)}
+          </div>
+        </a>`;
+      }).join('')}
+    </div>`;
+
+  } else if (dashTTView === 'list') {
+    body.innerHTML = trailers.map(t => `
+      <a href="/calculator?trailer=${t.id}" style="text-decoration:none;display:flex;align-items:center;gap:10px;
+        padding:10px 12px;border-bottom:1px solid var(--border);color:inherit;transition:background .12s"
+        onmouseover="this.style.background='var(--bg-panel)'" onmouseout="this.style.background=''">
+        <span style="width:8px;height:8px;border-radius:50%;background:${getTrailerAccent(t.name).accent};flex-shrink:0;display:inline-block"></span>
+        <div>
+          <div style="font-size:13px;font-weight:600">${escH(t.name)}</div>
+          ${t.description ? `<div style="font-size:11px;color:var(--text-dim)">${escH(t.description)}</div>` : ''}
+        </div>
+      </a>`).join('');
+
+  } else if (dashTTView === 'details') {
+    body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--bg-panel);border-bottom:2px solid var(--border)">
+          <th style="padding:7px 12px;text-align:left;color:var(--text-dim);font-weight:600">Name</th>
+          <th style="padding:7px 12px;text-align:left;color:var(--text-dim);font-weight:600">Description</th>
+          <th style="padding:7px 12px;text-align:right;color:var(--text-dim);font-weight:600">Markup</th>
+          <th style="padding:7px 12px"></th>
+        </tr>
+      </thead>
+      <tbody>${trailers.map(t => `
+        <tr class="tt-dash-details-row" onclick="location.href='/calculator?trailer=${t.id}'"
+          style="border-bottom:1px solid var(--border)">
+          <td style="padding:9px 12px;font-weight:600">${escH(t.name)}</td>
+          <td style="padding:9px 12px;color:var(--text-dim)">${escH(t.description || '—')}</td>
+          <td style="padding:9px 12px;text-align:right;color:var(--text-dim)">${
+            t.markup_percentage != null ? (t.markup_percentage * 100).toFixed(0) + '%' : '—'
+          }</td>
+          <td style="padding:9px 12px;text-align:right">
+            <a href="/calculator?trailer=${t.id}" class="btn btn-outline btn-sm">Calculate</a>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  } else {
+    // Tiles (default)
+    body.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+      ${trailers.map(t => {
+        const accent = getTrailerAccent(t.name);
+        return `
+        <a href="/calculator?trailer=${t.id}" style="text-decoration:none" class="tt-dash-tile">
+          <div style="background:var(--bg-panel);border:1px solid var(--border);
+            border-radius:var(--radius);padding:16px;height:100%;box-sizing:border-box">
+            <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,${accent.accent} 0%,${accent.deep} 100%);color:#fff;
+              font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-bottom:10px">
+              ${escH(getTrailerInitial(t.name))}
+            </div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:4px">${escH(t.name)}</div>
+            <div style="font-size:11px;color:var(--text-dim)">${escH(t.description || 'Click to calculate')}</div>
+          </div>
+        </a>`;
+      }).join('')}
+    </div>`;
+  }
+}
+
+// Init
+document.getElementById('stat-all')?.classList.add('stat-active');
+document.querySelectorAll('.tt-view-btn').forEach(b =>
+  b.classList.toggle('active', b.dataset.view === dashTTView));
+document.getElementById('btn-tt-sort')?.classList.toggle('active', dashTTSorted);
+renderDashTrailers();
+
+// ─── Live update for the Approval Rate card ───────────────────────────────
+(function () {
+  const card = document.getElementById('approval-rate-card');
+  if (!card) return;  // user lacks dashboard.approval_rate permission
+
+  function pctColor(p) {
+    if (p >= 50) return 'var(--green)';
+    if (p >= 25) return '#ffb340';
+    return 'var(--text-secondary)';
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/dashboard/approval-rates', { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const data = await r.json();
+      card.querySelectorAll('[data-bucket]').forEach(row => {
+        const b = data[row.dataset.bucket];
+        if (!b) return;
+        row.querySelector('.ar-label').textContent    = b.label;
+        row.querySelector('.ar-approved').textContent = b.approved;
+        row.querySelector('.ar-total').textContent    = b.total;
+        const pct = row.querySelector('.ar-pct');
+        pct.textContent  = '(' + b.pct + '%)';
+        pct.style.color  = pctColor(b.pct);
+      });
+    } catch (e) { /* silent — try again next tick */ }
+  }
+
+  // Poll every 30s while the tab is visible.
+  let timer = null;
+  function start() { if (!timer) timer = setInterval(refresh, 30000); }
+  function stop()  { if (timer) { clearInterval(timer); timer = null; } }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stop(); else { refresh(); start(); }
+  });
+  if (!document.hidden) start();
+})();
+</script>
+{% endblock %}

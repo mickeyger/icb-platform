@@ -1,0 +1,363 @@
+{% extends "base.html" %}
+{% block title %}GRP Import (advanced){% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Import / GRP (advanced){% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:1400px">
+  <div class="card-header">
+    <span class="card-title">GRP Import &nbsp;<span style="font-size:11px;color:var(--text-dim);font-weight:400">advanced flow with category gating + chained formula resolution</span></span>
+  </div>
+  <div class="card-body">
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;line-height:1.5">
+      Walks one sheet of <strong>GRP Costings 2018.xlsx</strong>, classifies every
+      cell, and produces an in-memory write-plan. You review the plan first, then
+      click <em>Commit</em> to apply it. Body Options become calculator toggles;
+      sections inherit a master toggle from their TOTAL row's <code>=IF(Cxx="Y",1,0)</code>
+      gate; per-line gates override.
+    </div>
+
+    <!-- Workbook upload -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);
+                padding:12px 16px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-weight:600;font-size:13px;color:var(--text)">📤 Workbook</div>
+        <span id="grp-up-status" style="font-size:11px;color:var(--text-dim)"></span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        Pick the GRP Costings <code>.xlsx</code> from your PC. Uploaded once per
+        session and discarded afterwards. On dev you can leave this empty to use
+        the configured <code>excel_folder</code> path.
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="grp-up-costing" accept=".xlsx,.xlsm,.xls" class="form-control" style="max-width:380px;font-size:13px"/>
+        <button class="btn btn-outline btn-sm" id="grp-up-btn" onclick="grpUploadWorkbook()">Upload</button>
+        <button class="btn btn-outline btn-sm" id="grp-up-clear" onclick="grpClearUpload()" style="display:none">Clear</button>
+        <span id="grp-up-msg" style="font-size:12px;color:var(--text-dim)"></span>
+      </div>
+    </div>
+
+    <!-- Sheet picker + buttons -->
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+      <label class="form-label" style="margin:0">Sheet:</label>
+      <input type="text" id="grp-sheet" class="form-control" style="max-width:300px;font-size:13px"
+             value="RIGID DRY FREIGHT"/>
+      <label class="form-label" style="margin:0;margin-left:14px">Trailer name:</label>
+      <input type="text" id="grp-trailer" class="form-control" style="max-width:300px;font-size:13px"
+             placeholder="(default: same as sheet)"/>
+      <button class="btn btn-primary" id="grp-preview-btn" onclick="grpPreview()">
+        <span id="grp-spin" class="spinner" style="display:none"></span>
+        Run preview
+      </button>
+      <button class="btn btn-success" id="grp-commit-btn" onclick="grpCommit()" disabled
+              style="background:#238636;border-color:#238636;color:white">
+        <span id="grp-commit-spin" class="spinner" style="display:none"></span>
+        Commit to DB
+      </button>
+      <label style="font-size:12px;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="grp-replace" style="width:14px;height:14px"/>
+        replace if exists
+      </label>
+      <span id="grp-msg" style="font-size:12px;color:var(--text-dim);margin-left:auto"></span>
+    </div>
+
+    <!-- Summary -->
+    <div id="grp-summary" style="display:none;margin-bottom:16px;padding:12px 16px;
+         border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel)">
+      <div id="grp-summary-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+        gap:10px 24px;font-size:12px"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div id="grp-tabs" style="display:none;border-bottom:1px solid var(--border);margin-bottom:12px">
+      <button class="grp-tab active" data-tab="lines"   onclick="grpShowTab('lines')">BOM lines</button>
+      <button class="grp-tab"        data-tab="sections" onclick="grpShowTab('sections')">Sections</button>
+      <button class="grp-tab"        data-tab="options"  onclick="grpShowTab('options')">Body options</button>
+      <button class="grp-tab"        data-tab="warnings" onclick="grpShowTab('warnings')">Warnings &amp; errors</button>
+    </div>
+
+    <div id="grp-pane-lines"    class="grp-pane"></div>
+    <div id="grp-pane-sections" class="grp-pane" style="display:none"></div>
+    <div id="grp-pane-options"  class="grp-pane" style="display:none"></div>
+    <div id="grp-pane-warnings" class="grp-pane" style="display:none"></div>
+  </div>
+</div>
+
+<style>
+  .grp-tab {
+    background:transparent; border:none; color:var(--text-dim); cursor:pointer;
+    padding:8px 14px; font-size:13px; border-bottom:2px solid transparent; margin-bottom:-1px;
+  }
+  .grp-tab.active { color:var(--blue-hi); border-bottom-color:var(--blue); font-weight:600; }
+  .grp-tab:hover  { color:var(--text); }
+
+  .grp-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .grp-table th {
+    background:var(--bg-panel); padding:6px 10px; text-align:left;
+    color:var(--text-dim); font-size:10px; letter-spacing:.5px;
+    border-bottom:1px solid var(--border); white-space:nowrap;
+    position:sticky; top:0;
+  }
+  .grp-table td { padding:5px 10px; border-bottom:1px solid var(--border-soft, var(--border)); vertical-align:top; }
+  .grp-table tr:hover td { background:var(--bg-raise); }
+  .grp-table .mono { font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+  .grp-scroll { max-height:60vh; overflow:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-panel); }
+
+  .pill { display:inline-block; padding:1px 6px; border-radius:9px; font-size:10px; font-weight:600; letter-spacing:.3px; }
+  .pill-literal     { background:#0a1f15; color:#3d9970; }
+  .pill-formulas    { background:#0a1825; color:#4a90d9; }
+  .pill-other       { background:#1a1200; color:#f0a500; }
+  .pill-aggregate   { background:#1a1500; color:#cc9900; }
+  .pill-expression  { background:#1f1530; color:#a371f7; }
+  .pill-empty       { background:#222; color:#888; }
+  .pill-unresolved  { background:#3a1010; color:#ff6b6b; }
+  .pill-y           { background:#0a1f15; color:#3fb950; }
+  .pill-n           { background:#222; color:#888; }
+  .pill-master      { background:#0a1825; color:#4a90d9; }
+  .pill-inh         { background:#222; color:#888; }
+</style>
+
+<script>
+const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+let _grpPlan = null;
+let _grpActiveTab = 'lines';
+let _grpUploadId = null;          // populated after a successful upload
+let _grpAvailableSheets = [];     // sheet names from the uploaded workbook
+
+function grpFmtBytes(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024*1024) return `${(n/1024).toFixed(1)} KB`;
+  return `${(n/1024/1024).toFixed(1)} MB`;
+}
+
+async function grpUploadWorkbook() {
+  const f = document.getElementById('grp-up-costing').files[0];
+  if (!f) {
+    document.getElementById('grp-up-msg').textContent = 'Pick a .xlsx file first';
+    document.getElementById('grp-up-msg').style.color = 'var(--red)';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('costing', f);
+  document.getElementById('grp-up-msg').textContent = 'Uploading…';
+  document.getElementById('grp-up-msg').style.color = 'var(--text-dim)';
+  document.getElementById('grp-up-btn').disabled = true;
+  try {
+    const r = await fetch('/api/import/upload', {
+      method: 'POST',
+      headers: {'X-CSRF-Token': csrf},
+      body: fd,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Upload failed');
+    _grpUploadId = d.upload_id;
+    _grpAvailableSheets = d.sheets || [];
+    document.getElementById('grp-up-msg').textContent =
+      `${d.costing_name} (${grpFmtBytes(d.costing_size)}) — ${_grpAvailableSheets.length} sheets`;
+    document.getElementById('grp-up-msg').style.color = 'var(--green)';
+    document.getElementById('grp-up-clear').style.display = '';
+    document.getElementById('grp-up-status').textContent = 'uploaded';
+    document.getElementById('grp-up-status').style.color = 'var(--green)';
+    // If the typed sheet doesn't match an upload sheet, autoselect a likely one
+    const typed = (document.getElementById('grp-sheet').value || '').trim();
+    const matched = _grpAvailableSheets.find(s => s === typed)
+      || _grpAvailableSheets.find(s => s.trim() === typed)
+      || _grpAvailableSheets.find(s => s.toUpperCase().includes('RIGID DRY FREIGHT'))
+      || _grpAvailableSheets[0];
+    if (matched) document.getElementById('grp-sheet').value = matched;
+  } catch (e) {
+    document.getElementById('grp-up-msg').textContent = e.message;
+    document.getElementById('grp-up-msg').style.color = 'var(--red)';
+  } finally {
+    document.getElementById('grp-up-btn').disabled = false;
+  }
+}
+
+function grpClearUpload() {
+  _grpUploadId = null;
+  _grpAvailableSheets = [];
+  document.getElementById('grp-up-costing').value = '';
+  document.getElementById('grp-up-msg').textContent = '';
+  document.getElementById('grp-up-status').textContent = '';
+  document.getElementById('grp-up-clear').style.display = 'none';
+}
+
+function grpSetMsg(m, color) {
+  const el = document.getElementById('grp-msg');
+  el.textContent = m || '';
+  if (color) el.style.color = color;
+}
+
+async function grpPreview() {
+  const sheet = (document.getElementById('grp-sheet').value || '').trim();
+  const trailer = (document.getElementById('grp-trailer').value || '').trim();
+  if (!sheet) { grpSetMsg('Enter a sheet name', 'var(--red)'); return; }
+  document.getElementById('grp-preview-btn').disabled = true;
+  document.getElementById('grp-spin').style.display = '';
+  grpSetMsg('Running discoverer…', 'var(--text-dim)');
+  try {
+    const r = await fetch('/api/import/grp/preview', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({
+        sheet_name: sheet,
+        trailer_name: trailer || null,
+        upload_id: _grpUploadId || null,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'preview failed');
+    _grpPlan = d;
+    grpRenderSummary();
+    grpRenderAll();
+    document.getElementById('grp-summary').style.display = '';
+    document.getElementById('grp-tabs').style.display = '';
+    grpShowTab('lines');
+    grpSetMsg(`Plan ready: ${d.bom_lines.length} lines, ${d.body_options.length} options, ${d.warnings.length} warnings, ${d.errors.length} errors`,
+              d.errors.length ? 'var(--red)' : 'var(--green)');
+    document.getElementById('grp-commit-btn').disabled = (d.errors.length > 0);
+  } catch (e) {
+    grpSetMsg(e.message, 'var(--red)');
+  } finally {
+    document.getElementById('grp-preview-btn').disabled = false;
+    document.getElementById('grp-spin').style.display = 'none';
+  }
+}
+
+async function grpCommit() {
+  if (!_grpPlan) return;
+  const sheet   = _grpPlan.sheet_name;
+  const trailer = _grpPlan.trailer_name;
+  const replace = document.getElementById('grp-replace').checked;
+  if (!await confirmModal(`Commit ${_grpPlan.bom_lines.length} BOM lines + ${_grpPlan.body_options.length} body options as trailer "${trailer}"${replace ? ' (replacing existing)' : ''}?`, { title: 'Commit GRP import', okText: 'Commit' })) return;
+  document.getElementById('grp-commit-btn').disabled = true;
+  document.getElementById('grp-commit-spin').style.display = '';
+  grpSetMsg('Committing…', 'var(--text-dim)');
+  try {
+    const r = await fetch('/api/import/grp/commit', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({
+        sheet_name: sheet,
+        trailer_name: trailer,
+        replace_existing: replace,
+        upload_id: _grpUploadId || null,
+      }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : (d.detail?.message || 'commit failed'));
+    grpSetMsg(`Imported as trailer #${d.trailer_type_id} ("${d.trailer_name}") — ${d.bom_lines_imported} BOM lines + ${d.body_options_imported} body options`, 'var(--green)');
+  } catch (e) {
+    grpSetMsg('Failed: ' + e.message, 'var(--red)');
+  } finally {
+    document.getElementById('grp-commit-spin').style.display = 'none';
+  }
+}
+
+function grpRenderSummary() {
+  const d = _grpPlan;
+  const cell = (label, value, color) =>
+    `<div><div style="color:var(--text-dim);font-size:10px">${label}</div>
+      <div style="font-size:18px;font-weight:600;color:${color || 'var(--text)'}">${value}</div></div>`;
+  const dims = Object.entries(d.dimensions||{}).map(([k,v]) => `${k}=${v}`).join('  ');
+  document.getElementById('grp-summary-grid').innerHTML = [
+    cell('Trailer', `<span style="font-size:14px">${escHtml(d.trailer_name)}</span>`, 'var(--text)'),
+    cell('Dimensions', `<span style="font-size:11px;font-family:var(--font-mono)">${escHtml(dims)}</span>`, 'var(--text)'),
+    cell('Body options', d.body_options.length, 'var(--blue-hi)'),
+    cell('Sections',     d.sections.length,     'var(--blue-hi)'),
+    cell('BOM lines',    d.bom_lines.length,    'var(--blue-hi)'),
+    cell('Warnings', d.warnings.length, d.warnings.length ? 'var(--orange,#f0a500)' : 'var(--text-dim)'),
+    cell('Errors',   d.errors.length,   d.errors.length   ? 'var(--red)' : 'var(--text-dim)'),
+    cell('Excel grand total', d.grand_total_excel != null ? `R ${Number(d.grand_total_excel).toFixed(2)}` : '—', 'var(--text)'),
+  ].join('');
+}
+
+function grpShowTab(name) {
+  _grpActiveTab = name;
+  document.querySelectorAll('.grp-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  ['lines','sections','options','warnings'].forEach(t => {
+    document.getElementById('grp-pane-' + t).style.display = (t === name) ? '' : 'none';
+  });
+}
+
+function grpRenderAll() {
+  const d = _grpPlan;
+  // Lines
+  document.getElementById('grp-pane-lines').innerHTML = `
+    <div class="grp-scroll"><table class="grp-table">
+      <thead><tr>
+        <th>Section</th><th>Item</th><th>Qty formula</th><th>Price</th><th>Ref / Value</th><th>Gate</th>
+      </tr></thead><tbody>${d.bom_lines.map(l => `
+        <tr>
+          <td>${escHtml(l.section)}</td>
+          <td>${escHtml(l.item_name)} <span class="mono">[${escHtml(l.source_addr)}]</span></td>
+          <td class="mono">${escHtml(l.qty_formula)}</td>
+          <td><span class="pill pill-${grpKindClass(l.price_kind)}">${l.price_kind}</span></td>
+          <td>${grpRefCell(l)}</td>
+          <td>${l.gate_option_name
+            ? `<span class="pill pill-master">${escHtml(l.gate_option_name)}</span> ${l.inherited_from_section ? `<span class="pill pill-inh">inh</span>` : ''}`
+            : '<span style="color:var(--text-dim)">—</span>'}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+  // Sections
+  document.getElementById('grp-pane-sections').innerHTML = `
+    <div class="grp-scroll"><table class="grp-table">
+      <thead><tr><th>Section</th><th>Header row</th><th>TOTAL row</th><th>Master toggle</th><th>×N</th></tr></thead>
+      <tbody>${d.sections.map(s => `
+        <tr>
+          <td>${escHtml(s.name)}</td>
+          <td class="mono">R${s.header_row}</td>
+          <td class="mono">${s.total_row ? 'R'+s.total_row : '—'}</td>
+          <td>${s.master_option ? `<span class="pill pill-master">${escHtml(s.master_option)}</span>` : '<span style="color:var(--text-dim)">—</span>'}</td>
+          <td class="mono">${s.j_multiplier != null ? '×'+s.j_multiplier : '—'}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+  // Body options
+  document.getElementById('grp-pane-options').innerHTML = `
+    <div class="grp-scroll"><table class="grp-table">
+      <thead><tr><th>Cell</th><th>Default</th><th>Name</th><th>Quantity</th></tr></thead>
+      <tbody>${d.body_options.map(o => `
+        <tr>
+          <td class="mono">${escHtml(o.source_addr)}</td>
+          <td><span class="pill pill-${o.default_yn ? 'y' : 'n'}">${o.default_yn ? 'Y' : 'N'}</span></td>
+          <td>${escHtml(o.name)}</td>
+          <td class="mono">${o.quantity != null ? o.quantity : '—'}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+  // Warnings
+  const all = [...(d.errors||[]).map(e => ({...e, level: 'error'})),
+               ...(d.warnings||[]).map(w => ({...w, level: 'warning'}))];
+  document.getElementById('grp-pane-warnings').innerHTML = all.length ? `
+    <div class="grp-scroll"><table class="grp-table">
+      <thead><tr><th>Level</th><th>Code</th><th>Cell</th><th>Message</th></tr></thead>
+      <tbody>${all.map(w => `
+        <tr>
+          <td><span class="pill pill-${w.level === 'error' ? 'unresolved' : 'aggregate'}">${w.level}</span></td>
+          <td class="mono">${escHtml(w.code || '')}</td>
+          <td class="mono">${escHtml(w.cell || '')}</td>
+          <td>${escHtml(w.message || '')}</td>
+        </tr>`).join('')}</tbody></table></div>`
+    : `<div style="padding:30px;color:var(--text-dim);text-align:center;font-style:italic;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel)">No warnings or errors.</div>`;
+}
+
+function grpKindClass(kind) {
+  return ({
+    literal: 'literal', external_formulas_2018: 'formulas', external_other: 'other',
+    aggregate: 'aggregate', if_condition: 'formulas', expression: 'expression',
+    empty: 'empty', unresolved: 'unresolved',
+  })[kind] || 'empty';
+}
+
+function grpRefCell(l) {
+  if (l.price_ref_cell) {
+    return `<span class="mono">${escHtml(l.price_ref_sheet || '')}!${escHtml(l.price_ref_cell)}</span>` +
+           (l.price_fallback != null ? ` <span style="color:var(--text-dim)">(R${Number(l.price_fallback).toFixed(2)})</span>` : '');
+  }
+  if (l.price_value != null)    return `<span class="mono">R${Number(l.price_value).toFixed(2)}</span>`;
+  if (l.price_fallback != null) return `<span class="mono" style="color:var(--text-dim)">fallback R${Number(l.price_fallback).toFixed(2)}</span>`;
+  return '<span style="color:var(--text-dim)">—</span>';
+}
+
+function escHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+{% endblock %}

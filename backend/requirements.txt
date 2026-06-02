@@ -1,0 +1,48 @@
+# ICB Platform - backend (FastAPI). PostgreSQL-only. Python 3.12+ (3.14 supported).
+# Pins reflect the proven-working Cost Calculator venv; psycopg / alembic /
+# pydantic-settings added for Phase 1 (WO v4.12).
+# Intentionally excluded vs. the legacy app:
+#   - PyMySQL   -> PostgreSQL-only in the monorepo
+#   - a2wsgi    -> Passenger/WSGI bridge (legacy cPanel prod only)
+#   - gunicorn  -> uvicorn is the server here
+#   - weasyprint-> not present in the working local venv; reportlab/pypdf is the
+#                  active PDF path. (Re-add with GTK libs if HTML->PDF is needed.)
+
+# --- Web framework ---
+fastapi==0.115.12
+starlette==0.46.2
+uvicorn==0.42.0
+python-multipart==0.0.22
+Jinja2==3.1.6
+sse-starlette==1.8.2
+
+# --- Config / validation ---
+pydantic==2.12.5
+pydantic-settings>=2.5,<3
+
+# --- Database (PostgreSQL only) ---
+SQLAlchemy==2.0.48
+psycopg[binary]>=3.2,<4
+alembic>=1.13,<2
+
+# --- Auth / crypto ---
+passlib==1.7.4
+bcrypt==4.0.1
+cryptography==46.0.6
+
+# --- Excel import ---
+openpyxl==3.1.5
+xlrd==2.0.2
+
+# --- PDF generation (reportlab/pypdf path) ---
+reportlab==4.4.10
+pypdf==4.0.1
+pypdfium2==5.8.0
+pillow==12.2.0
+svglib==1.6.0
+
+# --- AI Help assistant ---
+anthropic==0.104.1
+
+# --- Utilities ---
+python-dotenv==1.2.2

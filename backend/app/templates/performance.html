@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Performance{% endblock %}
+{% block breadcrumb %}<strong>Performance</strong>{% endblock %}
+{% block topbar_actions %}{% endblock %}
+
+{% block content %}
+<div style="max-width:1000px;margin:24px auto;padding:0 20px">
+
+  <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0;font-size:18px;color:var(--text-head)">Costing Performance</h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="perf-copy-msg" style="font-size:11px;color:#3fb950"></span>
+      <span id="perf-updated" style="font-size:11px;color:var(--text-dim)"></span>
+      <button class="btn btn-outline btn-sm" onclick="copyPerf()"
+        title="Copy the results as text — paste straight into a message or spreadsheet">⧉ Copy</button>
+      <button class="btn btn-outline btn-sm" onclick="exportPerfCsv()"
+        title="Download the results as a CSV file">↓ CSV</button>
+      <button class="btn btn-outline btn-sm" onclick="loadPerf()">↻ Refresh</button>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--text-dim);margin:6px 0 18px">
+    Live timing of the costing flow. <b>Server</b> rows are measured on the server;
+    <b>client</b> rows are reported by the calculator after it draws the table.
+    A <b>cold</b> row means a sleeping server worker had to wake up first.
+  </p>
+
+  <!-- Summary cards -->
+  <div id="perf-summary" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:18px"></div>
+
+  <!-- Recent records -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--bg-panel);color:var(--text-dim);text-align:left">
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px">TIME</th>
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px">SOURCE</th>
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px">WHAT</th>
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px;text-align:right">DURATION</th>
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px;text-align:right">TOTAL (client)</th>
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px;text-align:center">COLD?</th>
+          <th style="padding:8px 12px;font-size:10px;letter-spacing:1px;text-align:right">WORKER AGE</th>
+        </tr>
+      </thead>
+      <tbody id="perf-rows">
+        <tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim)">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <textarea id="perf-copy-fallback" readonly
+    style="display:none;width:100%;height:160px;margin-top:12px;background:var(--bg-input);
+      border:1px solid var(--border);border-radius:6px;color:var(--text);
+      font-family:var(--font-mono);font-size:11px;padding:8px"></textarea>
+</div>
+
+<script>
+let _perfData = null;   // last payload from /api/performance/data — used by copy/export
+function _ms(v) {
+  if (v == null || v === '') return '';
+  const n = Number(v);
+  let color = '#3fb950';                         // fast — green
+  if (n >= 1000) color = '#f85149';              // slow — red
+  else if (n >= 300) color = '#d29922';          // medium — amber
+  return `<span style="color:${color};font-family:var(--font-mono)">${n.toFixed(0)} ms</span>`;
+}
+
+// /api/calculate emits per-stage timings into the record. Render them as a
+// compact second line under the path so a slow row immediately shows which
+// stage ate the time. Known stage keys come from app/routers/calculator.py.
+const _STAGE_KEYS = ['bom_load_ms', 'build_items_ms', 'formula_eval_ms', 'chassis_margin_ms'];
+function _stagesHtml(r) {
+  const parts = _STAGE_KEYS.filter(k => r[k] != null).map(k => {
+    const label = k.replace(/_ms$/, '').replace(/_/g, ' ');
+    return `<span style="color:var(--text-dim)">${label}</span> <span style="color:var(--text-head);font-family:var(--font-mono)">${Number(r[k]).toFixed(0)}</span>`;
+  });
+  if (!parts.length) return '';
+  return `<div style="font-size:10px;color:var(--text-dim);margin-top:2px;line-height:1.3">${parts.join(' · ')}</div>`;
+}
+
+function _card(label, value, sub) {
+  return `<div class="card" style="flex:1;min-width:170px;padding:12px 16px">
+    <div style="font-size:10px;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase">${label}</div>
+    <div style="font-size:22px;font-weight:700;color:var(--text-head);margin-top:2px">${value}</div>
+    <div style="font-size:11px;color:var(--text-dim);margin-top:2px">${sub || ''}</div>
+  </div>`;
+}
+
+async function loadPerf() {
+  const rowsEl = document.getElementById('perf-rows');
+  try {
+    const res = await fetch('/api/performance/data', { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    _perfData = data;
+    const s = data.summary || {};
+    const coldPct = s.calc_count ? Math.round((s.cold_count / s.calc_count) * 100) : 0;
+
+    document.getElementById('perf-summary').innerHTML =
+        _card('Costings measured', s.calc_count || 0, 'server /api/calculate')
+      + _card('Avg server time', (s.avg_server_ms || 0).toFixed(0) + ' ms', 'pure server compute')
+      + _card('Cold starts', (s.cold_count || 0) + ' / ' + (s.calc_count || 0),
+              coldPct + '% hit a sleeping worker')
+      + _card('Avg client render', (s.avg_render_ms || 0).toFixed(0) + ' ms',
+              'avg total ' + (s.avg_total_ms || 0).toFixed(0) + ' ms');
+
+    const recs = data.records || [];
+    if (!recs.length) {
+      rowsEl.innerHTML = '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text-dim)">'
+        + 'No measurements yet — open the calculator and run a costing.</td></tr>';
+    } else {
+      rowsEl.innerHTML = recs.map(r => `
+        <tr style="border-top:1px solid var(--border)">
+          <td style="padding:6px 12px;font-family:var(--font-mono);color:var(--text-dim)">${(r.ts||'').slice(11)}</td>
+          <td style="padding:6px 12px">${r.kind === 'client'
+              ? '<span style="color:#58a6ff">client</span>'
+              : '<span style="color:var(--text-dim)">server</span>'}</td>
+          <td style="padding:6px 12px;font-family:var(--font-mono);font-size:11px">${(r.path||'')}${_stagesHtml(r)}</td>
+          <td style="padding:6px 12px;text-align:right">${_ms(r.duration_ms)}</td>
+          <td style="padding:6px 12px;text-align:right">${_ms(r.total_ms)}</td>
+          <td style="padding:6px 12px;text-align:center">${r.cold
+              ? '<span style="color:#f85149;font-weight:700">● COLD</span>' : ''}</td>
+          <td style="padding:6px 12px;text-align:right;font-family:var(--font-mono);color:var(--text-dim)">${
+              r.worker_uptime_s != null ? r.worker_uptime_s + 's' : ''}</td>
+        </tr>`).join('');
+    }
+    document.getElementById('perf-updated').textContent =
+      'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    rowsEl.innerHTML = `<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--red)">`
+      + `Failed to load: ${e.message}</td></tr>`;
+  }
+}
+
+// ── Export / copy ────────────────────────────────────────────────────────────
+function _perfFlash(msg) {
+  const el = document.getElementById('perf-copy-msg');
+  if (!el) return;
+  el.textContent = msg;
+  clearTimeout(_perfFlash._t);
+  _perfFlash._t = setTimeout(() => { el.textContent = ''; }, 2800);
+}
+
+// Tab-separated text of the whole page — pastes cleanly into a chat message,
+// an email, or a spreadsheet.
+function _perfAsText() {
+  if (!_perfData) return '';
+  const s = _perfData.summary || {};
+  const recs = _perfData.records || [];
+  const coldPct = s.calc_count ? Math.round((s.cold_count / s.calc_count) * 100) : 0;
+  const lines = [];
+  lines.push('Costing Performance — exported ' + new Date().toLocaleString());
+  lines.push('Summary: ' + (s.calc_count || 0) + ' costings · avg server '
+    + (s.avg_server_ms || 0).toFixed(0) + 'ms · cold starts ' + (s.cold_count || 0)
+    + '/' + (s.calc_count || 0) + ' (' + coldPct + '%) · avg client render '
+    + (s.avg_render_ms || 0).toFixed(0) + 'ms');
+  lines.push('');
+  lines.push(['TIME', 'SOURCE', 'WHAT', 'DURATION_MS', 'TOTAL_MS', 'COLD', 'WORKER_AGE_S',
+              'BOM_LOAD_MS', 'BUILD_ITEMS_MS', 'FORMULA_EVAL_MS', 'CHASSIS_MARGIN_MS'].join('\t'));
+  recs.forEach(r => lines.push([
+    r.ts || '', r.kind || '', r.path || '',
+    r.duration_ms != null ? r.duration_ms : '',
+    r.total_ms != null ? r.total_ms : '',
+    r.cold ? 'COLD' : '',
+    r.worker_uptime_s != null ? r.worker_uptime_s : '',
+    r.bom_load_ms != null ? r.bom_load_ms : '',
+    r.build_items_ms != null ? r.build_items_ms : '',
+    r.formula_eval_ms != null ? r.formula_eval_ms : '',
+    r.chassis_margin_ms != null ? r.chassis_margin_ms : '',
+  ].join('\t')));
+  return lines.join('\n');
+}
+
+async function copyPerf() {
+  const text = _perfAsText();
+  if (!text) { _perfFlash('Nothing to copy yet'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    _perfFlash('✓ Copied to clipboard');
+  } catch (e) {
+    // Clipboard API blocked — fall back to a textarea the user copies manually.
+    const ta = document.getElementById('perf-copy-fallback');
+    ta.value = text;
+    ta.style.display = 'block';
+    ta.focus();
+    ta.select();
+    _perfFlash('Select-all is done — press Ctrl+C to copy');
+  }
+}
+
+function exportPerfCsv() {
+  const recs = (_perfData && _perfData.records) || [];
+  if (!recs.length) { _perfFlash('Nothing to export yet'); return; }
+  const esc = v => {
+    const str = String(v == null ? '' : v);
+    return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  };
+  const header = ['time', 'source', 'what', 'duration_ms', 'total_ms', 'cold', 'worker_age_s',
+                  'bom_load_ms', 'build_items_ms', 'formula_eval_ms', 'chassis_margin_ms'];
+  const rows = recs.map(r => [
+    r.ts, r.kind, r.path, r.duration_ms, r.total_ms, r.cold ? 'cold' : '', r.worker_uptime_s,
+    r.bom_load_ms, r.build_items_ms, r.formula_eval_ms, r.chassis_margin_ms,
+  ].map(esc).join(','));
+  const csv = header.join(',') + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'performance-' + stamp + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  _perfFlash('✓ CSV downloaded');
+}
+
+loadPerf();
+setInterval(loadPerf, 15000);  // auto-refresh every 15s
+</script>
+{% endblock %}

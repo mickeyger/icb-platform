@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Quote Templates{% endblock %}
+{% block topbar_title %}Quote Templates{% endblock %}
+
+{% block content %}
+<style>
+  .qt-section { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:16px 20px; margin-bottom:20px; }
+  .qt-section h2 { margin:0 0 12px 0; font-size:16px; }
+  .qt-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .qt-table th, .qt-table td { text-align:left; padding:8px 10px; border-bottom:1px solid #f0f0f0; vertical-align:middle; }
+  .qt-table th { background:#fafafa; font-weight:600; }
+  .qt-table select, .qt-table input[type=text] { width:100%; padding:4px 6px; }
+  .qt-actions { white-space:nowrap; }
+  .qt-form-row { display:grid; grid-template-columns:1fr 1fr 1fr auto; gap:8px; align-items:end; }
+  .qt-form-row label { display:block; font-size:12px; color:#555; margin-bottom:2px; }
+  .qt-form-row input, .qt-form-row select { width:100%; padding:5px 8px; }
+  .qt-help { color:#666; font-size:12px; margin-bottom:10px; }
+  .qt-pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; background:#eef; color:#225; }
+  .qt-pill.muted { background:#eee; color:#666; }
+  .qt-restore { background:#fff8e1; }
+</style>
+
+<div class="qt-help">
+  <b>How this works:</b> Quote templates are built by the developer. You don't
+  add or remove them here. What you <i>do</i> manage on this page is which
+  trailer types use which template — via <b>groups</b> (one template per group
+  of trailers) and per-trailer <b>overrides</b> (one trailer in a group can
+  use a different template). Need a new template? Ask the developer.
+</div>
+
+<!-- ── Templates (read-only list) ────────────────────────────────────── -->
+<div class="qt-section">
+  <h2>📑 Available Templates</h2>
+  <table class="qt-table">
+    <thead><tr><th>Name</th><th>Description</th><th>Active</th><th>Used by</th></tr></thead>
+    <tbody>
+      {% for t in templates_list %}
+      <tr>
+        <td><b>{{ t.name }}</b></td>
+        <td>{{ t.description or '' }}</td>
+        <td>
+          {% if t.is_active %}<span class="qt-pill">active</span>
+          {% else %}<span class="qt-pill muted">inactive</span>{% endif %}
+        </td>
+        <td>
+          <span class="qt-pill {% if not template_usage[t.id] %}muted{% endif %}">
+            {{ template_usage[t.id] }} trailer(s)
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Groups ─────────────────────────────────────────────────────────── -->
+<div class="qt-section">
+  <h2>🗂 Trailer Groups</h2>
+  <table class="qt-table">
+    <thead><tr><th>Name</th><th>Description</th><th>Default Template</th><th>Trailer Types</th><th class="qt-actions"></th></tr></thead>
+    <tbody>
+      {% for g in groups %}
+      <tr>
+        <form method="post" action="/admin/quote-templates/groups/{{ g.id }}/edit" style="display:contents">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+          <td><input type="text" name="name" value="{{ g.name }}" required></td>
+          <td><input type="text" name="description" value="{{ g.description or '' }}"></td>
+          <td>
+            <select name="report_template_id">
+              <option value="">— none —</option>
+              {% for t in templates_list %}
+                <option value="{{ t.id }}" {% if g.report_template_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            {% set members = group_members[g.id] %}
+            {% if members %}
+              {% for tt in members %}<span class="qt-pill">{{ tt.name }}</span> {% endfor %}
+            {% else %}
+              <span class="qt-pill muted">no trailers</span>
+            {% endif %}
+          </td>
+          <td class="qt-actions">
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+        </form>
+            <form method="post" action="/admin/quote-templates/groups/{{ g.id }}/delete" style="display:inline" id="del-group-form-{{ g.id }}">
+              <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+              <button type="button" class="btn btn-sm btn-danger" onclick="confirmAndSubmit(this, 'Delete group {{ g.name }}? Trailers in this group will be unassigned (template binding lost).')">Delete</button>
+            </form>
+          </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h3 style="margin-top:18px;font-size:14px">+ Add Group</h3>
+  <form method="post" action="/admin/quote-templates/groups/new" class="qt-form-row">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <div><label>Name</label><input type="text" name="name" placeholder="e.g. TIPPER" required></div>
+    <div><label>Description</label><input type="text" name="description"></div>
+    <div>
+      <label>Default Template</label>
+      <select name="report_template_id">
+        <option value="">— none —</option>
+        {% for t in templates_list %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit" class="btn btn-primary">Create</button></div>
+  </form>
+</div>
+
+<!-- ── Trailer assignments ────────────────────────────────────────────── -->
+<div class="qt-section">
+  <h2>🚚 Body Type Assignments</h2>
+  <div class="qt-help">Assign a group (default) and/or a per-trailer override template.</div>
+  <table class="qt-table">
+    <thead><tr><th>Body Type</th><th>Group</th><th>Override Template</th><th>Resolves to</th><th class="qt-actions"></th></tr></thead>
+    <tbody>
+      {% for tt in trailers %}
+      <tr>
+        <form method="post" action="/admin/quote-templates/trailer/{{ tt.id }}/assign" style="display:contents">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+          <td>{{ tt.name }}</td>
+          <td>
+            <select name="group_id">
+              <option value="">— none —</option>
+              {% for g in groups %}
+                <option value="{{ g.id }}" {% if tt.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select name="override_report_template_id">
+              <option value="">— inherit from group —</option>
+              {% for t in templates_list %}
+                <option value="{{ t.id }}" {% if tt.override_report_template_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            {% set resolved = resolved_map[tt.id] %}
+            {% if resolved %}
+              <span class="qt-pill">{{ resolved.name }}</span>
+            {% else %}
+              <span class="qt-pill muted">no quote</span>
+            {% endif %}
+          </td>
+          <td class="qt-actions">
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+          </td>
+        </form>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Orphaned (archived) assignments ────────────────────────────────── -->
+{% if orphans %}
+<div class="qt-section">
+  <h2>♻️ Restorable Assignments</h2>
+  <div class="qt-help">These trailer names previously had a template. Re-imports matching the name will be offered restoration; you can also restore manually.</div>
+  <table class="qt-table">
+    <thead><tr><th>Trailer Name</th><th>Group</th><th>Override</th><th>Archived</th><th class="qt-actions"></th></tr></thead>
+    <tbody>
+      {% for o in orphans %}
+      <tr class="qt-restore">
+        <td>{{ o.trailer_name }}</td>
+        <td>{{ orphan_group_name[o.id] or '—' }}</td>
+        <td>{{ orphan_override_name[o.id] or '—' }}</td>
+        <td>{{ o.archived_at.strftime('%Y-%m-%d') if o.archived_at else '' }}</td>
+        <td class="qt-actions">
+          <form method="post" action="/admin/quote-templates/orphans/{{ o.id }}/restore" style="display:inline-flex;gap:4px;align-items:center">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <select name="trailer_id" style="max-width:160px">
+              <option value="">— match by name —</option>
+              {% for tt in trailers %}<option value="{{ tt.id }}">{{ tt.name }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm btn-success">Restore</button>
+          </form>
+          <form method="post" action="/admin/quote-templates/orphans/{{ o.id }}/discard" style="display:inline" id="del-orphan-form-{{ o.id }}">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <button type="button" class="btn btn-sm btn-danger" onclick="confirmAndSubmit(this, 'Forget this archived assignment?')">Forget</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+async function confirmAndSubmit(btn, message) {
+  if (!await confirmModal(message, { danger: true, okText: 'Delete' })) return;
+  btn.closest('form').submit();
+}
+</script>
+{% endblock %}

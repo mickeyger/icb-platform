@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Quotation {{ ref_no }}</title>
+<link rel="stylesheet" href="{{ css_path }}"/>
+<style>
+  .accept-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 3mm 0 4mm 0;
+    font-size: 10pt;
+  }
+  .accept-table th {
+    background: #f0f0f0;
+    border: 0.5pt solid #333;
+    padding: 1.5mm 3mm;
+    text-align: left;
+    font-weight: bold;
+  }
+  .accept-table td {
+    border: 0.5pt solid #333;
+    padding: 1.5mm 3mm;
+    vertical-align: middle;
+  }
+  .chk-box {
+    display: inline-block;
+    width: 5mm;
+    height: 5mm;
+    border: 1pt solid #333;
+    vertical-align: middle;
+  }
+  .accept-field {
+    border-bottom: 0.5pt solid #000;
+    min-height: 7mm;
+    margin-bottom: 3mm;
+    display: block;
+  }
+  .accept-field-label {
+    font-weight: bold;
+    margin-top: 4mm;
+    margin-bottom: 0.5mm;
+  }
+  .accept-dims {
+    display: flex;
+    gap: 8mm;
+    margin-bottom: 3mm;
+  }
+  .accept-dim-cell {
+    flex: 1;
+    border-bottom: 0.5pt solid #000;
+    min-height: 6mm;
+  }
+  .accept-dim-label {
+    font-size: 8.5pt;
+    color: #555;
+  }
+</style>
+</head>
+<body>
+
+{# ────────── PAGE 1 ────────── #}
+<section class="page">
+  <header class="brand-header">
+    <div class="brand-left">
+      {% if logo_path %}<img src="{{ logo_path }}" class="logo" alt="IceCold Bodies"/>{% endif %}
+    </div>
+    <div class="brand-right">
+      <table class="addr">
+        <tr>
+          <th class="addr-h u">MANUFACTURING PLANT</th>
+          <th class="addr-h u">SERVICE AND REPAIRS</th>
+          <th class="addr-h u">MANUFACTURING PLANT</th>
+        </tr>
+        <tr>
+          <td>4 END STREET<br/>HEIDELBERG<br/>GAUTENG<br/>TEL: 016 349 1140</td>
+          <td>4 LOPER AVENUE<br/>KEMPTON PARK<br/>GAUTENG<br/>TEL: 087 822 2341</td>
+          <td>21-23 WIMBLEDON ROAD<br/>BLACKHEATH<br/>CAPE TOWN<br/>TEL: 021 555 3076</td>
+        </tr>
+      </table>
+      <div class="contact-line">
+        <strong>EMAIL:</strong> INFO@ICECOLDGRP.CO.ZA &nbsp;|&nbsp;
+        <strong>WEB:</strong> WWW.ICECOLDGRP.CO.ZA
+      </div>
+    </div>
+  </header>
+
+  <div class="brand-strap">THE QUALITY OF OUR BUSINESS IS THE QUALITY OF OUR RELATIONSHIP</div>
+  <div class="reg-line">Co Reg Nr. 2000/025936/07 &nbsp;&bull;&nbsp; Vat Reg Nr. 451 019 0848 &nbsp;&bull;&nbsp; Customs Code: 20117899</div>
+
+  {% if sarda_path %}
+    <div class="sarda-wrap"><img src="{{ sarda_path }}" class="sarda" alt="SARDA"/></div>
+  {% endif %}
+
+  <h1 class="title u red"><span class="spaced">{% if is_repair %}REPAIR {% endif %}QUOTATION</span></h1>
+
+  <h2 class="client">{{ customer_name }}</h2>
+
+  <table class="meta-grid">
+    <tr>
+      <td class="lbl red u">DATE</td><td class="colon">:</td><td class="val">{{ date }}</td>
+      <td class="lbl red u">PAGES</td><td class="colon">:</td><td class="val"><strong><span class="total-pages"></span></strong></td>
+    </tr>
+    <tr>
+      <td class="lbl red u">REF. NO.</td><td class="colon">:</td><td class="val">{{ ref_no }}</td>
+      <td class="lbl red u">ATTENTION</td><td class="colon">:</td><td class="val">{{ attention }}</td>
+    </tr>
+    <tr>
+      <td class="lbl red u">TEL. NO.</td><td class="colon">:</td><td class="val">{{ tel_no }}</td>
+      <td class="lbl red u">E-MAIL</td><td class="colon">:</td><td class="val">{{ email }}</td>
+    </tr>
+  </table>
+
+  <h2 class="re red"><span class="re-label u">RE:</span> <span class="u">G.R.P. SEMI-INSULATED &ldquo;DRY FREIGHT&rdquo; BODY</span></h2>
+
+  <p>We appreciate your valued enquiry and have pleasure in submitting our quotation as follows:</p>
+
+  <h3 class="section-h red u">OFFER:</h3>
+  <p>To manufacture and fit G.R.P. Semi-Insulated &ldquo;Dry Freight&rdquo; Body onto a chassis cab:</p>
+
+  <h3 class="section-h red u">BODY SPECIFICATIONS:</h3>
+
+  <table class="spec-grid">
+    <tr>
+      <td class="alpha">a)</td>
+      <td class="key red u"><strong>External Body<br/>Dimensions:</strong></td>
+      <td class="val">
+        {{ length_mm }} (Length)<br/>
+        {{ width_mm }} (Width)<br/>
+        {{ height_mm }} (Height)
+      </td>
+    </tr>
+    <tr>
+      <td class="alpha">b)</td>
+      <td class="key red u"><strong>Double rear doors:</strong></td>
+      <td class="val">Fully opening double rear doors fitted complete with our
+        independent rubber door seals, <strong>heavy-duty door hinges</strong>
+        and locking poles. Door securing T-catches and D-rubber bumpers fitted
+        to each door to prevent damage when swinging open.</td>
+    </tr>
+    <tr>
+      <td class="alpha">c)</td>
+      <td class="key red u"><strong>Insulation:</strong></td>
+      <td class="val">Sides, front and rear will be insulated with a
+        <strong>polystyrene</strong> insulation. Roof insulated with a
+        waterproof <strong>polystyrene</strong> insulation.</td>
+    </tr>
+    <tr>
+      <td class="alpha">d)</td>
+      <td class="key red u"><strong>Floor:</strong></td>
+      <td class="val">3mm Mild Steel floor with heavy duty cross member spacing.</td>
+    </tr>
+  </table>
+
+  <div class="directors">Directors: B.C. Gildenhuys | D. Gildenhuys | C.M. Botha | M. du Plessis</div>
+</section>
+
+{# ────────── PAGE 2 ────────── #}
+<section class="page">
+  <div class="cont-head">
+    {% if logo_path %}<img src="{{ logo_path }}" class="logo-sm" alt=""/>{% endif %}
+    <span class="ref-no red u"><strong>REF. NO.</strong> {{ ref_no }}</span>
+    <span class="page-num">- 2 -</span>
+  </div>
+
+  <table class="spec-grid">
+    <tr>
+      <td class="alpha">e)</td>
+      <td class="key red u"><strong>Panel finish:</strong></td>
+      <td class="val">Internal &amp; external finish to be white G.R.P. sheeting.</td>
+    </tr>
+    <tr>
+      <td class="alpha">f)</td>
+      <td class="key red u"><strong>Under run:</strong></td>
+      <td class="val">Heavy-duty under run bumper fitted with chevron and D-rubbers
+        to protect rear of body.</td>
+    </tr>
+    <tr>
+      <td class="alpha">g)</td>
+      <td class="key red u"><strong>Finishing:</strong></td>
+      <td class="val">
+        i)&nbsp;&nbsp;External corners fitted with our personalised large
+          <u>aluminium extrusions</u> all round that adds to the strength of our bodies.
+          All capping finally sealed all round with silicone sealant to prevent water
+          penetration.<br/>
+        ii)&nbsp;&nbsp;Standard &ldquo;Icecold Bodies&rdquo; mud flaps fitted behind rear wheels.<br/>
+        iii)&nbsp;&nbsp;&ldquo;SABS&rdquo; approved truck tail- and number plate lights will be fitted.<br/>
+        iv)&nbsp;&nbsp;Our sub frame is designed in accordance to the chassis manufacturer
+          specifications.<br/>
+        v)&nbsp;&nbsp;Sub frame painting is of high quality 2K to match truck chassis colour.<br/>
+        vi)&nbsp;&nbsp;All components used in the construction of our high quality bodies are
+          corrosion resistant aluminium, fibreglass or stainless steel.
+      </td>
+    </tr>
+    <tr>
+      <td class="alpha">h)</td>
+      <td class="key red u"><strong>Included:</strong></td>
+      <td class="val">
+        i)&nbsp;&nbsp;Door stopper plate at bottom of left rear door.<br/>
+        ii)&nbsp;&nbsp;3CR12 internal kick plates.
+      </td>
+    </tr>
+  </table>
+
+  <table class="price-grid">
+    <tr>
+      <td class="price-lbl red u"><strong>PRICE:</strong></td>
+      <td class="price-dash">-</td>
+      <td class="price-val">{{ price }} EACH <strong>(Excluding VAT)</strong></td>
+    </tr>
+  </table>
+
+  <h3 class="section-h red u">OPTIONAL EXTRAS <span style="font-weight:normal">(No Discount):</span></h3>
+  <table class="extras">
+    <tr><td>a)</td><td>Interior light &ndash; each</td><td class="dash">-</td><td class="amt">R &nbsp;&nbsp;&nbsp;405.00 NETT</td></tr>
+    <tr><td>b)</td><td>Micro switch</td><td class="dash">-</td><td class="amt">R &nbsp;&nbsp;&nbsp;520.00 NETT</td></tr>
+    <tr><td>c)</td><td>Two (2) rows load lock rails per side with two (2) shoring bars</td><td class="dash">-</td><td class="amt">R &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;.00 NETT</td></tr>
+    <tr><td>d)</td><td>Internal bulkhead protector</td><td class="dash">-</td><td class="amt">R &nbsp;5 093.00 NETT</td></tr>
+    <tr><td>e)</td><td>Nose cone</td><td class="dash">-</td><td class="amt">R &nbsp;5 850.00 NETT</td></tr>
+    <tr><td>f)</td><td>Rear impact bar with rollers</td><td class="dash">-</td><td class="amt">R 10 222.00 NETT</td></tr>
+    <tr><td>g)</td><td>Double side door with access step and grab handle</td><td class="dash">-</td><td class="amt">R 17 200.00 NETT</td></tr>
+    <tr><td>h)</td><td>Single side door with access step and grab handle</td><td class="dash">-</td><td class="amt">R &nbsp;8 600.00 NETT</td></tr>
+  </table>
+</section>
+
+{# ────────── PAGE 3 ────────── #}
+<section class="page">
+  <div class="cont-head">
+    {% if logo_path %}<img src="{{ logo_path }}" class="logo-sm" alt=""/>{% endif %}
+    <span class="ref-no red u"><strong>REF. NO.</strong> {{ ref_no }}</span>
+    <span class="page-num">- 3 -</span>
+  </div>
+
+  <h3 class="section-h red u">GENERAL TERMS AND CONDITIONS</h3>
+
+  <h4 class="tc-h red u">1. DELIVERY</h4>
+  <p class="tc">All deliveries are ex &ndash; factory.</p>
+  <p class="tc">Production will only commence upon:</p>
+  <ol class="roman tc">
+    <li>receipt of an official written order</li>
+    <li>written confirmation of approved finance or available funds from a recognized financial institution</li>
+    <li>confirmation of deposits where applicable.</li>
+  </ol>
+
+  <h4 class="tc-h red u">2. PAYMENT</h4>
+  <p class="tc">A COD invoice will be issued upon completion of the goods and full payment is due prior to delivery ex &ndash; factory.</p>
+
+  <h4 class="tc-h red u">3. OWNERSHIP</h4>
+  <p class="tc">Ownership of the goods remains with Icecold Bodies, and transfer of ownership will only take place once the purchase price has been paid in full.</p>
+
+  <h4 class="tc-h red u">4. VALIDITY</h4>
+  <p class="tc">This quote is valid for a period of <strong>15 days</strong> from date hereof and is subject to review thereafter.</p>
+
+  <h4 class="tc-h red u">5. WARRANTY</h4>
+  <p class="tc">All G.R.P bodies manufactured by Icecold Bodies are guaranteed for a period of thirty-six (36) months from date of delivery. Accident, abuse, fair wear and tear excluded.</p>
+  <p class="tc">Our 3<sup>rd</sup> party products carry a one year warranty. <strong>This warranty excludes fair wear and tear, neglect and abuse.</strong></p>
+  <p class="tc">Under no circumstances will Icecold Bodies honor any 3<sup>rd</sup> party maintenance, be it precautionary or emergency, should it not be sanctioned by Icecold Bodies by means of an official order.</p>
+
+  <h4 class="tc-h red u">6. DOCUMENTATION</h4>
+  <p class="tc">Licensing is not included but can be arranged as a separate transaction, the only costs being the cost of the license itself and number plates.</p>
+</section>
+
+{# ────────── PAGE 4 ────────── #}
+<section class="page">
+  <div class="cont-head">
+    {% if logo_path %}<img src="{{ logo_path }}" class="logo-sm" alt=""/>{% endif %}
+    <span class="ref-no red u"><strong>REF. NO.</strong> {{ ref_no }}</span>
+    <span class="page-num">- 4 -</span>
+  </div>
+
+  <h4 class="tc-h red u">7. V A T</h4>
+  <p class="tc">All prices in this quote are exclusive of V A T.</p>
+  <p class="tc">As per the requirements of the South African Revenue Services all cross border transactions must be declared at the border.</p>
+  <p class="tc">Icecold Bodies (Pty) Ltd is the Exporter.</p>
+  <p class="tc">The responsibility remains with the Customer to make the necessary arrangements with a Clearing Agent to declare the transaction.</p>
+  <p class="tc">Kindly ensure that the SAD500, EDI Release Note and all other relevant documentation is provided to Icecold Bodies (Pty) Ltd by no later than two months from month of Tax Invoice.</p>
+
+  <h4 class="tc-h red u">8. END USER SPECIFICATIONS</h4>
+  <p class="tc">Icecold Bodies cannot support the final specifications if the details of the End-user is unknown, and will thus charge additional costs should any specification be given through wrongly from a middleman.</p>
+
+  <h4 class="tc-h red u">9. LEGAL AND FINAL BINDING</h4>
+  <p class="tc">This quote becomes a legal, fair and final once signed and accepted. All the specifications, prices and relevant details to the product under negotiation will be accepted as accurate and final when signed by whichever party and Icecold Bodies cannot be held accountable for additional changes, negotiation or specifications as this becomes a legal document.</p>
+
+  <p class="tc" style="margin-top:8mm">Yours faithfully,<br/><strong class="red u">ICECOLD BODIES</strong></p>
+</section>
+
+{# ────────── PAGE 5 — QUOTE ACCEPTANCE FORM ────────── #}
+<section class="page">
+  <div class="cont-head">
+    {% if logo_path %}<img src="{{ logo_path }}" class="logo-sm" alt=""/>{% endif %}
+    <span class="ref-no red u" style="top:8mm"><strong>QUOTE ACCEPTANCE FORM</strong></span>
+    <span class="page-num" style="top:8mm;left:auto;right:0;transform:none">QUOTE NUMBER: {{ ref_no }}</span>
+  </div>
+
+  <div class="accept-field-label">Customer Name:</div>
+  <span class="accept-field">&nbsp;</span>
+
+  <p style="margin:2mm 0"><strong>Description:</strong> G.R.P. SEMI-INSULATED &ldquo;DRY FREIGHT&rdquo; BODY</p>
+
+  <div class="accept-field-label">Chassis:</div>
+  <span class="accept-field">&nbsp;</span>
+
+  <div class="accept-field-label">External Body Dimensions:</div>
+  <div class="accept-dims">
+    <div>
+      <div class="accept-dim-label">Length</div>
+      <div class="accept-dim-cell">{{ length_mm }}</div>
+    </div>
+    <div>
+      <div class="accept-dim-label">Width</div>
+      <div class="accept-dim-cell">{{ width_mm }}</div>
+    </div>
+    <div>
+      <div class="accept-dim-label">Height</div>
+      <div class="accept-dim-cell">{{ height_mm }}</div>
+    </div>
+  </div>
+
+  <div class="accept-field-label" style="margin-bottom:2mm">Optional Extras:</div>
+  <table class="accept-table">
+    <tr>
+      <th style="width:12%">SELECT</th>
+      <th>DESCRIPTION</th>
+      <th style="width:12%">QTY</th>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Interior light</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Micro switch</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Two (2) rows load lock rails per side with two (2) shoring bars</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Internal bulkhead protector</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Nose cone</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Rear impact bar with rollers</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>Double side door with access step and grab handle</td>
+      <td>&nbsp;</td>
+    </tr>
+    <tr>
+      <td style="text-align:center"><span class="chk-box"></span></td>
+      <td>3CR12 internal kick plates</td>
+      <td>&nbsp;</td>
+    </tr>
+  </table>
+
+  <div class="keep-together">
+    <h4 class="tc-h red u" style="margin-top:4mm">ACCEPTANCE OF QUOTE NO: {{ ref_no }}</h4>
+    <p class="tc">I, the undersigned, who warrants that he is duly authorized to do so, hereby accept the
+      terms and conditions of this quote for and on behalf of &hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;&hellip;</p>
+
+    <div style="display:flex;gap:16mm;margin-top:6mm">
+      <div class="sig-block" style="flex:2">
+        <div class="sig-line">___________________________________</div>
+        <div class="sig-cap">Signature</div>
+      </div>
+      <div class="sig-block" style="flex:1">
+        <div class="sig-line">____________________</div>
+        <div class="sig-cap">Date</div>
+      </div>
+    </div>
+
+    <div style="margin-top:6mm">
+      <div class="sig-line">___________________________________</div>
+      <div class="sig-cap">Order Number</div>
+    </div>
+  </div>
+</section>
+
+<span id="last-page"></span>
+
+</body>
+</html>

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}GRP Costings{% endblock %} — IceCold</title>
+  <meta name="csrf-token" content="{{ request.state.csrf_token if request.state.csrf_token is defined else '' }}">
+  <link rel="stylesheet" href="/static/css/style.css?v=16"/>
+  {% if user %}<link rel="stylesheet" href="/static/css/help_chat.css?v=6"/>{% endif %}
+  {% if user %}<link rel="stylesheet" href="/static/css/help_audit.css?v=4"/>{% endif %}
+  <!-- Apply theme before paint to avoid flash -->
+  <style id="theme-override"></style>
+  <script>
+  (function(){
+    var THEMES = {
+      red: ':root{--border-hi:#ed1c24;--blue:#ed1c24;--blue-hi:#ff6168;--blue-dim:#3a1215;--grid-line:rgba(237,28,36,0.08);}'
+    };
+    var t = localStorage.getItem('app-theme') || 'blue';
+    var el = document.getElementById('theme-override');
+    if (el && THEMES[t]) el.textContent = THEMES[t];
+  })();
+  </script>
+  {% if request.state.theme and request.state.theme.css_path %}
+  <link rel="stylesheet" href="{{ request.state.theme.css_path }}?v=11"/>
+  {% elif theme and theme.css_path %}
+  <link rel="stylesheet" href="{{ theme.css_path }}?v=11"/>
+  {% endif %}
+  {# WO v4.7 — MES skin overlay no longer loaded conditionally here. The fork
+     at /mes/dashboard and /mes/calculator uses templates that load theme-mes.css
+     via their own {% block head %}, so the live / and /calculator stay pristine. #}
+  {% block head %}{% endblock %}
+  <style>
+    /* Editable nav group labels */
+    .nav-label-editable { display:flex; align-items:center; gap:4px; }
+    .nav-label-edit-btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--text-dim); font-size: 11px; padding: 0 2px;
+      line-height: 1; opacity: 0; transition: opacity .15s;
+    }
+    .nav-label-editable:hover .nav-label-edit-btn { opacity: 1; }
+    .nav-label-input {
+      flex: 1; min-width: 0; font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .6px;
+      background: var(--bg-input, #1e2330); color: var(--text, #e6edf3);
+      border: 1px solid var(--blue, #388bfd); border-radius: 4px;
+      padding: 1px 5px;
+    }
+    .hidden { display: none !important; }
+    /* Sub-menu nav items — slightly indented */
+    a.nav-item.nav-sub { padding-left: 28px; font-size: 12px; opacity: .85; }
+    a.nav-item.nav-sub .nav-icon { font-size: 12px; }
+
+    /* Collapsible nav groups */
+    .nav-label { display:flex; align-items:center; cursor:pointer; user-select:none; }
+    .nav-chevron {
+      margin-left:auto; font-size:9px; color:var(--text-dim);
+      display:inline-block; transition:transform .2s ease;
+      flex-shrink:0; padding-left:4px;
+    }
+    .nav-group.nav-collapsed .nav-chevron { transform:rotate(-90deg); }
+    .nav-group.nav-collapsed .nav-item { display:none !important; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <img src="/static/IceCold-Logo.png" alt="IceCold Logo"
+        style="width:180px;height:auto;display:block;margin:0 auto 8px"/>
+      <h1>GRP Costings System <span style="font-size:11px;font-weight:600;color:var(--blue-hi);opacity:.7;letter-spacing:.04em;vertical-align:middle">{{ app_version }}</span></h1>
+    </div>
+    <div class="sidebar-nav">
+      <div class="nav-group">
+        <div class="nav-label">Main</div>
+        <a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}">
+          <span class="nav-icon">⊞</span> Dashboard
+        </a>
+        <a href="/calculator" class="nav-item {% if request.url.path == '/calculator' %}active{% endif %}">
+          <span class="nav-icon">⚙</span> Cost Calculator
+        </a>
+        <a href="/calculator2" class="nav-item {% if request.url.path == '/calculator2' %}active{% endif %}">
+          <span class="nav-icon">⚙</span> Cost Calculator 2
+        </a>
+      </div>
+      {% set is_admin = user and user.role == 'admin' %}
+      {% set show_g2 = is_admin %}
+      {% set show_g3 = is_admin or user_can(user, 'menu.customers') or user_can(user, 'menu.import') or user_can(user, 'menu.users') or user_can(user, 'menu.themes') or user_can(user, 'menu.quote_numbering') %}
+
+      {# ── BODIES ── #}
+      {% if is_admin or user_can(user, 'menu.body_templates') %}
+      <div class="nav-group">
+        <div class="nav-label{% if is_admin %} nav-label-editable{% endif %}"{% if is_admin %} data-group-key="nav_group_bodies"{% endif %}>
+          <span class="nav-label-text">{{ (request.state.nav_groups.nav_group_bodies if request.state.nav_groups else None) or 'Bodies' }}</span>
+          {% if is_admin %}
+          <button class="nav-label-edit-btn" title="Rename group" onclick="startNavGroupEdit(this)" aria-label="Rename group">✎</button>
+          <input class="nav-label-input hidden" type="text" maxlength="60" />
+          {% endif %}
+        </div>
+        <a href="/admin/templates" class="nav-item {% if request.url.path == '/admin/templates' %}active{% endif %}">
+          <span class="nav-icon">⊡</span> Body Templates
+        </a>
+        {% if is_admin %}
+        <a href="/admin/templates/formula-scan" class="nav-item nav-sub {% if '/admin/templates/formula-scan' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">⌕</span> Formula Scan
+        </a>
+        <a href="/admin/settings" class="nav-item nav-sub {% if '/admin/settings' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">⚙</span> Settings
+        </a>
+        <a href="/admin/configurator-preview" class="nav-item nav-sub {% if '/admin/configurator-preview' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">▣</span> Configurator (preview)
+        </a>
+        <a href="/admin/trailer-designer" class="nav-item {% if '/admin/trailer-designer' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">✦</span> Body Designer
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── CHASSIS ── #}
+      {% if is_admin or user_can(user, 'menu.chassis') %}
+      <div class="nav-group">
+        <div class="nav-label{% if is_admin %} nav-label-editable{% endif %}" {% if is_admin %}data-group-key="nav_group_chassis"{% endif %}>
+          <span class="nav-label-text">{{ (request.state.nav_groups.nav_group_chassis if request.state.nav_groups else None) or 'Chassis' }}</span>
+          {% if is_admin %}
+          <button class="nav-label-edit-btn" title="Rename group" onclick="startNavGroupEdit(this)" aria-label="Rename group">✎</button>
+          <input class="nav-label-input hidden" type="text" maxlength="60" />
+          {% endif %}
+        </div>
+        {% if user_can(user, 'menu.chassis') %}
+        <a href="/admin/chassis" class="nav-item {% if '/admin/chassis' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">⚙</span> Chassis Options
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── PRICING FORMULAS ── #}
+      {% if is_admin or user_can(user, 'menu.pricing_formulas') %}
+      <div class="nav-group">
+        <div class="nav-label{% if is_admin %} nav-label-editable{% endif %}"{% if is_admin %} data-group-key="nav_group_pricing"{% endif %}>
+          <span class="nav-label-text">{{ (request.state.nav_groups.nav_group_pricing if request.state.nav_groups else None) or 'Pricing Formulas' }}</span>
+          {% if is_admin %}
+          <button class="nav-label-edit-btn" title="Rename group" onclick="startNavGroupEdit(this)" aria-label="Rename group">✎</button>
+          <input class="nav-label-input hidden" type="text" maxlength="60" />
+          {% endif %}
+        </div>
+        <a href="/admin/floor-plates" class="nav-item {% if request.url.path == '/admin/floor-plates' %}active{% endif %}">
+          <span class="nav-icon" style="color:#3d9970">⊞</span> Floor Plates
+        </a>
+        <a href="/admin/mounting-cleats" class="nav-item {% if request.url.path == '/admin/mounting-cleats' %}active{% endif %}">
+          <span class="nav-icon" style="color:#4a90d9">⊟</span> Mounting Cleats
+        </a>
+        <a href="/admin/sap-prices" class="nav-item {% if '/admin/sap-prices' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">⊙</span> SAP Prices
+        </a>
+        <a href="/admin/skin-formulas" class="nav-item {% if request.url.path == '/admin/skin-formulas' %}active{% endif %}">
+          <span class="nav-icon" style="color:#58a6ff">◎</span> Skin Formulas
+        </a>
+        <a href="/admin/taping-blocks" class="nav-item {% if request.url.path == '/admin/taping-blocks' %}active{% endif %}">
+          <span class="nav-icon" style="color:#f0a500">⊡</span> Taping Blocks
+        </a>
+      </div>
+      {% endif %}
+
+      {# ── BOM ── #}
+      {% if is_admin or user_can(user, 'menu.materials') %}
+      <div class="nav-group">
+        <div class="nav-label{% if is_admin %} nav-label-editable{% endif %}" {% if is_admin %}data-group-key="nav_group_bom"{% endif %}>
+          <span class="nav-label-text">{{ (request.state.nav_groups.nav_group_bom if request.state.nav_groups else None) or 'BOM' }}</span>
+          {% if is_admin %}
+          <button class="nav-label-edit-btn" title="Rename group" onclick="startNavGroupEdit(this)" aria-label="Rename group">✎</button>
+          <input class="nav-label-input hidden" type="text" maxlength="60" />
+          {% endif %}
+        </div>
+        {% if user_can(user, 'menu.materials') %}
+        <a href="/admin/materials" class="nav-item {% if '/admin/materials' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">◈</span> Materials &amp; Prices
+        </a>
+        {% endif %}
+        {% if is_admin %}
+        <a href="/admin/formulas" class="nav-item {% if '/admin/formulas' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">ƒ</span> Formulas
+        </a>
+        <a href="/admin/bom-snapshots" class="nav-item {% if '/admin/bom-snapshots' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">📸</span> BOM Snapshots
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── Group 2: Form Setup (admin-only) ── #}
+      {% if show_g2 %}
+      <div class="nav-group">
+        <div class="nav-label nav-label-editable" data-group-key="nav_group_2">
+          <span class="nav-label-text">{{ request.state.nav_groups.nav_group_2 if request.state.nav_groups else 'Form Setup' }}</span>
+          <button class="nav-label-edit-btn" title="Rename group" onclick="startNavGroupEdit(this)" aria-label="Rename group">✎</button>
+          <input class="nav-label-input hidden" type="text" maxlength="60" />
+        </div>
+        <a href="/admin/pdf-templates" class="nav-item {% if '/admin/pdf-templates' in request.url.path and '/admin/pdf-template-builder' not in request.url.path %}active{% endif %}">
+          <span class="nav-icon">📄</span> PDF Templates
+        </a>
+        {% if user_can(user, 'menu.templates') %}
+        <a href="/admin/quote-templates" class="nav-item {% if '/admin/quote-templates' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">📑</span> Quote Templates
+        </a>
+        {% endif %}
+        <a href="/admin/pdf-template-builder" class="nav-item {% if '/admin/pdf-template-builder' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">🛠</span> Template Builder
+        </a>
+      </div>
+      {% endif %}
+
+      {# ── Group 3: User Setup ── #}
+      {% if show_g3 %}
+      <div class="nav-group">
+        <div class="nav-label{% if is_admin %} nav-label-editable{% endif %}" {% if is_admin %}data-group-key="nav_group_3"{% endif %}>
+          <span class="nav-label-text">{{ request.state.nav_groups.nav_group_3 if request.state.nav_groups else 'User Setup' }}</span>
+          {% if is_admin %}
+          <button class="nav-label-edit-btn" title="Rename group" onclick="startNavGroupEdit(this)" aria-label="Rename group">✎</button>
+          <input class="nav-label-input hidden" type="text" maxlength="60" />
+          {% endif %}
+        </div>
+        {% if user_can(user, 'menu.customers') %}
+        <a href="/admin/customers" class="nav-item {% if '/admin/customers' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">👤</span> Customers
+        </a>
+        {% endif %}
+        {% if user_can(user, 'menu.import') %}
+        <a href="/admin/import/grp" class="nav-item {% if '/admin/import/grp' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">⇩</span> GRP Import (advanced)
+        </a>
+        <a href="/admin/import" class="nav-item {% if request.url.path == '/admin/import' %}active{% endif %}">
+          <span class="nav-icon">⬆</span> Import from Excel
+        </a>
+        {% endif %}
+        {% if user_can(user, 'menu.users') %}
+        <a href="/admin/users" class="nav-item {% if '/admin/users' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">👥</span> Manage Users
+        </a>
+        {% endif %}
+        {% if user_can(user, 'menu.themes') %}
+        <a href="/admin/themes" class="nav-item {% if '/admin/themes' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">🎨</span> Themes
+        </a>
+        {% endif %}
+        {% if is_admin %}
+        <a href="/admin/user-permissions" class="nav-item {% if '/admin/user-permissions' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">🔐</span> User View Permissions
+        </a>
+        {% endif %}
+        {% if user_can(user, 'menu.quote_numbering') %}
+        <a href="/admin/quote-numbering" class="nav-item {% if '/admin/quote-numbering' in request.url.path %}active{% endif %}">
+          <span class="nav-icon">#</span> Quote Numbering
+        </a>
+        {% endif %}
+        {% if is_dev_mode() and is_admin %}
+        <a href="/admin/devtools" class="nav-item {% if '/admin/devtools' in request.url.path %}active{% endif %}" style="margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
+          <span class="nav-icon">🛠</span> Dev Tools
+        </a>
+        {% endif %}
+        {% if user and (user.username or '')|lower == 'admin' %}
+        <a href="/admin/performance" class="nav-item {% if '/admin/performance' in request.url.path %}active{% endif %}" style="margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
+          <span class="nav-icon">⚡</span> Performance
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="sidebar-footer">
+      {% if user %}
+      <div class="user-pill">
+        <div class="user-avatar">{{ user.username[0].upper() }}</div>
+        <div>
+          <div style="color:var(--text-head);font-size:13px">{{ user.username }}</div>
+          <span class="badge badge-{{ user.role }}">{{ user.role }}</span>
+        </div>
+      </div>
+      <a href="/logout" class="btn btn-outline btn-sm" style="width:100%;justify-content:center">Sign out</a>
+      {% endif %}
+      <!-- Theme switcher -->
+      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06)">
+        <span style="font-size:10px;color:var(--text-dim);letter-spacing:.05em;text-transform:uppercase">Theme</span>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button id="theme-btn-blue" onclick="setTheme('blue')" title="Blueprint (blue)"
+            style="width:18px;height:18px;border-radius:50%;border:2px solid transparent;background:#388bfd;cursor:pointer;padding:0;transition:border-color .15s"></button>
+          <button id="theme-btn-red" onclick="setTheme('red')" title="IceCold (red)"
+            style="width:18px;height:18px;border-radius:50%;border:2px solid transparent;background:#ed1c24;cursor:pointer;padding:0;transition:border-color .15s"></button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main area -->
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-title">
+        {% block breadcrumb %}<strong>BurtCost</strong>{% endblock %}
+      </span>
+      {% block topbar_actions %}{% endblock %}
+    </div>
+    <div class="page-content">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+{% if user %}
+<!-- ── AI Help Assistant ─────────────────────────────────────────────────── -->
+<button id="help-launcher" type="button" title="Ask the app">
+  <span class="help-launcher-icon">💬</span>
+  <span>Help</span>
+</button>
+<aside id="help-panel" role="dialog" aria-label="AI Help assistant">
+  <div class="help-header">
+    <div>
+      <div class="help-title">Ask the app</div>
+      <div class="help-subtitle">Powered by Claude · session-only memory</div>
+    </div>
+    <div class="help-header-actions">
+      <label class="help-toggle" id="help-suggest-toggle-label" title="Let the assistant offer quick action buttons under its replies">
+        <input type="checkbox" id="help-suggest-toggle"/>
+        <span>Actions</span>
+      </label>
+      <button class="help-icon-btn" id="help-clear" type="button" title="Clear chat">⟲</button>
+      <button class="help-icon-btn" id="help-close" type="button" title="Close (Esc)">✕</button>
+    </div>
+  </div>
+  <div id="help-messages"></div>
+  <div id="help-suggestions"></div>
+  <div id="help-attachment-chip" class="hidden" aria-live="polite"></div>
+  <div id="help-input-row">
+    <button id="help-attach" type="button" class="help-icon-btn" title="Attach Excel workbook to compare">📎</button>
+    <input id="help-file-input" type="file" accept=".xlsx,.xls" style="display:none"/>
+    <textarea id="help-input" rows="1" placeholder="Ask how to do something… (Enter to send, Shift+Enter for newline)"></textarea>
+    <button id="help-send" type="button">Send</button>
+  </div>
+</aside>
+{% endif %}
+
+<div id="global-loading-overlay" class="loading-overlay hidden" aria-live="polite" aria-busy="true">
+  <span class="spinner spinner-lg"></span>
+  <div class="loading-label">Working…</div>
+</div>
+
+<div class="modal-backdrop hidden" id="modal-prompt">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title" id="prompt-title">Enter value</span>
+      <button class="btn btn-icon" onclick="_promptModalResolve(null)">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="prompt-message" style="font-size:13px;line-height:1.5;color:var(--text-head);white-space:pre-line;margin-bottom:10px"></div>
+      <input type="text" id="prompt-input" class="form-input" style="width:100%"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();_promptModalResolve(document.getElementById('prompt-input').value);}else if(event.key==='Escape'){_promptModalResolve(null);}">
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="_promptModalResolve(null)">Cancel</button>
+      <button class="btn btn-primary" onclick="_promptModalResolve(document.getElementById('prompt-input').value)">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="modal-confirm">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title" id="confirm-title">Confirm</span>
+      <button class="btn btn-icon" onclick="_confirmModalResolve(false)">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="confirm-message" style="font-size:13px;line-height:1.5;color:var(--text-head);white-space:pre-line;text-align:center"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="confirm-cancel" onclick="_confirmModalResolve(false)">Cancel</button>
+      <button class="btn btn-primary" id="confirm-ok" onclick="_confirmModalResolve(true)">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="modal-shortcuts">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title">Keyboard Shortcuts</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-shortcuts')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:140px 1fr;gap:10px 16px;font-size:13px;align-items:center">
+        <div style="font-family:var(--font-mono);color:var(--blue-hi)">Ctrl+K</div><div>Focus search</div>
+        <div style="font-family:var(--font-mono);color:var(--blue-hi)">Ctrl+S</div><div>Save current form</div>
+        <div style="font-family:var(--font-mono);color:var(--blue-hi)">Ctrl+N</div><div>New record</div>
+        <div style="font-family:var(--font-mono);color:var(--blue-hi)">Esc</div><div>Close modals</div>
+        <div style="font-family:var(--font-mono);color:var(--blue-hi)">?</div><div>Open this sheet</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-shortcuts')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js?v=5"></script>
+{% if user %}<script src="/static/js/help_chat.js?v=12"></script>{% endif %}
+{% if user %}<script src="/static/js/help_audit.js?v=6"></script>{% endif %}
+{% if is_dev_mode() and is_admin %}
+<script src="/static/js/dev_inspector.js?v=3"></script>
+{% endif %}
+{% block scripts %}{% endblock %}
+<script>
+// ── Nav group inline rename ──────────────────────────────────────────────────
+function startNavGroupEdit(btn) {
+  const wrapper = btn.closest('.nav-label-editable');
+  const textEl  = wrapper.querySelector('.nav-label-text');
+  const input   = wrapper.querySelector('.nav-label-input');
+  input.value   = textEl.textContent.trim();
+  textEl.classList.add('hidden');
+  btn.classList.add('hidden');
+  input.classList.remove('hidden');
+  input.focus();
+  input.select();
+
+  function commit() {
+    const newName = input.value.trim();
+    if (!newName) { cancel(); return; }
+    const key = wrapper.dataset.groupKey;
+    fetch('/api/admin/nav-groups', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: newName })
+    }).then(r => r.json()).then(() => {
+      textEl.textContent = newName;
+      cancel();
+    }).catch(() => cancel());
+  }
+
+  function cancel() {
+    input.classList.add('hidden');
+    textEl.classList.remove('hidden');
+    btn.classList.remove('hidden');
+    input.removeEventListener('blur', commit);
+    input.removeEventListener('keydown', onKey);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  }
+
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', onKey);
+}
+
+// ── Theme switcher ─────────────────────────────────────────────────────────
+const _THEMES = {
+  red: ':root{--border-hi:#ed1c24;--blue:#ed1c24;--blue-hi:#ff6168;--blue-dim:#3a1215;--grid-line:rgba(237,28,36,0.08);}'
+};
+
+function setTheme(t) {
+  localStorage.setItem('app-theme', t);
+  const el = document.getElementById('theme-override');
+  if (el) el.textContent = _THEMES[t] || '';
+  // Update swatch ring
+  document.querySelectorAll('[id^="theme-btn-"]').forEach(b => {
+    b.style.borderColor = 'transparent';
+  });
+  const active = document.getElementById('theme-btn-' + t);
+  if (active) active.style.borderColor = '#fff';
+}
+
+// Mark active swatch on load
+(function() {
+  const t = localStorage.getItem('app-theme') || 'blue';
+  const btn = document.getElementById('theme-btn-' + t);
+  if (btn) btn.style.borderColor = '#fff';
+})();
+
+// ── Collapsible nav groups ────────────────────────────────────────
+(function() {
+  document.querySelectorAll('.nav-group').forEach(function(group, idx) {
+    const header = group.querySelector('.nav-label');
+    if (!header) return;
+
+    // Inject chevron
+    const chevron = document.createElement('span');
+    chevron.className = 'nav-chevron';
+    chevron.textContent = '▾';
+    header.appendChild(chevron);
+
+    const key = 'nav-collapsed-' + idx;
+    // Always keep the group containing the active page expanded
+    const hasActive = !!group.querySelector('.nav-item.active');
+    if (!hasActive && localStorage.getItem(key) === '1') {
+      group.classList.add('nav-collapsed');
+    }
+
+    header.addEventListener('click', function(e) {
+      // Don't toggle when clicking the rename button or its input
+      if (e.target.closest('.nav-label-edit-btn') || e.target.closest('.nav-label-input')) return;
+      group.classList.toggle('nav-collapsed');
+      localStorage.setItem(key, group.classList.contains('nav-collapsed') ? '1' : '0');
+    });
+  });
+})();
+</script>
+</body>
+</html>

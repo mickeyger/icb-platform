@@ -1,0 +1,8 @@
+{# Icecold Bodies MES skin fork of the Dashboard.
+   Inherits the live / template verbatim and overlays the MES skin stylesheet
+   on top. The live / route stays bit-for-bit pristine. Served at
+   /mes/dashboard (see app/routers/mes_views.py). WO v4.7. #}
+{% extends "dashboard.html" %}
+{% block head %}{{ super() }}
+<link rel="stylesheet" href="/static/css/theme-mes.css?v=1"/>
+{% endblock %}

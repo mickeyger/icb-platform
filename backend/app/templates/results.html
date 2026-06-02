@@ -1,0 +1,680 @@
+{% extends "base.html" %}
+{% block title %}Results {{ record.quote_number or ('#' ~ record.id) }}{% endblock %}
+
+{% block head %}
+<style>
+.bom-group-hdr:hover td { background: #1e2638 !important; }
+.bom-group-hdr.collapsed td { opacity: .85; }
+</style>
+{% endblock %}
+{% block breadcrumb %}
+  <a href="/calculator" style="color:var(--text-dim);text-decoration:none">Calculator</a>
+  &nbsp;/&nbsp; <strong>Results {{ record.quote_number or ('#' ~ record.id) }}</strong>
+{% endblock %}
+{% block topbar_actions %}
+  <a href="/calculator?from={{ record.id }}" class="btn btn-outline btn-sm no-print" title="Re-open with same dimensions in calculator">⧉ Duplicate</a>
+  {% if user_can(user, 'export.excel') %}
+  <button class="btn btn-success btn-sm no-print" id="excel-export-btn" onclick="openExcelExportModal()">⬇ Export Excel</button>
+  {% endif %}
+  {% if user_can(user, 'export.pdf') %}
+  <a href="/results/{{ record.id }}/export/pdf"   class="btn btn-danger  btn-sm no-print" onclick="onExport(this,'Generating PDF…')">📄 Export PDF</a>
+  {% endif %}
+  {% if user_can(user, 'quote.generate') %}
+    {% if report_template %}
+    <a href="/results/{{ record.id }}/report" target="_blank" class="btn btn-primary btn-sm no-print" onclick="onExport(this,'Generating Quote…')" title="Generate {{ report_template.name }}">📑 Generate Quote</a>
+    {% else %}
+    <button class="btn btn-primary btn-sm no-print" disabled
+            style="opacity:.5;cursor:not-allowed"
+            title="No PDF quote template has been configured for this body type. Please contact your system administrator or developer.">📑 Generate Quote</button>
+    {% endif %}
+  {% endif %}
+  <button class="btn btn-outline btn-sm no-print" onclick="window.print()">🖨 Print</button>
+{% endblock %}
+
+{% block content %}
+{% set full_cost_access = user_can(user, 'bom.view_prices') %}
+{% set costing_status = (record.status if record.status else ('accepted' if record.approved_at else 'pending')) %}
+{% set decided_when = record.approved_at.strftime('%d %b %Y %H:%M') if record.approved_at else '' %}
+{% set decided_by = record.approver.username if record.approver else '' %}
+{% if costing_status == 'accepted' %}
+  {% set status_tooltip = 'Accepted' + (' by ' ~ decided_by if decided_by else '') + (' on ' ~ decided_when if decided_when else '') %}
+{% elif costing_status == 'declined' %}
+  {% set status_tooltip = 'Declined' + (' by ' ~ decided_by if decided_by else '') + (' on ' ~ decided_when if decided_when else '') + ((' — ' ~ record.decline_reason) if record.decline_reason else '') %}
+{% else %}
+  {% set status_tooltip = 'Pending review' %}
+{% endif %}
+
+{% macro costing_state_controls() %}
+  {% if costing_status == 'pending' %}
+    <button class="btn btn-success btn-sm no-print results-status-btn" data-action="accept"
+            onclick="acceptFromResults(this)">✓ Accepted</button>
+    <button class="btn btn-danger btn-sm no-print results-status-btn" data-action="decline"
+            onclick="declineFromResults(this)">✗ Declined</button>
+  {% elif costing_status == 'accepted' %}
+    <span class="costing-state-pill state-accepted no-print" title="{{ status_tooltip }}">✓ Accepted</span>
+  {% else %}
+    <span class="costing-state-pill state-declined no-print" title="{{ status_tooltip }}">✗ Declined</span>
+  {% endif %}
+{% endmacro %}
+<!-- Header -->
+<div style="display:flex;align-items:flex-start;justify-content:space-between;
+  margin-bottom:20px;flex-wrap:wrap;gap:12px">
+  <div>
+    <div style="font-family:var(--font-mono);font-size:10px;color:var(--blue);
+      letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+      Costing Report {{ record.quote_number or ('#' ~ record.id) }}
+      {% if result_version and result_version > 1 %}
+      <span style="background:rgba(255,163,67,.15);color:#ffb340;border:1px solid rgba(255,163,67,.4);
+        border-radius:10px;padding:1px 8px;font-size:10px;letter-spacing:.5px">
+        Rev{{ result_version }}
+      </span>
+      {% endif %}
+    </div>
+    <h2 style="font-size:22px;color:var(--text-head);display:inline-flex;align-items:center;gap:12px">
+      <span>{{ trailer.name }}</span>
+      {% if record.is_repair %}
+      <span style="background:rgba(224,36,36,.14);color:#e02424;border:1px solid rgba(224,36,36,.45);
+        border-radius:10px;padding:2px 10px;font-size:12px;font-weight:600;letter-spacing:.5px">🔧 REPAIR QUOTE</span>
+      {% endif %}
+      {{ costing_state_controls() }}
+    </h2>
+    {% if record.customer %}
+    <div style="font-size:14px;color:var(--text);margin-top:3px;font-weight:600">
+      {{ record.customer.name }}
+      {% if record.customer.bp_code %}<span style="font-size:11px;color:var(--text-dim);font-weight:400"> · {{ record.customer.bp_code }}</span>{% endif %}
+    </div>
+    {% endif %}
+    <div style="color:var(--text-dim);font-size:13px;margin-top:4px">
+      Generated {{ record.created_at.strftime('%d %B %Y at %H:%M') }}
+    </div>
+    {% if overrides_by_name %}
+    <div style="margin-top:8px;font-size:11px;color:#ffb340;display:flex;align-items:center;gap:5px">
+      <span>✎</span>
+      <span>{{ overrides_by_name|length }} quote-only price override{{ 's' if overrides_by_name|length != 1 else '' }} applied — not saved to material database</span>
+    </div>
+    {% endif %}
+  </div>
+  <div style="text-align:right">
+    {% set _final_price = result.selling_price if result.get('selling_price') else result.grand_total %}
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">SELLING PRICE</div>
+    <div style="font-family:var(--font-mono);font-size:32px;font-weight:700;color:var(--blue-hi)">
+      R {{ '{:,.2f}'.format(_final_price) }}
+    </div>
+    {% if result.cost_per_sqm %}
+    <div style="font-size:12px;color:var(--text-dim)">
+      Manufacturing R {{ '{:,.2f}'.format(result.grand_total) }} &nbsp;·&nbsp; R {{ '{:,.2f}'.format(result.cost_per_sqm) }} / m²
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Dimensions + Geometry -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Input Dimensions</span></div>
+    <div class="card-body">
+      <div class="geo-grid">
+        <div class="geo-item"><div class="geo-label">Length</div><div class="geo-value">{{ dims.get('length', 0) }} m</div></div>
+        <div class="geo-item"><div class="geo-label">Width</div><div class="geo-value">{{ dims.get('width', 0) }} m</div></div>
+        <div class="geo-item"><div class="geo-label">Height</div><div class="geo-value">{{ dims.get('height', 0) }} m</div></div>
+        <div class="geo-item"><div class="geo-label">Num Axles</div><div class="geo-value">{{ dims.get('num_axles', 0)|int }}</div></div>
+        <div class="geo-item"><div class="geo-label">Num Doors</div><div class="geo-value">{{ dims.get('num_doors', 0)|int }}</div></div>
+        <div class="geo-item"><div class="geo-label">Insulation</div><div class="geo-value">{{ dims.get('insulation_thickness', 0) }} m</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="card-title">Computed Geometry</span></div>
+    <div class="card-body">
+      <div class="geo-grid">
+        {% for k, v in result.geometry.items() %}
+        <div class="geo-item">
+          <div class="geo-label">{{ k.replace('_',' ').title() }}</div>
+          <div class="geo-value">{{ '{:.3f}'.format(v) }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Category Summary -->
+{# Build the set of optional-section names once, drives red highlighting both
+   in the summary card below and in the BOM table group headers further down.
+   Matches the live calculator's behaviour at calculator.js:4282-4286. #}
+{% set _opt_ns = namespace(cats=[]) %}
+{% for _it in result_items if _it.section_is_optional %}{% if _it.category not in _opt_ns.cats %}{% set _ = _opt_ns.cats.append(_it.category) %}{% endif %}{% endfor %}
+{% set optional_cats = _opt_ns.cats %}
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px">
+  <div class="card">
+    <div class="card-header"><span class="card-title">Cost by Category</span></div>
+    <div class="card-body">
+      {% if full_cost_access %}
+      <div class="summary-box">
+        {% for cat, total in result.category_totals.items() %}
+        {% set mult = result.category_multipliers.get(cat, 1) if result.get('category_multipliers') else 1 %}
+        {% set _opt = cat in optional_cats %}
+        <div class="summary-row">
+          <span class="s-label"{% if _opt %} style="color:var(--red,#e35d6a)"{% endif %}>{{ cat }}{% if mult and mult != 1 %}
+            <span title="× {{ mult }} multiplier applied to this section"
+              style="margin-left:6px;background:#3a1a1a;color:#ff6b6b;border:1px solid #f44336;
+                border-radius:4px;padding:1px 5px;font-size:10px;font-weight:600">× {{ mult | int if mult == mult | int else mult }}</span>
+            {% endif %}</span>
+          <span class="s-val"{% if _opt %} style="color:var(--red,#e35d6a)"{% endif %}>R {{ '{:,.2f}'.format(total) }}</span>
+        </div>
+        {% endfor %}
+        <div class="summary-row" style="border-top:2px solid var(--border)">
+          <span class="s-label">Cost per m²</span>
+          <span class="s-val">R {{ '{:,.2f}'.format(result.cost_per_sqm) }}</span>
+        </div>
+        <div class="summary-row" style="border-top:2px solid var(--border);margin-top:4px;padding-top:6px">
+          <span class="s-label" style="font-weight:600">Total Manufacturing</span>
+          <span class="s-val" style="font-weight:600">R {{ '{:,.2f}'.format(result.grand_total) }}</span>
+        </div>
+        {% if result.get('profit_amount') %}
+        <div class="summary-row highlight-green">
+          <span class="s-label">Profit Margin ({{ result.profit_margin }}%)</span>
+          <span class="s-val">+ R {{ '{:,.2f}'.format(result.profit_amount) }}</span>
+        </div>
+        {% endif %}
+        {% if result.get('ratio_amount') %}
+        <div class="summary-row highlight-green">
+          <span class="s-label">Ratio ({{ result.ratio_label }})</span>
+          <span class="s-val">+ R {{ '{:,.2f}'.format(result.ratio_amount) }}</span>
+        </div>
+        {% endif %}
+        {% if result.get('selling_price') %}
+        <div class="summary-row total" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>SELLING PRICE</span>
+          <span style="display:inline-flex;align-items:center;gap:10px">
+            {{ costing_state_controls() }}
+            <span class="s-val">R {{ '{:,.2f}'.format(result.selling_price) }}</span>
+          </span>
+        </div>
+        {% else %}
+        <div class="summary-row total" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>TOTAL MANUFACTURING COST</span>
+          <span style="display:inline-flex;align-items:center;gap:10px">
+            {{ costing_state_controls() }}
+            <span class="s-val">R {{ '{:,.2f}'.format(result.grand_total) }}</span>
+          </span>
+        </div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div style="padding:16px;color:var(--text-dim);font-size:13px">
+        Cost breakdown is restricted. Only materials cost, cost/m², margin, ratio, and total are shown.
+      </div>
+      <div class="summary-box" style="margin-top:12px">
+        <div class="summary-row" style="border-top:2px solid var(--border);margin-top:4px;padding-top:6px">
+          <span class="s-label" style="font-weight:600">Total Manufacturing</span>
+          <span class="s-val" style="font-weight:600">R {{ '{:,.2f}'.format(result.grand_total) }}</span>
+        </div>
+        <div class="summary-row" style="margin-bottom:8px">
+          <span class="s-label" style="font-size:10px;color:var(--text-dim)">Cost / m²</span>
+          <span class="s-val" style="font-size:10px;color:var(--text-dim)">R {{ '{:,.2f}'.format(result.cost_per_sqm) }}</span>
+        </div>
+        {% if result.get('profit_amount') %}
+        <div class="summary-row highlight-green">
+          <span class="s-label">Profit Margin ({{ result.profit_margin }}%)</span>
+          <span class="s-val">+ R {{ '{:,.2f}'.format(result.profit_amount) }}</span>
+        </div>
+        {% endif %}
+        {% if result.get('ratio_amount') %}
+        <div class="summary-row highlight-green">
+          <span class="s-label">Ratio ({{ result.ratio_label }})</span>
+          <span class="s-val">+ R {{ '{:,.2f}'.format(result.ratio_amount) }}</span>
+        </div>
+        {% endif %}
+        {% if result.get('selling_price') %}
+        <div class="summary-row total" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>SELLING PRICE</span>
+          <span style="display:inline-flex;align-items:center;gap:10px">
+            {{ costing_state_controls() }}
+            <span class="s-val">R {{ '{:,.2f}'.format(result.selling_price) }}</span>
+          </span>
+        </div>
+        {% else %}
+        <div class="summary-row total" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>TOTAL MANUFACTURING COST</span>
+          <span style="display:inline-flex;align-items:center;gap:10px">
+            {{ costing_state_controls() }}
+            <span class="s-val">R {{ '{:,.2f}'.format(result.grand_total) }}</span>
+          </span>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><span class="card-title">Cost Distribution</span></div>
+    <div class="card-body">
+      {% if full_cost_access %}
+        {% set total = result.grand_total %}
+        {% for cat, amt in result.category_totals.items() %}
+        {% set pct = (amt / total * 100) if total > 0 else 0 %}
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between; font-size:11px;margin-bottom:3px">
+            <span style="color:var(--text-dim)">{{ cat }}</span>
+            <span style="font-family:var(--font-mono);color:var(--text)">{{ '{:.1f}'.format(pct) }}%</span>
+          </div>
+          <div style="height:6px;background:var(--bg-panel);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:{{ '{:.1f}'.format(pct) }}%; background:var(--blue);border-radius:3px; transition:width .4s ease"></div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div style="padding:16px;color:var(--text-dim);font-size:13px">
+        Cost distribution chart is restricted.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Full BOM Table -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Full Bill of Materials</span>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;user-select:none">
+        <input type="checkbox" id="bom-collapse-all-chk" onchange="bomCollapseAll(this.checked)"
+          style="accent-color:var(--blue);width:13px;height:13px;cursor:pointer">
+        Collapse all
+      </label>
+      <span style="font-size:11px;color:var(--text-dim)">{{ result_items|length }} line items</span>
+      {% if overrides_by_name %}
+      <span style="font-size:11px;color:#f85149">✎* quote-only price override</span>
+      {% endif %}
+      {% if outdated_prices %}
+      <span style="font-size:11px;color:#ffb340">⚠ outdated unit price</span>
+      {% endif %}
+      {% if recently_updated %}
+      <span style="font-size:11px;color:var(--blue)">↻ price updated last 7 days</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Material</th>
+          <th>SAP Code</th>
+          <th>Formula</th>
+          <th style="text-align:right">Qty</th>
+          <th>Unit</th>
+          <th style="text-align:right">Unit Price</th>
+          <th style="text-align:right">Waste %</th>
+          <th style="text-align:right">Line Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set ns = namespace(current_cat='', cat_total=0, cat_idx=0) %}
+        {% for item in result_items %}
+          {% if item.category != ns.current_cat %}
+            {% if ns.current_cat %}
+            <tr class="tfoot-row bom-group-row" data-cat-group="cat-{{ ns.cat_idx }}">
+              <td colspan="8" style="text-align:right;color:var(--text-dim);font-size:11px">
+                {{ ns.current_cat }} subtotal
+              </td>
+              <td style="text-align:right;color:var(--blue-hi)" class="bom-subtotal-val">
+                {% if full_cost_access %}R {{ '{:,.2f}'.format(ns.cat_total) }}{% else %}••••{% endif %}
+              </td>
+            </tr>
+            {% endif %}
+            {% set ns.cat_idx = ns.cat_idx + 1 %}
+            {% set ns.current_cat = item.category %}
+            {% set ns.cat_total = 0 %}
+            {% set _hdr_opt = item.category in optional_cats %}
+            <tr class="bom-group-hdr" data-cat-id="cat-{{ ns.cat_idx }}" onclick="toggleBomGroup(this)" title="Click to collapse / expand">
+              <td colspan="9" style="background:var(--bg-panel);padding:8px 12px;cursor:pointer;user-select:none">
+                <span class="bom-chevron" style="font-size:10px;margin-right:6px;color:var(--text-dim)">▼</span>
+                <span style="font-family:var(--font-mono);font-size:10px;color:{% if _hdr_opt %}var(--red,#e35d6a){% else %}var(--blue-hi){% endif %};letter-spacing:1.2px;text-transform:uppercase">{{ item.category }}</span>
+                <span class="bom-hdr-subtotal" style="display:none;float:right;font-family:var(--font-mono);font-size:11px;color:{% if _hdr_opt %}var(--red,#e35d6a){% else %}var(--blue-hi){% endif %};font-weight:600"></span>
+              </td>
+            </tr>
+          {% endif %}
+          {% set ns.cat_total = ns.cat_total + item.line_cost %}
+          {% set is_override = item.material in overrides_by_name %}
+          {% set is_outdated = item.material in outdated_prices %}
+          {% set is_recent   = item.material in recently_updated %}
+          <tr class="bom-group-row" data-cat-group="cat-{{ ns.cat_idx }}"{% if is_override %} style="background:rgba(248,81,73,.04)"{% endif %}>
+            <td></td>
+            <td>
+              {{ item.material }}
+              {% if is_override %}{% set ov_reason = override_reasons_by_name.get(item.material) if override_reasons_by_name else None %}<span title="{% if ov_reason %}Reason: {{ ov_reason }}{% else %}Quote-only price override{% endif %}" style="color:#f85149;font-size:10px;margin-left:4px;cursor:help">✎*</span>{% endif %}
+              {% if is_outdated %}<span title="{{ outdated_prices[item.material] }}" style="color:#ffb340;font-size:10px;margin-left:4px">⚠</span>{% endif %}
+              {% if is_recent %}<span title="{{ recently_updated[item.material] }}" style="color:var(--blue);font-size:10px;margin-left:4px">↻</span>{% endif %}
+            </td>
+            <td class="td-mono" style="font-size:11px;color:var(--text-dim)">{{ item.material_code }}</td>
+            <td class="td-mono" style="font-size:11px;color:var(--text-dim)">{{ item.formula }}</td>
+            <td class="td-num">{{ '{:,.4f}'.format(item.quantity) }}</td>
+            <td style="color:var(--text-dim);font-size:12px">{{ item.unit }}</td>
+            <td class="td-num{% if is_override %} price-override-cell{% elif is_outdated %} price-outdated-cell{% elif is_recent %} price-recent-cell{% endif %}"
+              {% if is_override %}{% set ov_reason = override_reasons_by_name.get(item.material) if override_reasons_by_name else None %}data-tooltip="{% if ov_reason %}Reason: {{ ov_reason }}{% else %}Quote-only price override{% endif %}" title="{% if ov_reason %}Reason: {{ ov_reason }}{% else %}Quote-only price override{% endif %}"{% elif is_outdated %}data-tooltip="{{ outdated_prices[item.material] }}"{% elif is_recent %}data-tooltip="{{ recently_updated[item.material] }}"{% endif %}>
+              {% if full_cost_access %}R {{ '{:,.2f}'.format(item.unit_price) }}{% if is_override %} <span style="color:#f85149;font-size:10px">*</span>{% endif %}{% else %}••••{% endif %}
+            </td>
+            <td class="td-num" style="color:var(--text-dim)">
+              {% if item.waste_pct %}{{ item.waste_pct }}%{% endif %}
+            </td>
+            <td class="td-num" style="font-weight:600;{% if is_override %}color:var(--red){% endif %}">
+              {% if full_cost_access %}R {{ '{:,.2f}'.format(item.line_cost) }}{% else %}••••{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        <!-- last category subtotal -->
+        {% if ns.current_cat %}
+        <tr class="tfoot-row bom-group-row" data-cat-group="cat-{{ ns.cat_idx }}">
+          <td colspan="8" style="text-align:right;color:var(--text-dim);font-size:11px">
+            {{ ns.current_cat }} subtotal
+          </td>
+          <td style="text-align:right;color:var(--blue-hi)" class="bom-subtotal-val">
+            {% if full_cost_access %}R {{ '{:,.2f}'.format(ns.cat_total) }}{% else %}••••{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% if result.chassis and result.chassis['items'] %}
+        {% set ch = result.chassis %}
+        <tr class="bom-group-hdr">
+          <td colspan="9" style="background:var(--bg-panel);padding:8px 12px">
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--blue-hi);letter-spacing:1.2px;text-transform:uppercase">
+              Chassis — {{ ch.axle_count }}-axle · {{ ch.tyre_style }} · {{ ch.tyre_count }} tyres · {{ ch.length }} m
+            </span>
+          </td>
+        </tr>
+        {% for it in ch['items'] %}
+        <tr>
+          <td style="font-size:11px;color:var(--text-dim)">{{ it.kind }}</td>
+          <td>{{ it.label }}</td>
+          <td></td>
+          <td></td>
+          <td class="td-num">{{ '{:,.2f}'.format(it.qty) }}</td>
+          <td style="color:var(--text-dim);font-size:12px">ea</td>
+          <td class="td-num">{% if full_cost_access %}R {{ '{:,.2f}'.format(it.unit_price) }}{% else %}••••{% endif %}</td>
+          <td></td>
+          <td class="td-num" style="font-weight:600">{% if full_cost_access %}R {{ '{:,.2f}'.format(it.line_cost) }}{% else %}••••{% endif %}</td>
+        </tr>
+        {% endfor %}
+        <tr class="tfoot-row">
+          <td colspan="8" style="text-align:right;color:var(--text-dim);font-size:11px">Chassis subtotal</td>
+          <td style="text-align:right;color:var(--blue-hi)">
+            {% if full_cost_access %}R {{ '{:,.2f}'.format(ch.subtotal) }}{% else %}••••{% endif %}
+          </td>
+        </tr>
+        {% if result.materials_total is not none %}
+        <tr class="tfoot-row">
+          <td colspan="8" style="text-align:right;color:var(--text-dim);font-size:11px">Body materials subtotal</td>
+          <td style="text-align:right;color:var(--blue-hi)">
+            {% if full_cost_access %}R {{ '{:,.2f}'.format(result.materials_total) }}{% else %}••••{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endif %}
+        <!-- grand total -->
+        <tr class="tfoot-row" style="background:var(--blue-dim)">
+          <td colspan="8" style="font-size:14px;color:var(--text-head)">
+            TOTAL MANUFACTURING COST
+          </td>
+          <td style="text-align:right;font-size:15px;color:var(--blue-hi)">
+            R {{ '{:,.2f}'.format(result.grand_total) }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+<!-- ── Excel Export Decision Modal ─────────────────────────────────────── -->
+<div class="modal-backdrop hidden no-print" id="modal-excel-export">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <span class="modal-title">⬇ Export to Excel</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-excel-export')">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Step 1: highlight question -->
+      <div id="excel-step-1">
+        <p style="font-size:14px;color:var(--text);margin-bottom:18px;line-height:1.6">
+          Do you want <strong>price changes to be highlighted</strong> in the Excel sheet?
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+
+          <button class="btn btn-primary" style="justify-content:flex-start;gap:12px;padding:12px 16px;text-align:left"
+                  onclick="showExcelHighlightPreview()">
+            <span style="font-size:18px">🎨</span>
+            <div>
+              <div style="font-weight:700">Yes — highlight price changes</div>
+              <div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px">Colour-code overridden and recently updated prices</div>
+            </div>
+          </button>
+
+          <button class="btn btn-outline" style="justify-content:flex-start;gap:12px;padding:12px 16px;text-align:left"
+                  onclick="doExcelExport(false)">
+            <span style="font-size:18px">📄</span>
+            <div>
+              <div style="font-weight:700">No — export as-is</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Standard export, no colour coding</div>
+            </div>
+          </button>
+
+        </div>
+      </div>
+
+      <!-- Step 2: colour legend preview -->
+      <div id="excel-step-2" style="display:none">
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:14px">The following colour coding will be applied to the <strong>Unit Price</strong> column:</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 14px;
+            background:rgba(56,139,253,.08);border:1px solid rgba(56,139,253,.3);border-radius:var(--radius)">
+            <span style="font-family:var(--font-mono);font-weight:700;font-size:16px;color:#388BFD;min-width:80px">R 123.45</span>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--blue-hi)">Blue — permanently updated</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Price was changed in the material database within the last 7 days</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:12px 14px;
+            background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.3);border-radius:var(--radius)">
+            <span style="font-family:var(--font-mono);font-weight:700;font-size:16px;color:#F85149;min-width:80px">R 99.00</span>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--red)">Red — quote-only override</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">Price was manually changed for this quote only — not saved to database</div>
+            </div>
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--text-dim);margin-bottom:16px">
+          A <strong>Legend</strong> tab will also be included in the workbook.
+        </p>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline" style="flex:1" onclick="showExcelStep1()">← Back</button>
+          <button class="btn btn-success" id="excel-confirm-btn" style="flex:2;justify-content:center" onclick="doExcelExport(true)">
+            <span id="excel-confirm-spin" class="spinner spinner-sm" style="display:none"></span>
+            ⬇ Export with highlights
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Excel export decision tree ────────────────────────────────────────────────
+const EXCEL_BASE_URL = '/results/{{ record.id }}/export/excel';
+
+function openExcelExportModal() {
+  showExcelStep1();
+  document.getElementById('modal-excel-export').classList.remove('hidden');
+}
+
+function showExcelStep1() {
+  document.getElementById('excel-step-1').style.display = '';
+  document.getElementById('excel-step-2').style.display = 'none';
+}
+
+function showExcelHighlightPreview() {
+  document.getElementById('excel-step-1').style.display = 'none';
+  document.getElementById('excel-step-2').style.display = '';
+}
+
+function doExcelExport(highlight) {
+  closeModal('modal-excel-export');
+  const url = EXCEL_BASE_URL + (highlight ? '?highlight=1' : '');
+  // Show brief loading state on the export button
+  const btn = document.getElementById('excel-export-btn');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner spinner-sm"></span> Exporting…';
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.innerHTML = orig;
+    btn.disabled = false;
+  }, 6000);
+  // Trigger download
+  window.location.href = url;
+}
+
+// ── Costing state: accept / decline ──────────────────────────────────────────
+function _csrfHeader() {
+  return {
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+  };
+}
+
+function _replaceStatePillsWith(html) {
+  document.querySelectorAll('.results-status-btn').forEach(b => { b.outerHTML = html; });
+  document.querySelectorAll('.costing-state-pill').forEach(p => { p.outerHTML = html; });
+}
+
+async function acceptFromResults(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-sm"></span> Saving…';
+  try {
+    const r = await fetch('/api/calculations/{{ record.id }}/accept', {
+      method: 'POST', headers: _csrfHeader(), body: '{}'
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Request failed');
+    const tip = `Accepted${d.approver ? ' by ' + d.approver : ''}${d.approved_at ? ' on ' + d.approved_at : ''}`;
+    _replaceStatePillsWith(`<span class="costing-state-pill state-accepted no-print" title="${tip}">✓ Accepted</span>`);
+    if (typeof toast === 'function') toast('Costing accepted', 'success');
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    toast('Accept failed: ' + e.message, 'error');
+  }
+}
+
+async function declineFromResults(btn) {
+  const reason = await promptModal(
+    'Why is this costing being declined? (min 5 characters)',
+    '',
+    { title: 'Decline costing', okText: 'Decline' }
+  );
+  if (reason === null) return;
+  if (reason.trim().length < 5) {
+    toast('Decline reason must be at least 5 characters', 'warn');
+    return;
+  }
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-sm"></span> Saving…';
+  try {
+    const r = await fetch('/api/calculations/{{ record.id }}/decline', {
+      method: 'POST', headers: _csrfHeader(),
+      body: JSON.stringify({ reason: reason.trim() })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Request failed');
+    const reasonText = (d.decline_reason || reason.trim()).replace(/"/g, '&quot;');
+    const tip = `Declined${d.approver ? ' by ' + d.approver : ''}${d.approved_at ? ' on ' + d.approved_at : ''} — ${reasonText}`;
+    _replaceStatePillsWith(`<span class="costing-state-pill state-declined no-print" title="${tip}">✗ Declined</span>`);
+    if (typeof toast === 'function') toast('Costing declined', 'success');
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+    toast('Decline failed: ' + e.message, 'error');
+  }
+}
+
+function onExport(link, label) {
+  const orig = link.innerHTML;
+  link.innerHTML = `<span class="spinner spinner-sm"></span>${label}`;
+  link.style.pointerEvents = 'none';
+  link.style.opacity = '0.7';
+  setTimeout(() => {
+    link.innerHTML = orig;
+    link.style.pointerEvents = '';
+    link.style.opacity = '';
+  }, 6000);
+}
+
+// ── BOM group collapse / expand ───────────────────────────────────────────────
+function _bomSetGroup(hdr, collapse) {
+  const id      = hdr.dataset.catId;
+  const rows    = document.querySelectorAll(`.bom-group-row[data-cat-group="${id}"]`);
+  const chevron = hdr.querySelector('.bom-chevron');
+  const hdrsub  = hdr.querySelector('.bom-hdr-subtotal');
+
+  hdr.classList.toggle('collapsed', collapse);
+  chevron.textContent = collapse ? '▶' : '▼';
+  rows.forEach(r => r.style.display = collapse ? 'none' : '');
+
+  if (collapse) {
+    const subtotalRow = document.querySelector(`.bom-group-row.tfoot-row[data-cat-group="${id}"] .bom-subtotal-val`);
+    hdrsub.textContent = subtotalRow ? subtotalRow.textContent.trim() : '';
+    hdrsub.style.display = '';
+  } else {
+    hdrsub.style.display = 'none';
+  }
+}
+
+function toggleBomGroup(hdr) {
+  const collapse = !hdr.classList.contains('collapsed');
+  _bomSetGroup(hdr, collapse);
+
+  // Persist state per record
+  const key   = 'bom-collapse-{{ record.id }}';
+  const state = JSON.parse(localStorage.getItem(key) || '{}');
+  state[hdr.dataset.catId] = collapse;
+  localStorage.setItem(key, JSON.stringify(state));
+
+  // Sync the checkbox: checked = all collapsed, unchecked = any expanded
+  _bomSyncCheckbox();
+}
+
+function bomCollapseAll(collapse) {
+  const key   = 'bom-collapse-{{ record.id }}';
+  const state = {};
+  document.querySelectorAll('.bom-group-hdr').forEach(hdr => {
+    _bomSetGroup(hdr, collapse);
+    state[hdr.dataset.catId] = collapse;
+  });
+  localStorage.setItem(key, JSON.stringify(state));
+}
+
+function _bomSyncCheckbox() {
+  const hdrs = document.querySelectorAll('.bom-group-hdr');
+  const chk  = document.getElementById('bom-collapse-all-chk');
+  if (!chk || !hdrs.length) return;
+  const allCollapsed = [...hdrs].every(h => h.classList.contains('collapsed'));
+  chk.checked = allCollapsed;
+}
+
+// Restore collapsed state on load
+document.addEventListener('DOMContentLoaded', function () {
+  const key   = 'bom-collapse-{{ record.id }}';
+  const state = JSON.parse(localStorage.getItem(key) || '{}');
+  document.querySelectorAll('.bom-group-hdr').forEach(hdr => {
+    if (state[hdr.dataset.catId]) _bomSetGroup(hdr, true);
+  });
+  _bomSyncCheckbox();
+});
+</script>
+{% endblock %}

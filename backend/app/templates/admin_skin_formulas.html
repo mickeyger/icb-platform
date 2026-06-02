@@ -1,0 +1,585 @@
+{% extends "base.html" %}
+{% block title %}Skin Formulas{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Skin Formulas{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary btn-sm" onclick="openAddFormula()">+ Add Formula</button>
+  <button class="btn btn-sm" onclick="openIngredients()">⊞ Manage Ingredients</button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Two-column layout: ingredients panel + formulas list -->
+<div style="display:grid;grid-template-columns:1fr;gap:16px">
+
+  <!-- ── Formulas card ─────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Skin Formula Recipes</span>
+      <span id="formula-count" style="font-size:11px;color:var(--text-dim)"></span>
+    </div>
+
+    <div class="table-wrap">
+      <table id="formula-table">
+        <thead>
+          <tr>
+            <th style="width:220px">Name</th>
+            <th>Description</th>
+            <th style="text-align:right;width:120px">Cost/m² Std</th>
+            <th style="text-align:right;width:120px">Cost/m² KZN</th>
+            <th style="text-align:right;width:120px;color:var(--blue-hi,#58a6ff)">Cost/m² SAP</th>
+            <th style="width:80px">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="formula-body">
+          <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim)">
+            <span class="spinner"></span> Loading…
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Add/Edit Formula Modal ─────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-formula">
+  <div class="modal" style="max-width:700px;width:95vw">
+    <div class="modal-header">
+      <span class="modal-title" id="fmodal-title">Add Skin Formula</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-formula')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="f-id"/>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label class="form-label">Name *</label>
+          <input class="form-input" id="f-name" placeholder="e.g. 450CSM-450"/>
+        </div>
+        <div class="form-group" style="flex:3">
+          <label class="form-label">Description</label>
+          <input class="form-input" id="f-desc" placeholder="Short description"/>
+        </div>
+      </div>
+
+      <!-- Ingredient items table -->
+      <div style="margin-top:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <label class="form-label" style="margin:0">Ingredients (qty per m²)</label>
+          <button class="btn btn-sm" type="button" onclick="addIngredientRow()">+ Add Ingredient</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 8px;color:var(--text-dim);font-weight:500">Ingredient</th>
+              <th style="text-align:right;padding:4px 8px;color:var(--text-dim);font-weight:500;width:140px">Qty/m² (formula)</th>
+              <th style="text-align:right;padding:4px 8px;color:var(--text-dim);font-weight:500;width:90px">Std/m²</th>
+              <th style="text-align:right;padding:4px 8px;color:var(--text-dim);font-weight:500;width:90px">KZN/m²</th>
+              <th style="width:36px"></th>
+            </tr>
+          </thead>
+          <tbody id="items-body"></tbody>
+          <tfoot>
+            <tr id="items-totals" style="border-top:2px solid var(--border)">
+              <td colspan="2" style="padding:6px 8px;font-weight:600;font-size:12px">TOTAL per m²</td>
+              <td id="total-std" style="text-align:right;padding:6px 8px;font-weight:600">R 0.00</td>
+              <td id="total-kzn" style="text-align:right;padding:6px 8px;font-weight:600">R 0.00</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-formula')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFormula()">Save Formula</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Manage Ingredients Modal ──────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-ingredients">
+  <div class="modal" style="max-width:680px;width:95vw">
+    <div class="modal-header">
+      <span class="modal-title">Manage Ingredients &amp; Prices</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-ingredients')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:12px;display:flex;justify-content:flex-end">
+        <button class="btn btn-sm btn-primary" onclick="addIngredientRecord()">+ New Ingredient</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:4px 8px;color:var(--text-dim);font-weight:500">Name</th>
+            <th style="text-align:left;padding:4px 8px;color:var(--text-dim);font-weight:500;width:130px">SAP Code</th>
+            <th style="text-align:right;padding:4px 8px;color:var(--text-dim);font-weight:500;width:90px">Std Price</th>
+            <th style="text-align:right;padding:4px 8px;color:var(--text-dim);font-weight:500;width:90px">KZN Price</th>
+            <th style="text-align:right;padding:4px 8px;color:var(--blue-hi,#58a6ff);font-weight:500;width:90px" title="Last Purchase Price from SAP — click the value to edit">SAP LastPP ✎</th>
+            <th style="width:100px"></th>
+          </tr>
+        </thead>
+        <tbody id="ing-body">
+          <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-dim)">
+            <span class="spinner"></span> Loading…
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-ingredients')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Formula detail accordion (read-only view under each row) ──── -->
+<!-- Rendered inline via JS -->
+
+<script>
+let _ingredients = [];   // [{id, name, price_standard, price_kzn, sap_code}]
+let _formulas    = [];   // full list from API
+const _saving    = new Set(); // guards against blur re-entrancy
+
+function _csrf() {
+  return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+function _headers() {
+  return { 'Content-Type': 'application/json', 'X-CSRF-Token': _csrf() };
+}
+
+async function loadIngredients() {
+  const r = await fetch('/api/skin-formula-ingredients');
+  _ingredients = await r.json();
+}
+
+async function loadFormulas() {
+  const r = await fetch('/api/skin-formulas');
+  _formulas = await r.json();
+  renderFormulas();
+}
+
+async function refreshFormulaCosts() {
+  // Remember which detail accordions are currently open
+  const open = new Set(
+    [...document.querySelectorAll('.detail-row:not(.hidden)')]
+      .map(el => parseInt(el.id.replace('detail-', '')))
+  );
+  await loadFormulas();
+  // Re-open the same accordions after re-render
+  open.forEach(fid => {
+    const row = document.getElementById(`detail-${fid}`);
+    const btn = document.querySelector(`tr[data-fid="${fid}"] button[title="Expand"]`);
+    if (row && btn) { row.classList.remove('hidden'); btn.textContent = '▼'; }
+  });
+}
+
+function renderFormulas() {
+  const tbody = document.getElementById('formula-body');
+  document.getElementById('formula-count').textContent = `${_formulas.length} formula${_formulas.length !== 1 ? 's' : ''}`;
+  if (!_formulas.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--text-dim)">No formulas yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _formulas.map(f => `
+    <tr data-fid="${f.id}">
+      <td style="font-weight:500">${esc(f.name)}</td>
+      <td style="color:var(--text-dim);font-size:12px">${esc(f.description)}</td>
+      <td style="text-align:right;font-family:var(--font-mono)">R ${f.cost_standard.toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--font-mono)">R ${f.cost_kzn.toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--blue-hi,#58a6ff)">R ${(f.cost_sap||0).toFixed(2)}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-icon btn-sm" title="Expand" onclick="toggleDetail(${f.id}, this)">▶</button>
+          <button class="btn btn-icon btn-sm" title="Edit" onclick="editFormula(${f.id})">✎</button>
+          <button class="btn btn-icon btn-sm" title="Delete" onclick="deleteFormula(${f.id}, '${esc(f.name).replace(/'/g,"\\'")}')">🗑</button>
+        </div>
+      </td>
+    </tr>
+    <tr class="detail-row hidden" id="detail-${f.id}">
+      <td colspan="6" style="padding:0 8px 12px 8px;background:var(--bg-input)">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:4px">
+          <thead>
+            <tr style="color:var(--text-dim)">
+              <th style="text-align:left;padding:2px 6px;font-weight:400">Ingredient</th>
+              <th style="text-align:left;padding:2px 6px;font-weight:400;width:130px">SAP Code</th>
+              <th style="text-align:center;padding:2px 6px;font-weight:400;width:50px">Source</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400">Qty/m²</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400">Price</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400">Line</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400">KZN Price</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400">KZN Line</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400;color:var(--blue-hi,#58a6ff)">SAP Price</th>
+              <th style="text-align:right;padding:2px 6px;font-weight:400;color:var(--blue-hi,#58a6ff)">SAP Line</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${f.items.map(it => {
+              const isSap = it.price_source === 'sap';
+              const sap = isSap ? 'color:var(--blue-hi,#58a6ff)' : '';
+              const badge = `<button class="btn btn-sm"
+                style="font-size:10px;padding:1px 5px;${isSap ? 'color:var(--blue-hi,#58a6ff);border-color:var(--blue-hi,#58a6ff)' : ''}"
+                title="Toggle price source (currently ${isSap ? 'SAP LastPP' : 'Standard'})"
+                onclick="togglePriceSource(${it.id}, '${isSap ? 'standard' : 'sap'}', ${f.id})"
+              >${isSap ? 'SAP' : 'STD'}</button>`;
+              const priceCell = isSap
+                ? `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);${sap}">R ${(it.price_sap||0).toFixed(2)}</td>`
+                : `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">R ${it.price_standard.toFixed(2)}</td>`;
+              const lineCell = isSap
+                ? `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);${sap}">R ${(it.line_sap||0).toFixed(4)}</td>`
+                : `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">R ${it.line_std.toFixed(4)}</td>`;
+              const kznPrice = isSap
+                ? `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);${sap}">= SAP</td>`
+                : `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">R ${it.price_kzn.toFixed(2)}</td>`;
+              const kznLine = isSap
+                ? `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);${sap}">R ${(it.line_sap||0).toFixed(4)}</td>`
+                : `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">R ${it.line_kzn.toFixed(4)}</td>`;
+              const sapPriceCell = it.price_sap != null
+                ? `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi,#58a6ff)">R ${it.price_sap.toFixed(2)}</td>`
+                : `<td style="text-align:right;padding:3px 6px;color:var(--text-dim)">—</td>`;
+              const sapLineCell = it.price_sap != null
+                ? `<td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi,#58a6ff)">R ${(it.line_sap||0).toFixed(4)}</td>`
+                : `<td style="text-align:right;padding:3px 6px;color:var(--text-dim)">—</td>`;
+              return `
+              <tr style="border-top:1px solid var(--border)">
+                <td style="padding:3px 6px">${esc(it.ingredient_name)}</td>
+                <td style="padding:3px 6px;color:var(--text-dim);font-size:11px;font-family:var(--font-mono)">${esc(it.sap_code)}</td>
+                <td style="text-align:center;padding:3px 6px">${badge}</td>
+                <td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">${it.qty_per_m2}</td>
+                ${priceCell}${lineCell}${kznPrice}${kznLine}${sapPriceCell}${sapLineCell}
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border);font-weight:600">
+              <td colspan="5" style="padding:3px 6px">Total per m²</td>
+              <td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">R ${f.cost_standard.toFixed(4)}</td>
+              <td></td>
+              <td style="text-align:right;padding:3px 6px;font-family:var(--font-mono)">R ${f.cost_kzn.toFixed(4)}</td>
+              <td></td>
+              <td style="text-align:right;padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi,#58a6ff)">R ${(f.cost_sap||0).toFixed(4)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function toggleDetail(fid, btn) {
+  const row = document.getElementById(`detail-${fid}`);
+  const hidden = row.classList.toggle('hidden');
+  btn.textContent = hidden ? '▶' : '▼';
+}
+
+// ── Formula add/edit ─────────────────────────────────────────────
+
+function openAddFormula() {
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('items-body').innerHTML = '';
+  recalcTotals();
+  document.getElementById('fmodal-title').textContent = 'Add Skin Formula';
+  document.getElementById('modal-formula').classList.remove('hidden');
+}
+
+function editFormula(fid) {
+  const f = _formulas.find(x => x.id === fid);
+  if (!f) return;
+  document.getElementById('f-id').value = fid;
+  document.getElementById('f-name').value = f.name;
+  document.getElementById('f-desc').value = f.description;
+  // Render items
+  const tbody = document.getElementById('items-body');
+  tbody.innerHTML = '';
+  f.items.forEach(it => addIngredientRow(it.ingredient_id, it.qty_per_m2, it.qty_formula || '', it.price_source));
+  recalcTotals();
+  document.getElementById('fmodal-title').textContent = 'Edit Skin Formula';
+  document.getElementById('modal-formula').classList.remove('hidden');
+}
+
+function _evalQty(expr) {
+  if (expr === null || expr === undefined || String(expr).trim() === '') return NaN;
+  const s = String(expr).trim();
+  const n = Number(s);
+  if (!isNaN(n)) return n;
+  try {
+    const fn = new Function(
+      'pi', 'PI', 'E', 'sqrt', 'abs', 'pow', 'ceil', 'floor', 'round', 'log',
+      '"use strict"; return (' + s + ');'
+    );
+    const r = fn(Math.PI, Math.PI, Math.E, Math.sqrt, Math.abs, Math.pow,
+                 Math.ceil, Math.floor, Math.round, Math.log);
+    return (typeof r === 'number' && isFinite(r)) ? r : NaN;
+  } catch { return NaN; }
+}
+
+function addIngredientRow(ing_id = '', qty = '', qtyFormula = '', priceSource = 'standard') {
+  const tbody = document.getElementById('items-body');
+  const idx = tbody.children.length;
+  const tr = document.createElement('tr');
+  tr.dataset.idx = idx;
+  tr.dataset.priceSource = priceSource || 'standard';
+  const ingOpts = _ingredients.map(i =>
+    `<option value="${i.id}" data-std="${i.price_standard}" data-kzn="${i.price_kzn}"
+      ${i.id == ing_id ? 'selected' : ''}>${esc(i.name)}</option>`
+  ).join('');
+  const displayVal = qtyFormula || (qty !== '' ? qty : '');
+  tr.innerHTML = `
+    <td style="padding:3px 4px">
+      <select class="form-input ing-select" style="font-size:12px;padding:3px 6px"
+        onchange="recalcTotals()">${ingOpts}</select>
+    </td>
+    <td style="padding:3px 4px;vertical-align:top">
+      <input type="text" class="form-input qty-input" inputmode="decimal"
+        style="font-size:12px;padding:3px 6px;text-align:right;width:100%"
+        placeholder="e.g. 12/6" value="${esc(String(displayVal))}" oninput="recalcTotals()"/>
+      <span class="qty-preview" style="display:block;font-size:10px;text-align:right;margin-top:1px;min-height:12px"></span>
+    </td>
+    <td class="line-std" style="text-align:right;padding:3px 8px;font-family:var(--font-mono);font-size:12px">—</td>
+    <td class="line-kzn" style="text-align:right;padding:3px 8px;font-family:var(--font-mono);font-size:12px">—</td>
+    <td style="padding:3px 4px;text-align:center">
+      <button class="btn btn-icon btn-sm" type="button" onclick="this.closest('tr').remove();recalcTotals()">✕</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+  recalcTotals();
+}
+
+function recalcTotals() {
+  let totStd = 0, totKzn = 0;
+  document.querySelectorAll('#items-body tr').forEach(tr => {
+    const sel = tr.querySelector('.ing-select');
+    const qtyInput = tr.querySelector('.qty-input');
+    const preview  = tr.querySelector('.qty-preview');
+    if (!sel || !qtyInput) return;
+    const raw = qtyInput.value.trim();
+    const qty = _evalQty(raw);
+    if (preview) {
+      if (raw && isNaN(qty)) {
+        preview.textContent = '⚠ invalid expression';
+        preview.style.color = 'var(--danger, #f85149)';
+      } else if (raw && isNaN(Number(raw)) && !isNaN(qty)) {
+        preview.textContent = '= ' + qty.toFixed(4);
+        preview.style.color = 'var(--text-dim)';
+      } else {
+        preview.textContent = '';
+      }
+    }
+    const opt = sel.selectedOptions[0];
+    const std = parseFloat(opt?.dataset.std || 0);
+    const kzn = parseFloat(opt?.dataset.kzn || 0);
+    const safeQty = isNaN(qty) ? 0 : qty;
+    const ls = std * safeQty, lk = kzn * safeQty;
+    tr.querySelector('.line-std').textContent = `R ${ls.toFixed(4)}`;
+    tr.querySelector('.line-kzn').textContent = `R ${lk.toFixed(4)}`;
+    totStd += ls; totKzn += lk;
+  });
+  document.getElementById('total-std').textContent = `R ${totStd.toFixed(4)}`;
+  document.getElementById('total-kzn').textContent = `R ${totKzn.toFixed(4)}`;
+}
+
+async function saveFormula() {
+  const fid  = document.getElementById('f-id').value;
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { showToast('Name is required.', true); return; }
+  const items = [];
+  let sort = 10;
+  let valid = true;
+  document.querySelectorAll('#items-body tr').forEach(tr => {
+    const sel = tr.querySelector('.ing-select');
+    const qtyRaw = tr.querySelector('.qty-input')?.value?.trim() || '';
+    const qty = _evalQty(qtyRaw);
+    if (!sel || isNaN(qty) || qty <= 0) { valid = false; return; }
+    items.push({ ingredient_id: parseInt(sel.value), qty_per_m2: qty, qty_formula: qtyRaw, sort_order: sort, price_source: tr.dataset.priceSource || 'standard' });
+    sort += 10;
+  });
+  if (!valid) { showToast('Check ingredient quantities — each must be a positive number or valid formula.', true); return; }
+
+  const payload = {
+    name,
+    description: document.getElementById('f-desc').value,
+    items,
+  };
+
+  const url    = fid ? `/api/skin-formulas/${fid}` : '/api/skin-formulas';
+  const method = fid ? 'PUT' : 'POST';
+  const r = await fetch(url, { method, headers: _headers(), body: JSON.stringify(payload) });
+  if (!r.ok) { showToast('Save failed — check console.', true); return; }
+  closeModal('modal-formula');
+  await loadFormulas();
+}
+
+async function deleteFormula(fid, name) {
+  if (!await confirmModal(`Delete formula "${name}"?\nThis cannot be undone.`, {title:'Delete Formula',okText:'Delete',danger:true})) return;
+  await fetch(`/api/skin-formulas/${fid}`, { method: 'DELETE', headers: _headers() });
+  await loadFormulas();
+}
+
+// ── Ingredients management ────────────────────────────────────────
+
+async function openIngredients() {
+  await loadIngredients();
+  renderIngredients();
+  document.getElementById('modal-ingredients').classList.remove('hidden');
+}
+
+function renderIngredients() {
+  const tbody = document.getElementById('ing-body');
+  if (!_ingredients.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-dim)">No ingredients.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _ingredients.map(i => {
+    const sapPrice = i.sap_item_code_id
+      ? `<input type="number" class="form-input" step="0.01" min="0"
+          style="font-size:12px;padding:3px 6px;text-align:right;width:75px;color:var(--blue-hi,#58a6ff)"
+          value="${i.sap_last_purch_price != null ? i.sap_last_purch_price.toFixed(2) : ''}"
+          onblur="patchIngredient(${i.id}, 'sap_last_purch_price', parseFloat(this.value)||0)"/>`
+      : '<span style="color:var(--text-dim);font-size:11px">—</span>';
+    const syncBtn = i.sap_item_code_id
+      ? `<button class="btn btn-sm" style="font-size:11px;padding:2px 7px" title="Sync KZN price from SAP last purchase price" onclick="syncFromSap(${i.id})">↑ Sync KZN</button>`
+      : '<span style="color:var(--text-dim);font-size:11px">no SAP link</span>';
+    return `
+    <tr id="ing-row-${i.id}">
+      <td style="padding:4px 8px">
+        <input class="form-input" style="font-size:12px;padding:3px 6px" value="${esc(i.name)}"
+          onblur="patchIngredient(${i.id}, 'name', this.value)"/>
+      </td>
+      <td style="padding:4px 8px">
+        <input class="form-input" style="font-size:12px;padding:3px 6px;width:110px" value="${esc(i.sap_code)}"
+          onblur="patchIngredient(${i.id}, 'sap_code', this.value)"/>
+      </td>
+      <td style="padding:4px 8px">
+        <input type="number" class="form-input" step="0.01" min="0"
+          style="font-size:12px;padding:3px 6px;text-align:right;width:75px" value="${i.price_standard}"
+          onblur="patchIngredient(${i.id}, 'price_standard', parseFloat(this.value)||0)"/>
+      </td>
+      <td style="padding:4px 8px">
+        <input type="number" class="form-input" step="0.01" min="0"
+          style="font-size:12px;padding:3px 6px;text-align:right;width:75px" value="${i.price_kzn}"
+          onblur="patchIngredient(${i.id}, 'price_kzn', parseFloat(this.value)||0)"/>
+      </td>
+      <td style="padding:4px 8px;text-align:right">${sapPrice}</td>
+      <td style="padding:4px 8px;text-align:center;white-space:nowrap">
+        ${syncBtn}
+        <button class="btn btn-icon btn-sm" title="Deactivate" style="margin-left:4px"
+          onclick="deactivateIngredient(${i.id}, '${esc(i.name).replace(/'/g,"\\'")}')">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function syncFromSap(ingId) {
+  const r = await fetch(`/api/skin-formula-ingredients/${ingId}/sync-sap`, { method: 'POST', headers: _headers() });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}));
+    showToast(err.detail || 'Sync failed', true);
+    return;
+  }
+  const data = await r.json();
+  // Update local cache and re-render
+  const ing = _ingredients.find(i => i.id === ingId);
+  if (ing) { ing.price_kzn = data.price_kzn; }
+  renderIngredients();
+  // Refresh formula costs since KZN price changed
+  await loadFormulas();
+  renderFormulas();
+  showToast(`Synced KZN price from ${data.item_code}: R ${data.price_kzn.toFixed(2)}`);
+}
+
+function showToast(msg, isError) {
+  let t = document.getElementById('_toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = '_toast';
+    t.style.cssText = 'position:fixed;bottom:24px;right:24px;border-radius:8px;padding:10px 18px;font-size:13px;z-index:9999;transition:opacity .3s;max-width:340px';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = isError ? 'var(--red-dim,#3a1215)' : 'var(--bg-card)';
+  t.style.border = `1px solid ${isError ? 'var(--red,#f85149)' : 'var(--border)'}`;
+  t.style.color = isError ? 'var(--red,#f85149)' : 'var(--text)';
+  t.style.opacity = '1';
+  clearTimeout(t._to);
+  t._to = setTimeout(() => { t.style.opacity = '0'; }, isError ? 5000 : 3000);
+}
+
+async function patchIngredient(id, field, value) {
+  const key = `${id}:${field}`;
+  if (_saving.has(key)) return;  // prevent blur re-entrancy
+  _saving.add(key);
+  try {
+    const r = await fetch(`/api/skin-formula-ingredients/${id}`, {
+      method: 'PUT',
+      headers: _headers(),
+      body: JSON.stringify({[field]: value}),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      showToast(`Save failed: ${err.detail || r.status}`, true);
+    } else {
+      const ing = _ingredients.find(i => i.id === id);
+      if (ing) ing[field] = value;
+      if (field === 'price_standard' || field === 'price_kzn' || field === 'sap_last_purch_price') {
+        await refreshFormulaCosts();
+      }
+    }
+  } finally {
+    _saving.delete(key);
+  }
+}
+
+async function addIngredientRecord() {
+  const name = await promptModal('Ingredient name:', '', {title:'New Ingredient'});
+  if (!name) return;
+  const r = await fetch('/api/skin-formula-ingredients', {
+    method: 'POST',
+    headers: _headers(),
+    body: JSON.stringify({ name: name.trim(), price_standard: 0, price_kzn: 0 }),
+  });
+  if (!r.ok) { showToast('Create failed.', true); return; }
+  await loadIngredients();
+  renderIngredients();
+}
+
+async function deactivateIngredient(id, name) {
+  if (!await confirmModal(`Remove ingredient "${name}"?\nExisting formulas using it will be unaffected.`, {title:'Remove Ingredient',okText:'Remove',danger:true})) return;
+  await fetch(`/api/skin-formula-ingredients/${id}`, {
+    method: 'PUT',
+    headers: _headers(),
+    body: JSON.stringify({ is_active: false }),
+  });
+  await loadIngredients();
+  renderIngredients();
+}
+
+// ── Price source toggle ───────────────────────────────────────────
+
+async function togglePriceSource(itemId, newSource, formulaId) {
+  const r = await fetch(`/api/skin-formula-items/${itemId}/price-source`, {
+    method: 'PATCH',
+    headers: _headers(),
+    body: JSON.stringify({ price_source: newSource }),
+  });
+  if (!r.ok) { showToast('Toggle failed', true); return; }
+  await refreshFormulaCosts();
+}
+
+// ── Utilities ─────────────────────────────────────────────────────
+
+function closeModal(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+
+(async () => {
+  await loadIngredients();
+  await loadFormulas();
+})();
+</script>
+{% endblock %}

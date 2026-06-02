@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Cost Breakdown — Report #{{ record_id }}</title>
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 12mm 10mm 14mm 10mm;
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 8pt;
+      color: #555;
+    }
+    @bottom-left {
+      content: "Generated {{ generated_at }}";
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 8pt;
+      color: #555;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    color: #111;
+    font-size: 9pt;
+    margin: 0;
+    line-height: 1.25;
+  }
+  h1.title {
+    background: #0D1117;
+    color: #58A6FF;
+    text-align: center;
+    padding: 6mm;
+    font-size: 14pt;
+    margin: 0 0 0 0;
+    letter-spacing: 1pt;
+  }
+  .subtitle {
+    background: #161B22;
+    color: #C9D1D9;
+    text-align: center;
+    padding: 2mm 4mm;
+    font-size: 9.5pt;
+    margin: 0 0 4mm 0;
+  }
+  .repair-tag {
+    color: #E02424;
+  }
+  .client-line {
+    text-align: center;
+    font-size: 11pt;
+    font-weight: bold;
+    color: #0D1117;
+    margin: 0 0 4mm 0;
+  }
+  .dims-h {
+    color: #1F3A5F;
+    font-weight: bold;
+    font-size: 10pt;
+    margin: 2mm 0 1mm 0;
+  }
+  .dims-grid {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 4mm;
+  }
+  .dims-grid td {
+    padding: 0.8mm 2mm;
+    font-size: 9pt;
+  }
+  .dims-grid td.lbl { color: #555; width: 14%; }
+  .dims-grid td.val { color: #000; font-weight: bold; width: 11%; }
+
+  table.bom {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  table.bom th {
+    background: #1C2333;
+    color: #E6EDF3;
+    font-weight: bold;
+    font-size: 8.5pt;
+    padding: 2mm 1.5mm;
+    text-align: left;
+    border: 0.4pt solid #30363D;
+  }
+  table.bom th.num { text-align: right; }
+  table.bom th.ctr { text-align: center; }
+  table.bom td {
+    padding: 1mm 1.5mm;
+    border: 0.4pt solid #D0D7DE;
+    vertical-align: top;
+    font-size: 8.5pt;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  table.bom td.num { text-align: right; }
+  table.bom td.ctr { text-align: center; }
+  tr.cat-row td {
+    background: #1F3A5F;
+    color: #58A6FF;
+    font-weight: bold;
+    font-size: 9pt;
+    padding: 1.5mm 2mm;
+    text-transform: uppercase;
+  }
+  tr.subtotal-row td {
+    background: #EFF3F8;
+    color: #000;
+    font-weight: bold;
+  }
+  /* Column widths (9 cols total, sum 100) */
+  col.c-cat   { width: 11%; }
+  col.c-mat   { width: 26%; }
+  col.c-sap   { width: 9%; }
+  col.c-form  { width: 19%; }
+  col.c-qty   { width: 7%; }
+  col.c-unit  { width: 5%; }
+  col.c-price { width: 8%; }
+  col.c-waste { width: 6%; }
+  col.c-line  { width: 9%; }
+
+  /* Summary totals */
+  table.summary {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 5mm;
+  }
+  table.summary td {
+    padding: 2mm 3mm;
+    font-size: 10pt;
+    border: 0.4pt solid #D0D7DE;
+  }
+  table.summary td.lbl {
+    background: #0D4A8A;
+    color: #C9D1D9;
+    font-weight: bold;
+    text-align: right;
+    width: 75%;
+  }
+  table.summary td.val {
+    background: #0D4A8A;
+    color: #58A6FF;
+    font-weight: bold;
+    text-align: right;
+  }
+  table.summary tr.grand td.lbl {
+    background: #388BFD;
+    color: #fff;
+    font-size: 11pt;
+  }
+  table.summary tr.grand td.val {
+    background: #388BFD;
+    color: #fff;
+    font-size: 12pt;
+  }
+
+  table.cat-totals {
+    width: 60%;
+    border-collapse: collapse;
+    margin-top: 4mm;
+  }
+  table.cat-totals td {
+    padding: 1.2mm 2mm;
+    font-size: 9pt;
+    border-bottom: 0.3pt solid #D0D7DE;
+  }
+  table.cat-totals td.lbl { color: #444; }
+  table.cat-totals td.val { text-align: right; font-weight: bold; }
+  table.cat-totals .h td {
+    background: #1C2333;
+    color: #E6EDF3;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-size: 9pt;
+    border-bottom: 0;
+  }
+
+  .num-cell { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<h1 class="title">TRAILER MANUFACTURING COST REPORT{% if is_repair %}<span class="repair-tag"> &nbsp;—&nbsp; REPAIR QUOTE</span>{% endif %}</h1>
+<div class="subtitle">{{ trailer_name }} &nbsp;|&nbsp; Report #{{ record_id }} &nbsp;|&nbsp; {{ created_at_human }}</div>
+{% if customer_name %}<div class="client-line">Client: {{ customer_name }}</div>{% endif %}
+
+<div class="dims-h">DIMENSIONS</div>
+<table class="dims-grid">
+  <tr>
+    <td class="lbl">Length (m)</td><td class="val">{{ dims.length or '' }}</td>
+    <td class="lbl">Width (m)</td><td class="val">{{ dims.width or '' }}</td>
+    <td class="lbl">Height (m)</td><td class="val">{{ dims.height or '' }}</td>
+    <td class="lbl">Num Axles</td><td class="val">{{ dims.num_axles or '' }}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Num Doors</td><td class="val">{{ dims.num_doors or '' }}</td>
+    <td class="lbl">Insulation Thk (m)</td><td class="val">{{ dims.insulation_thickness or '' }}</td>
+    <td></td><td></td><td></td><td></td><td></td><td></td>
+  </tr>
+</table>
+
+<table class="bom">
+  <colgroup>
+    <col class="c-cat"/><col class="c-mat"/><col class="c-sap"/><col class="c-form"/>
+    <col class="c-qty"/><col class="c-unit"/><col class="c-price"/><col class="c-waste"/><col class="c-line"/>
+  </colgroup>
+  <thead>
+    <tr>
+      <th>Category</th>
+      <th>Material</th>
+      <th>SAP Code</th>
+      <th>Formula</th>
+      <th class="num">Quantity</th>
+      <th class="ctr">Unit</th>
+      <th class="num">Unit Price (R)</th>
+      <th class="num">Waste %</th>
+      <th class="num">Line Cost (R)</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% set ns = namespace(current_cat=None) %}
+  {% for item in items %}
+    {% if item.category != ns.current_cat %}
+      <tr class="cat-row"><td colspan="9"{% if item.category in (optional_cats or []) %} style="color:#F85149"{% endif %}>{{ item.category }}</td></tr>
+      {% set ns.current_cat = item.category %}
+    {% endif %}
+    <tr>
+      <td></td>
+      <td>{{ item.material }}</td>
+      <td>{{ item.material_code or '' }}</td>
+      <td>{{ item.formula or '' }}</td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(item.quantity) if item.quantity is number else (item.quantity or '') }}</td>
+      <td class="ctr">{{ item.unit or '' }}</td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(item.unit_price) if item.unit_price is number else '' }}</td>
+      <td class="num num-cell">{% if item.waste_pct %}{{ item.waste_pct }}%{% endif %}</td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(item.line_cost) if item.line_cost is number else '' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if chassis and chassis['items'] %}
+<table class="bom" style="margin-top:4mm">
+  <colgroup>
+    <col class="c-cat"/><col class="c-mat"/><col class="c-sap"/><col class="c-form"/>
+    <col class="c-qty"/><col class="c-unit"/><col class="c-price"/><col class="c-waste"/><col class="c-line"/>
+  </colgroup>
+  <thead>
+    <tr><th colspan="9" style="background:#1F3A5F;color:#58A6FF;text-align:left">
+      CHASSIS — {{ chassis.axle_count }}-axle · {{ chassis.tyre_style }} ·
+      {{ chassis.tyre_count }} tyres · {{ chassis.length }} m
+    </th></tr>
+  </thead>
+  <tbody>
+  {% for it in chassis['items'] %}
+    <tr>
+      <td>{{ it.kind }}</td>
+      <td>{{ it.label }}</td>
+      <td></td>
+      <td></td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(it.qty) }}</td>
+      <td class="ctr">ea</td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(it.unit_price) }}</td>
+      <td></td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(it.line_cost) }}</td>
+    </tr>
+  {% endfor %}
+    <tr class="subtotal-row">
+      <td colspan="8" style="text-align:right">Chassis Subtotal</td>
+      <td class="num num-cell">{{ '{:,.2f}'.format(chassis.subtotal) }}</td>
+    </tr>
+  </tbody>
+</table>
+{% endif %}
+
+{% if category_totals %}
+<table class="cat-totals">
+  <tr class="h"><td>Category</td><td class="val">Subtotal (R)</td></tr>
+  {% for cat, total in category_totals.items() %}
+    {% set _opt = cat in (optional_cats or []) %}
+    <tr{% if _opt %} style="color:#F85149"{% endif %}>
+      <td class="lbl">{{ cat }}</td>
+      <td class="val num-cell">{{ '{:,.2f}'.format(total) }}</td>
+    </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<table class="summary">
+  <tr>
+    <td class="lbl">Cost per m²</td>
+    <td class="val num-cell">{{ '{:,.2f}'.format(cost_per_sqm or 0) }}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Total Manufacturing</td>
+    <td class="val num-cell">{{ '{:,.2f}'.format(grand_total or 0) }}</td>
+  </tr>
+  {% if profit_amount %}
+  <tr>
+    <td class="lbl">Profit Margin ({{ profit_margin }}%)</td>
+    <td class="val num-cell">{{ '{:,.2f}'.format(profit_amount or 0) }}</td>
+  </tr>
+  {% endif %}
+  {% if ratio_amount %}
+  <tr>
+    <td class="lbl">Ratio ({{ ratio_label }})</td>
+    <td class="val num-cell">{{ '{:,.2f}'.format(ratio_amount or 0) }}</td>
+  </tr>
+  {% endif %}
+  <tr class="grand">
+    <td class="lbl">{% if selling_price %}SELLING PRICE{% else %}TOTAL MANUFACTURING COST{% endif %}</td>
+    <td class="val num-cell">R {{ '{:,.2f}'.format((selling_price or grand_total) or 0) }}</td>
+  </tr>
+</table>
+
+</body>
+</html>

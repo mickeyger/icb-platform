@@ -1,0 +1,3939 @@
+{% extends "base.html" %}
+{% block title %}Body Configurator (preview){% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Body Configurator (preview){% endblock %}
+
+{#
+  React-via-CDN mockup of the proposed Body Type Configurator UI.
+  Standalone — no real BOM data is read or written. Hardcoded snapshot
+  of RIGID DRY FREIGHT lets the user click around, react to the layout,
+  and decide whether to invest in a proper Vite-based React app + DB
+  integration.
+
+  The Babel-standalone transpile is intentional: it costs ~200ms on
+  first load and lets us write JSX without a build step. Production
+  React would skip Babel-standalone entirely.
+#}
+
+{% block content %}
+<style>
+  /* ── Layout ─────────────────────────────────────────────────── */
+  #cfg-root {
+    display: grid;
+    grid-template-columns: var(--cfg-tree-w, 320px) 8px 1fr;
+    gap: 0;
+    height: calc(100vh - 110px);
+    min-height: 600px;
+  }
+  .cfg-pane + .cfg-resize-handle { margin: 0 4px; }
+  .cfg-resize-handle + .cfg-pane { margin-right: 0; }
+  /* Restore visual gap between pane edges and the handle */
+  #cfg-root > .cfg-pane:first-child { margin-right: 4px; }
+  #cfg-root > .cfg-pane:last-child { margin-left: 4px; }
+  .cfg-resize-handle {
+    cursor: col-resize;
+    background: transparent;
+    position: relative;
+    user-select: none;
+    transition: background .12s;
+  }
+  .cfg-resize-handle:hover,
+  .cfg-resize-handle.dragging { background: rgba(88,166,255,.12); }
+  .cfg-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px; height: 36px;
+    background: var(--border);
+    border-radius: 1px;
+    transition: background .12s;
+  }
+  .cfg-resize-handle:hover::after,
+  .cfg-resize-handle.dragging::after { background: var(--blue-hi, var(--blue)); }
+  .cfg-pane {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .cfg-pane-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-raise, var(--bg-input));
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .cfg-pane-body { flex: 1; overflow: auto; padding: 12px; }
+
+  /* ── Tree ───────────────────────────────────────────────────── */
+  .cfg-tree-group { margin-bottom: 14px; }
+  .cfg-tree-group-hdr {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--text-dim); padding: 4px 0; cursor: pointer;
+    user-select: none;
+  }
+  .cfg-tree-group-hdr .chev { width: 10px; opacity: .6; }
+  .cfg-tree-group-hdr.choice { color: #f0a500; }
+  .cfg-tree-option {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px 4px 18px; cursor: pointer;
+    border-radius: 4px; font-size: 13px;
+    user-select: none;
+  }
+  .cfg-tree-option:hover { background: var(--bg-input); }
+  .cfg-tree-option.active { background: rgba(88,166,255,.15); color: var(--blue-hi); }
+  .cfg-tree-option .radio {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .cfg-tree-option .radio.on::after {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--blue);
+  }
+  .cfg-tree-section {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 8px 3px 36px; cursor: pointer;
+    border-radius: 4px; font-size: 12px; color: var(--text-dim);
+    user-select: none;
+  }
+  .cfg-tree-section.under-option { padding-left: 50px; }
+  .cfg-tree-section:hover { background: var(--bg-input); color: var(--text); }
+  .cfg-tree-section.active { background: rgba(88,166,255,.15); color: var(--blue-hi); font-weight: 600; }
+  .cfg-tree-section .count { opacity: .5; font-size: 10px; margin-left: auto; }
+
+  .cfg-add-btn {
+    margin-top: 12px; width: 100%;
+    background: transparent; border: 1px dashed var(--border);
+    color: var(--text-dim); padding: 6px;
+    border-radius: 4px; cursor: pointer; font-size: 11px;
+    transition: all .15s;
+  }
+  .cfg-add-btn:hover { border-color: var(--blue); color: var(--blue-hi); }
+
+  /* ── Detail grid ─────────────────────────────────────────────── */
+  .cfg-section-hdr {
+    display: flex; align-items: center; gap: 14px;
+    padding-bottom: 12px; margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cfg-section-hdr .name { font-size: 16px; font-weight: 600; color: var(--text); }
+  .cfg-section-hdr .master {
+    background: var(--bg-input); padding: 4px 10px; border-radius: 4px;
+    font-size: 12px; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .cfg-section-hdr .master select {
+    background: transparent; border: 0; color: var(--blue-hi); font-size: 12px; cursor: pointer;
+  }
+  .cfg-section-hdr label.default {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-dim); cursor: pointer;
+  }
+
+  .cfg-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cfg-table th {
+    text-align: left; padding: 6px 10px; font-size: 10px;
+    color: var(--text-dim); letter-spacing: .5px;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  .cfg-table th.center { text-align: center; }
+  .cfg-table td { padding: 7px 10px; border-bottom: 1px solid var(--border-soft, var(--border)); }
+  .cfg-table tr:hover td { background: var(--bg-input); }
+  .cfg-table .mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+
+  .cfg-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .cfg-dot.on { background: #3fb950; }
+  .cfg-dot.off { background: transparent; border: 1px solid var(--border); }
+  .cfg-dot.cond { background: #a371f7; }
+
+  .cfg-cond-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(163,113,247,.12); color: #a371f7;
+    padding: 2px 8px; border-radius: 10px; font-size: 11px;
+    margin-right: 4px;
+    border: 1px solid rgba(163,113,247,.4);
+  }
+  .cfg-cond-chip-empty {
+    color: var(--text-dim); font-size: 11px; opacity: .6;
+  }
+  .cfg-edit-link {
+    color: var(--blue-hi); cursor: pointer; font-size: 11px;
+    text-decoration: none; border-bottom: 1px dotted;
+  }
+
+  /* ── Modal ──────────────────────────────────────────────────── */
+  .cfg-modal-bd {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  .cfg-modal {
+    background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: var(--radius); width: 520px; max-width: 95vw;
+    box-shadow: 0 20px 50px rgba(0,0,0,.5);
+  }
+  .cfg-modal-hd {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .cfg-modal-hd .title { font-weight: 600; font-size: 14px; }
+  .cfg-modal-bd-body { padding: 16px; max-height: 60vh; overflow: auto; }
+  .cfg-modal-ft {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    display: flex; gap: 8px; justify-content: flex-end;
+  }
+
+  .cfg-cond-row {
+    display: grid; grid-template-columns: auto 1fr auto auto auto;
+    gap: 8px; align-items: center; padding: 6px 0;
+  }
+  .cfg-cond-row select, .cfg-cond-row input {
+    background: var(--bg-input); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 3px;
+    font-size: 12px;
+  }
+  .cfg-cond-row .when { color: var(--text-dim); font-size: 11px; }
+  .cfg-cond-row .x {
+    background: transparent; border: 0; color: var(--text-dim);
+    cursor: pointer; padding: 2px 6px; font-size: 14px;
+  }
+  .cfg-cond-row .x:hover { color: var(--red); }
+
+  .cfg-mock-banner {
+    background: rgba(240,165,0,.1); border: 1px solid rgba(240,165,0,.4);
+    color: #f0a500; padding: 8px 14px; border-radius: var(--radius);
+    font-size: 12px; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ── Inline action icons (rename / delete) ───────────────────── */
+  /* Actions sit at the very end of the row. We use visibility (not display)
+     so the row's layout stays the same whether actions are visible or not —
+     that's what was causing the "vibration" when cursor crossed rows. */
+  .cfg-actions {
+    display: inline-flex; gap: 2px; margin-left: 4px;
+    flex-shrink: 0;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity .1s linear;
+  }
+  .cfg-tree-section:hover .cfg-actions,
+  .cfg-tree-option:hover .cfg-actions,
+  .cfg-tree-group-hdr:hover .cfg-actions,
+  .cfg-bundle-opt:hover .cfg-actions,
+  .cfg-actions.always-on {
+    visibility: visible;
+    opacity: 1;
+  }
+  .cfg-icon-btn {
+    background: transparent; border: 0; color: var(--text-dim);
+    cursor: pointer; padding: 2px 5px; font-size: 11px;
+    border-radius: 3px; line-height: 1;
+  }
+  .cfg-icon-btn:hover { background: var(--bg-input); color: var(--text); }
+  .cfg-icon-btn.danger:hover { color: var(--red, #f85149); }
+
+  /* Keep the (N) count visible at all times — toggling it on hover was the root
+     cause of the vibration. Count stays right-aligned; actions cling after it. */
+  .cfg-tree-section .count {
+    margin-left: auto; padding-right: 4px;
+    flex-shrink: 0;
+  }
+  .cfg-tree-option > span:nth-child(2) { flex: 1; }
+
+  .cfg-rename-input {
+    background: var(--bg-input); border: 1px solid var(--blue);
+    color: var(--text); padding: 2px 6px; border-radius: 3px;
+    font-size: 12px; width: 100%; outline: none;
+  }
+
+  /* ── Structure preview ───────────────────────────────────────── */
+  .cfg-preview-modal { width: 720px; }
+  .cfg-outline { font-size: 13px; line-height: 1.7; }
+  .cfg-outline ul { list-style: none; margin: 0; padding-left: 18px; border-left: 1px dashed var(--border); }
+  .cfg-outline > ul { padding-left: 0; border-left: 0; }
+  .cfg-outline li { padding: 1px 0; position: relative; }
+  .cfg-outline .o-grp { color: var(--text); font-weight: 600; margin-top: 6px; }
+  .cfg-outline .o-grp.choice { color: #f0a500; }
+  .cfg-outline .o-grp .pick { font-size: 10px; background: rgba(240,165,0,.15); padding: 1px 6px; border-radius: 8px; margin-left: 6px; font-weight: 400; }
+  .cfg-outline .o-opt { color: var(--blue-hi); }
+  .cfg-outline .o-opt .star { color: #f0a500; font-size: 11px; margin-left: 4px; }
+  .cfg-outline .o-sec { color: var(--text); font-weight: 500; }
+  .cfg-outline .o-sec .count { color: var(--text-dim); font-weight: 400; font-size: 11px; margin-left: 4px; }
+  .cfg-outline .o-item { color: var(--text-dim); font-size: 12px; padding-left: 4px; }
+  .cfg-outline .o-item::before { content: '• '; opacity: .5; }
+  .cfg-outline .o-cond { color: #a371f7; font-size: 10px; margin-left: 6px; opacity: .85; }
+  .cfg-outline .o-empty { color: var(--text-dim); font-style: italic; font-size: 11px; }
+
+  /* ── Flag pick-one bundles ───────────────────────────────────── */
+  .cfg-bundle {
+    margin: 6px 0 6px 14px;
+    padding: 6px 8px 6px 10px;
+    border-left: 2px solid rgba(163,113,247,.4);
+    background: rgba(163,113,247,.04);
+    border-radius: 0 4px 4px 0;
+  }
+  .cfg-bundle-hdr {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: #a371f7; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .cfg-bundle-hdr .pick {
+    font-size: 9px; background: rgba(163,113,247,.2);
+    padding: 1px 6px; border-radius: 8px;
+  }
+  .cfg-bundle-opt {
+    padding: 2px 6px; cursor: pointer; border-radius: 3px;
+    font-size: 12px; display: flex; align-items: center; gap: 6px;
+    user-select: none;
+  }
+  .cfg-bundle-opt:hover { background: var(--bg-input); }
+  .cfg-bundle-opt .radio {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid rgba(163,113,247,.6);
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .cfg-bundle-opt .radio.on::after {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: #a371f7;
+  }
+  .cfg-bundle-opt.on { color: var(--text); font-weight: 500; }
+  .cfg-bundle-opt:not(.on) { color: var(--text-dim); }
+
+  /* ── Unassigned tray ─────────────────────────────────────────── */
+  .cfg-unassigned {
+    margin-top: 18px; padding-top: 12px;
+    border-top: 1px dashed rgba(240,165,0,.4);
+  }
+  .cfg-unassigned-hdr {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+    color: #f0a500; padding: 4px 0;
+  }
+  .cfg-unassigned-hint {
+    font-size: 10px; color: var(--text-dim); padding: 2px 0 8px;
+    font-style: italic;
+  }
+  .cfg-unassigned-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; font-size: 12px;
+    background: rgba(240,165,0,.06); border-radius: 4px;
+    margin-bottom: 4px;
+  }
+  .cfg-unassigned-row .name { flex: 1; }
+  .cfg-unassigned-row select {
+    background: var(--bg-input); border: 1px solid var(--border);
+    color: var(--text); font-size: 11px; padding: 2px 4px;
+    border-radius: 3px; max-width: 130px;
+  }
+</style>
+
+<div id="cfg-banner-mount"></div>
+<div id="cfg-root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js" crossorigin></script>
+
+{% raw %}
+<script type="text/babel">
+const { useState, useMemo, useCallback } = React;
+
+// ── Sample data — RIGID DRY FREIGHT shape ───────────────────────────
+// Items truncated for readability; structure is what we're demoing.
+const SAMPLE = {
+  trailerName: "RIGID DRY FREIGHT",
+  groups: [
+    {
+      kind: "always", id: "always", label: "Always include",
+      sections: [
+        { id: "front", name: "FRONT", items: [
+          { id: 1,  name: "EXT GRP SKIN 2*300 CSM",       qty: "height*width", unitPrice: 256.50, conditions: [] },
+          { id: 2,  name: "GLUE LINE",                     qty: "height*width", unitPrice: 28.58,  conditions: [] },
+          { id: 3,  name: "20MM EPS",                      qty: "height*width", unitPrice: 89.50,  conditions: [{ option: "BAKERY BODY", equals: "Y" }] },
+          { id: 4,  name: "80 DV URETHANE",                qty: "height*width", unitPrice: 228.65, conditions: [{ option: "80 DV COMPOSITE PANELS", equals: "Y" }] },
+          { id: 5,  name: "GLUE LINE",                     qty: "height*width", unitPrice: 28.58,  conditions: [{ option: "DRY FREIGHT", equals: "Y" }] },
+          { id: 6,  name: "4 MM PLYWOOD",                  qty: "2.44*width",   unitPrice: 220.00, conditions: [{ option: "DRY FREIGHT", equals: "Y" }] },
+          { id: 7,  name: "INT GRP SKIN 1*450 CSM",        qty: "height*width", unitPrice: 256.50, conditions: [] },
+        ]},
+        { id: "roof",  name: "ROOF",  items: [
+          { id: 10, name: "ROOF SHEET 1.6MM",              qty: "length*width",            unitPrice: 420.00, conditions: [] },
+          { id: 11, name: "EPS 50MM",                      qty: "length*width",            unitPrice: 95.30,  conditions: [{ option: "BAKERY BODY", equals: "Y" }] },
+          { id: 12, name: "100*19MM PICTURE FRAME",        qty: "length*2+width*2",        unitPrice: 31.20,  conditions: [] },
+        ]},
+        { id: "sides", name: "SIDES", items: [
+          { id: 20, name: "EXT GRP SKIN 2*300 CSM",        qty: "length*height",           unitPrice: 256.50, conditions: [] },
+          { id: 21, name: "GLUE LINE",                     qty: "(length+0.05)*(height-0.16+0.05)", unitPrice: 28.58, conditions: [] },
+        ]},
+      ]
+    },
+    {
+      kind: "choice", id: "door-type", label: "Door type", required: true,
+      defaultId: "drd",
+      options: [
+        {
+          id: "drd", name: "DRD",
+          sections: [
+            { id: "drd-core", name: "DRD core", items: [
+              { id: 100, name: "EXT GRP SKIN 2*300 CSM",   qty: "height*width", unitPrice: 256.50, conditions: [] },
+              { id: 101, name: "20MM EPS",                  qty: "height*width", unitPrice: 89.50,  conditions: [{ option: "BAKERY BODY", equals: "Y" }] },
+              { id: 102, name: "DOOR BLOCKS",               qty: "(height*2+width*2)*6", unitPrice: 264.51, conditions: [] },
+            ]},
+            { id: "drd-fittings", name: "DRD DOOR FITTINGS", items: [
+              { id: 110, name: "CSLB HINGES",               qty: "6",   unitPrice: 146.73, conditions: [] },
+              { id: 111, name: "SB 51111 DOOR SET",         qty: "2",   unitPrice: 506.91, conditions: [] },
+              { id: 112, name: "0661-0631 LONG RIVETS",     qty: "100", unitPrice: 0.515,  conditions: [] },
+            ]},
+          ]
+        },
+        {
+          id: "srd", name: "SRD",
+          sections: [
+            { id: "srd-core", name: "SRD core", items: [
+              { id: 200, name: "EXT GRP SKIN 2*300 CSM",   qty: "height*width", unitPrice: 256.50, conditions: [] },
+              { id: 201, name: "20MM EPS",                  qty: "height*width", unitPrice: 89.50,  conditions: [{ option: "BAKERY BODY", equals: "Y" }] },
+            ]},
+            { id: "srd-fittings", name: "SRD DOOR FITTINGS", items: [
+              { id: 210, name: "CSLB HINGES",               qty: "2",  unitPrice: 146.73, conditions: [] },
+              { id: 211, name: "SB 51111 DOOR SET",         qty: "1",  unitPrice: 506.91, conditions: [] },
+              { id: 212, name: "0661-0631 LONG RIVETS",     qty: "50", unitPrice: 0.515,  conditions: [] },
+            ]},
+          ]
+        }
+      ]
+    },
+    {
+      kind: "choice", id: "floor-type", label: "Floor type", required: true,
+      defaultId: "wisa-24",
+      options: [
+        { id: "wisa-24", name: "24MM WISA TRANS FLOOR", sections: [
+          { id: "wisa-24-sec", name: "24MM WISA TRANS FLOOR", items: [
+            { id: 300, name: "4 MM BEND UP SUB FRAME",     qty: "(length+0.05)+0.05*2", unitPrice: 243.00, conditions: [] },
+            { id: 301, name: "80*50*3 CROSSMEMBERS",        qty: "3*((length+0.05)+0.05)*2/2/0.305", unitPrice: 124.68, conditions: [] },
+            { id: 302, name: "24 MM WISA TRANS FLOOR",      qty: "((length+0.05)+0.05)*2/2/1.22",     unitPrice: 845.00, conditions: [] },
+            { id: 303, name: "3MM GUSSETS",                 qty: "0.11*0.25*12",                       unitPrice: 89.20,  conditions: [] },
+          ]}
+        ]},
+        { id: "3cr12-2mm", name: "2MM 3CR12 FLOOR", sections: [
+          { id: "3cr12-2mm-sec", name: "2MM 3CR12 S/STEEL FLOOR", items: [
+            { id: 310, name: "5MM BEND UP SUB FRAME",      qty: "(length+0.05)+0.05*2", unitPrice: 243.00, conditions: [] },
+            { id: 311, name: "2MM 3CR12 PLATE",             qty: "length*width",          unitPrice: 1040.16, conditions: [] },
+          ]}
+        ]},
+        { id: "mild-3mm", name: "3MM MILD STEEL FLOOR", sections: [
+          { id: "mild-3mm-sec", name: "3MM MILD STEEL FLOOR", items: [
+            { id: 320, name: "4 MM BEND UP SUB FRAME",     qty: "(length+0.05)+0.05*2", unitPrice: 243.00, conditions: [] },
+            { id: 321, name: "3MM MILD STEEL PLATE",        qty: "length*width",          unitPrice: 4345.00, conditions: [] },
+          ]}
+        ]},
+      ]
+    },
+    {
+      // Independent on/off body flags — referenced by item conditions.
+      // Don't gate sections directly; they just expose toggles like BAKERY BODY = Y.
+      kind: "flags", id: "body-flags", label: "Body options (flags)",
+      options: [
+        { id: "f-bakery", name: "BAKERY BODY", sections: [] },
+        { id: "f-dry",    name: "DRY FREIGHT", sections: [] },
+        { id: "f-80dv",   name: "80 DV COMPOSITE PANELS", sections: [] },
+      ]
+    }
+  ],
+  // Sections orphaned by deleting a parent option/group — not in BOM until restored.
+  unassigned: [],
+  // The flat list of every body option (toggle) the user can reference in conditions.
+  bodyOptions: [
+    "BAKERY BODY", "DRY FREIGHT", "80 DV COMPOSITE PANELS",
+    "REFLEXITE TAPE", "19MM PLYWOOD PANELS", "1ST ROW ALU KICK PLATE",
+    "2ND ROW ALU KICK PLATE", "ESCAPE HATCH", "INTERIOR LIGHTS",
+    "DRAIN HOLES", "NOSE CONE", "LOAD LOCK RAIL", "TOP HAT SECTION",
+  ],
+};
+
+// ── Data helpers ────────────────────────────────────────────────────
+function findSection(data, path) {
+  // path looks like ['always', 'front'] or ['door-type', 'drd', 'drd-core']
+  const grp = data.groups.find(g => g.id === path[0]);
+  if (!grp) return null;
+  if (grp.kind === 'always') {
+    return grp.sections.find(s => s.id === path[1]) || null;
+  } else {
+    const opt = grp.options.find(o => o.id === path[1]);
+    if (!opt) return null;
+    return opt.sections.find(s => s.id === path[2]) || null;
+  }
+}
+
+function masterToggleFor(data, path) {
+  // Returns the body-option-style master that gates this section, if any.
+  const grp = data.groups.find(g => g.id === path[0]);
+  if (!grp || grp.kind === 'always') return null;
+  const opt = grp.options.find(o => o.id === path[1]);
+  return opt ? opt.name : null;
+}
+
+// ── Components ──────────────────────────────────────────────────────
+
+// ── Modal helpers (replaces native alert/prompt/confirm) ──────────────────
+// In-app modals only — see memory feedback_no_native_dialogs.md.
+
+function InputModal({ title, label, defaultValue, placeholder, submitLabel, onSubmit, onCancel }) {
+  const [value, setValue] = useState(defaultValue || '');
+  const submit = () => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return;  // disabled-by-empty in the UI too
+    onSubmit(trimmed);
+  };
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">{title}</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+          {label && <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>{label}</div>}
+          <input autoFocus className="cfg-rename-input" style={{fontSize:'13px',padding:'6px 8px'}}
+                 value={value}
+                 placeholder={placeholder || ''}
+                 onChange={(e) => setValue(e.target.value)}
+                 onKeyDown={(e) => {
+                   if (e.key === 'Enter') submit();
+                   if (e.key === 'Escape') onCancel();
+                 }} />
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" disabled={!(value || '').trim()} onClick={submit}>{submitLabel || 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoticeModal({ title, body, tone, onClose, footer }) {
+  // tone: 'info' (default) | 'error' | 'success' | 'warn'
+  const titleColor = tone === 'error' ? 'var(--red, #f85149)'
+    : tone === 'warn' ? '#f0a500'
+    : tone === 'success' ? '#3fb950' : 'var(--text)';
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onClose(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title" style={{color: titleColor}}>{title}</span>
+          <button className="btn btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body" style={{whiteSpace:'pre-wrap',fontSize:'13px'}}>{body}</div>
+        <div className="cfg-modal-ft">
+          {footer || <button className="btn btn-primary" onClick={onClose}>OK</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveOneItemModal({ target, data, onCancel, onMove }) {
+  // Pick a destination section for the given item.
+  // Sections are grouped into optgroups so gate-option sections appear first
+  // and are clearly separated from always-include and unassigned sections.
+  const [pickedSec, setPickedSec] = useState('');
+  const [filter, setFilter] = useState('');
+
+  // Build grouped destination lists.
+  // 1. Gate-option sections first — one optgroup per gate.
+  const gateGroups = [];
+  (data?.groups || []).forEach(g => {
+    if (g.kind !== 'choice') return;
+    const secs = [];
+    (g.options || []).forEach(o => (o.sections || []).forEach(s => secs.push({
+      secId: s.id,
+      label: `${o.name} → ${s.name}`,
+      disabled: s.id === target.currentSectionTreeId,
+    })));
+    if (secs.length) gateGroups.push({ groupLabel: g.label, secs });
+  });
+
+  // 2. Always-include sections.
+  const alwaysSecs = [];
+  (data?.groups || []).forEach(g => {
+    if (g.kind !== 'always') return;
+    (g.sections || []).forEach(s => alwaysSecs.push({
+      secId: s.id,
+      label: s.name,
+      disabled: s.id === target.currentSectionTreeId,
+    }));
+  });
+
+  // 3. Unassigned / archived sections.
+  const unassignedSecs = (data?.unassigned || []).map(s => ({
+    secId: s.id,
+    label: s.name,
+    disabled: s.id === target.currentSectionTreeId,
+  }));
+
+  // Filter helper — applies the text filter to a list of {secId, label} objects.
+  const q = filter.trim().toLowerCase();
+  const applyFilter = (list) => q ? list.filter(d => d.label.toLowerCase().includes(q)) : list;
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">Move "{target.itemName}" to…</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body" style={{display:'flex',flexDirection:'column',gap:'8px',fontSize:'13px'}}>
+          <input autoFocus className="cfg-rename-input"
+                 style={{fontSize:'12px',padding:'5px 8px'}}
+                 placeholder="Filter sections…"
+                 value={filter} onChange={(e) => { setFilter(e.target.value); setPickedSec(''); }} />
+          <select size={10} value={pickedSec} onChange={(e) => setPickedSec(e.target.value)}
+                  style={{background:'var(--bg-input)',color:'var(--text)',border:'1px solid var(--border)',
+                          borderRadius:'4px',padding:'4px 2px',fontSize:'12px',minHeight:'160px'}}>
+            <option value="" disabled>Pick a destination section…</option>
+            {gateGroups.map(gg => {
+              const visible = applyFilter(gg.secs);
+              if (!visible.length) return null;
+              return (
+                <optgroup key={gg.groupLabel} label={`⬦ ${gg.groupLabel}`}>
+                  {visible.map(d => (
+                    <option key={d.secId} value={d.secId} disabled={d.disabled}>
+                      {d.label}{d.disabled ? ' (current)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
+            {applyFilter(alwaysSecs).length > 0 && (
+              <optgroup label="Always include">
+                {applyFilter(alwaysSecs).map(d => (
+                  <option key={d.secId} value={d.secId} disabled={d.disabled}>
+                    {d.label}{d.disabled ? ' (current)' : ''}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {applyFilter(unassignedSecs).length > 0 && (
+              <optgroup label="Unassigned">
+                {applyFilter(unassignedSecs).map(d => (
+                  <option key={d.secId} value={d.secId} disabled={d.disabled}>
+                    {d.label}{d.disabled ? ' (current)' : ''}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" disabled={!pickedSec}
+                  onClick={() => onMove(pickedSec)}>Move</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveItemsToSectionModal({ target, data, onCancel, onMoveItems }) {
+  // Pick items to move into `target` (a section). Default scope is flag
+  // masters from BODY OPTIONS (FLAGS) — typical use case is populating a
+  // newly-created sub-section with the flags it should host. The user can
+  // toggle "All BOM items" to widen the list to every section's items if
+  // they want to move a non-flag item instead.
+  const [filter, setFilter] = useState('');
+  const [picked, setPicked] = useState(() => new Set());
+  const [scope, setScope] = useState('flags');  // 'flags' | 'all'
+  const candidates = [];
+  // Helper to scan a flag group's options and add them as candidates.
+  const visitFlagGroup = (lg, location) => {
+    (lg?.options || []).forEach(o => {
+      const m = /^flag-m(\d+)$/.exec(o.id || '');
+      if (m) candidates.push({ itemId: parseInt(m[1], 10), name: o.name, location });
+    });
+  };
+  if (scope === 'flags') {
+    // Walk every flag group (top-level + nested under choice options).
+    (data?.groups || []).forEach(g => {
+      if (g.kind === 'flags') visitFlagGroup(g, g.label);
+      else if (g.kind === 'choice') {
+        (g.options || []).forEach(o => {
+          (o.linkedFlagGroups || []).forEach(lg =>
+            visitFlagGroup(lg, `${g.label} → ${o.name} → ${lg.label}`));
+        });
+      }
+    });
+  } else {
+    // 'all' — every plain BOM item across every section.
+    const visitSection = (sec, location) => {
+      if (!sec || sec.id === target.sectionTreeId) return;
+      (sec.items || []).forEach(it => candidates.push({ itemId: it.id, name: it.name, location }));
+    };
+    (data?.groups || []).forEach(g => {
+      if (g.kind === 'always') {
+        (g.sections || []).forEach(s => visitSection(s, `Always include → ${s.name}`));
+      } else if (g.kind === 'choice') {
+        (g.options || []).forEach(o => {
+          (o.sections || []).forEach(s => visitSection(s, `${g.label} → ${o.name} → ${s.name}`));
+        });
+      }
+    });
+    (data?.unassigned || []).forEach(s => visitSection(s, `Unassigned → ${s.name}`));
+  }
+  const lc = filter.trim().toLowerCase();
+  const shown = lc ? candidates.filter(c =>
+    (c.name || '').toLowerCase().includes(lc) || (c.location || '').toLowerCase().includes(lc)
+  ) : candidates;
+  shown.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const toggle = (id) => setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()} style={{maxWidth:'560px'}}>
+        <div className="cfg-modal-hd">
+          <span className="title">Move items into "{target.sectionName}"</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body" style={{display:'flex',flexDirection:'column',gap:'10px',fontSize:'13px'}}>
+          <div style={{display:'flex',gap:'12px',fontSize:'11px',color:'var(--text-dim)'}}>
+            <label style={{display:'inline-flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
+              <input type="radio" checked={scope==='flags'} onChange={() => { setScope('flags'); setPicked(new Set()); }} />
+              Flags only (BODY OPTIONS)
+            </label>
+            <label style={{display:'inline-flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
+              <input type="radio" checked={scope==='all'} onChange={() => { setScope('all'); setPicked(new Set()); }} />
+              All BOM items
+            </label>
+          </div>
+          <input autoFocus className="cfg-rename-input" style={{fontSize:'13px',padding:'6px 8px'}}
+                 value={filter} placeholder={scope === 'flags' ? "Search flags by name or group…" : "Search by item name or section…"}
+                 onChange={(e) => setFilter(e.target.value)} />
+          <div style={{maxHeight:'320px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'4px'}}>
+            {shown.length === 0 ? (
+              <div style={{padding:'10px',color:'var(--text-dim)',fontStyle:'italic',fontSize:'12px'}}>No items match.</div>
+            ) : shown.map(c => (
+              <label key={c.itemId}
+                     style={{display:'flex',alignItems:'center',gap:'8px',padding:'6px 10px',cursor:'pointer',borderBottom:'1px solid var(--border)'}}>
+                <input type="checkbox" checked={picked.has(c.itemId)} onChange={() => toggle(c.itemId)} />
+                <span style={{flex:1}}>{c.name}</span>
+                <span style={{color:'var(--text-dim)',fontSize:'10px'}}>{c.location}</span>
+              </label>
+            ))}
+          </div>
+          <div style={{fontSize:'11px',color:'var(--text-dim)'}}>{picked.size} selected</div>
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" disabled={picked.size === 0}
+                  onClick={() => onMoveItems([...picked])}>Move {picked.size || ''} here</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddItemAsFlagModal({ target, data, onCancel, onConfirm }) {
+  // Right-click on a section item → "Add as flag" opens this modal.
+  // target: { itemId, itemName }
+  // We pre-validate against bodyOptions (the catalog of existing master names
+  // already returned by the tree) so the user gets immediate feedback before
+  // the server-side duplicate check fires.
+  const [pickedGroupId, setPickedGroupId] = useState('');
+  const candidates = (data?.availableFlagGroups || []).filter(g => g.dbGroupId);
+  // Duplicate detection — case + whitespace insensitive.
+  const targetNorm = (target.itemName || '').trim().toLowerCase();
+  const dupe = ((data?.bodyOptions) || []).find(n => (n || '').trim().toLowerCase() === targetNorm);
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">Add "{target.itemName}" as a flag</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body" style={{display:'flex',flexDirection:'column',gap:'10px',fontSize:'13px'}}>
+          {dupe ? (
+            <div style={{color:'var(--red,#f85149)',fontSize:'13px'}}>
+              ⚠ A flag/option named <b>"{dupe}"</b> already exists on this trailer.<br/>
+              Pick a different item name, or rename the existing master first.
+            </div>
+          ) : candidates.length === 0 ? (
+            <div style={{fontSize:'12px',color:'var(--text-dim)',fontStyle:'italic'}}>
+              No flag groups exist yet. Create one first via "+ Add flags group" at the bottom of the tree.
+            </div>
+          ) : (
+            <>
+              <div style={{fontSize:'12px',color:'var(--text-dim)'}}>Pick the flag group to add it to:</div>
+              <select value={pickedGroupId} onChange={(e) => setPickedGroupId(e.target.value)}
+                      style={{background:'var(--bg-input)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:'4px',padding:'6px 8px',fontSize:'13px'}}>
+                <option value="">Pick a flag group…</option>
+                {candidates.map(g => (
+                  <option key={g.dbGroupId} value={g.dbGroupId}>{g.name}</option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary"
+                  disabled={!!dupe || !pickedGroupId}
+                  onClick={() => onConfirm(parseInt(pickedGroupId, 10))}>Add as flag</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddOrMoveFlagModal({ target, data, onCancel, onAddNewFlag, onMoveExistingFlag }) {
+  // ＋ on a flag-group header opens this modal so the user can either add a
+  // brand-new flag, or move an existing flag master from anywhere else into
+  // this group. `target` = { groupId, groupLabel, dbGroupId }.
+  const [name, setName] = useState('');
+  const [pickedMasterId, setPickedMasterId] = useState('');
+  // Collect candidate flag masters from EVERY other flag group in the tree
+  // (both top-level and nested under choice options). A flag is identified
+  // by id of the shape "flag-m<masterId>".
+  const candidates = [];
+  const visitFlagGroup = (lg, location) => {
+    if (!lg || lg.id === target.groupId) return;  // skip self
+    (lg.options || []).forEach(o => {
+      const m = /^flag-m(\d+)$/.exec(o.id || '');
+      if (m) candidates.push({ masterId: parseInt(m[1], 10), name: o.name, location });
+    });
+  };
+  (data?.groups || []).forEach(g => {
+    if (g.kind === 'flags') visitFlagGroup(g, g.label);
+    else if (g.kind === 'choice') {
+      (g.options || []).forEach(o => {
+        (o.linkedFlagGroups || []).forEach(lg => visitFlagGroup(lg, `${g.label} → ${o.name} → ${lg.label}`));
+      });
+    }
+  });
+  candidates.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">Add flag to "{target.groupLabel}"</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body" style={{display:'flex',flexDirection:'column',gap:'14px',fontSize:'13px'}}>
+          <div>
+            <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>Add a new flag</div>
+            <div style={{display:'flex',gap:'6px'}}>
+              <input autoFocus className="cfg-rename-input" style={{flex:1,fontSize:'13px',padding:'6px 8px'}}
+                     value={name}
+                     placeholder='Flag name (e.g. "BAKERY BODY")'
+                     onChange={(e) => setName(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onAddNewFlag(name.trim()); }} />
+              <button className="btn btn-primary" disabled={!name.trim()}
+                      onClick={() => onAddNewFlag(name.trim())}>Add new</button>
+            </div>
+          </div>
+          <div style={{borderTop:'1px solid var(--border)',paddingTop:'12px'}}>
+            <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>
+              Move an existing flag here
+            </div>
+            {candidates.length === 0 ? (
+              <div style={{fontSize:'12px',color:'var(--text-dim)',fontStyle:'italic'}}>
+                No flags available elsewhere to move.
+              </div>
+            ) : (
+              <div style={{display:'flex',gap:'6px'}}>
+                <select value={pickedMasterId} onChange={(e) => setPickedMasterId(e.target.value)}
+                        style={{flex:1,background:'var(--bg-input)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:'4px',padding:'6px 8px',fontSize:'13px'}}>
+                  <option value="">Pick a flag to move…</option>
+                  {candidates.map(c => (
+                    <option key={c.masterId} value={c.masterId}>{c.name} — {c.location}</option>
+                  ))}
+                </select>
+                <button className="btn btn-primary" disabled={!pickedMasterId}
+                        onClick={() => onMoveExistingFlag(parseInt(pickedMasterId, 10))}>Move here</button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddUnderOptionModal({ target, data, onCancel, onAddSection, onLinkFlagGroup, onCreateAndLinkFlagGroup }) {
+  // Lets the user choose between adding a brand-new section under the gate
+  // option, linking an existing top-level flag group, or creating + linking
+  // a brand-new flag group in one step.
+  const [name, setName] = useState('');
+  const [pickedGroupId, setPickedGroupId] = useState('');
+  const [newFlagGroupName, setNewFlagGroupName] = useState('');
+  // Only currently-top-level flag groups (i.e. not already linked) are link
+  // candidates. After this trailer's tree is built, linked groups have been
+  // moved under their parent option, so `data.groups` contains the unlinked.
+  // Use the server-provided catalog so empty / not-yet-rendered flag groups
+  // (e.g. one the user just created) still show up as link candidates.
+  // Exclude groups already linked elsewhere — only one link per group at a
+  // time, per the parent_option_master_id schema.
+  const availableFlagGroups = ((data?.availableFlagGroups) || []).filter(g =>
+    g.dbGroupId && g.parentOptionMasterId == null
+  );
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">Add under "{target.optName}"</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body" style={{display:'flex',flexDirection:'column',gap:'14px',fontSize:'13px'}}>
+          <div>
+            <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>Add a new section</div>
+            <div style={{display:'flex',gap:'6px'}}>
+              <input autoFocus className="cfg-rename-input" style={{flex:1,fontSize:'13px',padding:'6px 8px'}}
+                     value={name}
+                     placeholder='Section name (e.g. "TOPPINGS")'
+                     onChange={(e) => setName(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) onAddSection(name.trim()); }} />
+              <button className="btn btn-primary" disabled={!name.trim()}
+                      onClick={() => onAddSection(name.trim())}>Add section</button>
+            </div>
+          </div>
+          <div style={{borderTop:'1px solid var(--border)',paddingTop:'12px'}}>
+            <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>
+              Create a new flag group as a sub-area
+            </div>
+            <div style={{display:'flex',gap:'6px'}}>
+              <input className="cfg-rename-input" style={{flex:1,fontSize:'13px',padding:'6px 8px'}}
+                     value={newFlagGroupName}
+                     placeholder='Flag group name (e.g. "FLOOR THICKNESS")'
+                     onChange={(e) => setNewFlagGroupName(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === 'Enter' && newFlagGroupName.trim()) onCreateAndLinkFlagGroup && onCreateAndLinkFlagGroup(newFlagGroupName.trim()); }} />
+              <button className="btn btn-primary" disabled={!newFlagGroupName.trim() || !onCreateAndLinkFlagGroup}
+                      onClick={() => onCreateAndLinkFlagGroup(newFlagGroupName.trim())}>Create + link</button>
+            </div>
+          </div>
+          <div style={{borderTop:'1px solid var(--border)',paddingTop:'12px'}}>
+            <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>
+              Link an existing flag group as a sub-area
+            </div>
+            {availableFlagGroups.length === 0 ? (
+              <div style={{fontSize:'12px',color:'var(--text-dim)',fontStyle:'italic'}}>
+                No unlinked flag groups available. Create or unlink one first.
+              </div>
+            ) : (
+              <div style={{display:'flex',gap:'6px'}}>
+                <select value={pickedGroupId} onChange={(e) => setPickedGroupId(e.target.value)}
+                        style={{flex:1,background:'var(--bg-input)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:'4px',padding:'6px 8px',fontSize:'13px'}}>
+                  <option value="">Pick a flag group…</option>
+                  {availableFlagGroups.map(g => (
+                    <option key={g.dbGroupId} value={g.dbGroupId}>{g.name}</option>
+                  ))}
+                </select>
+                <button className="btn btn-primary" disabled={!pickedGroupId}
+                        onClick={() => onLinkFlagGroup(parseInt(pickedGroupId, 10))}>Link</button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResizeHandle() {
+  // Persisted drag-to-resize between the left tree pane and the right detail pane.
+  // Width sticks across reloads via localStorage. Clamp to a sensible range so the
+  // user can't drag either pane out of existence.
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    try {
+      const saved = localStorage.getItem('cfg_tree_w');
+      if (saved && /^\d+(\.\d+)?px$/.test(saved)) {
+        document.getElementById('cfg-root').style.setProperty('--cfg-tree-w', saved);
+      }
+    } catch (e) {}
+  }, []);
+  const onMouseDown = (e) => {
+    e.preventDefault();
+    const root = document.getElementById('cfg-root');
+    const handle = ref.current;
+    if (!root) return;
+    const startX = e.clientX;
+    const cs = getComputedStyle(root);
+    const cols = cs.gridTemplateColumns.split(/\s+/);
+    const startW = parseFloat(cols[0]) || 320;
+    handle && handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const newW = Math.max(220, Math.min(900, startW + dx));
+      root.style.setProperty('--cfg-tree-w', newW + 'px');
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      handle && handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      try { localStorage.setItem('cfg_tree_w', root.style.getPropertyValue('--cfg-tree-w') || ''); } catch (e) {}
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+  return <div ref={ref} className="cfg-resize-handle" onMouseDown={onMouseDown}
+              title="Drag to resize" />;
+}
+
+function InlineRename({ value, onCommit, onCancel }) {
+  const [v, setV] = useState(value);
+  return (
+    <input
+      autoFocus
+      className="cfg-rename-input"
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { onCommit(v.trim() || value); }
+        if (e.key === 'Escape') { onCancel(); }
+      }}
+      onBlur={() => onCommit(v.trim() || value)}
+    />
+  );
+}
+
+function Actions({ onRename, onDelete, onMove, alwaysOn }) {
+  return (
+    <span className={`cfg-actions ${alwaysOn ? 'always-on' : ''}`} onClick={(e) => e.stopPropagation()}>
+      {onMove   && <button className="cfg-icon-btn" title="Move to choice point" onClick={onMove}>⇪</button>}
+      {onRename && <button className="cfg-icon-btn" title="Rename" onClick={onRename}>✎</button>}
+      {onDelete && <button className="cfg-icon-btn danger" title="Delete" onClick={onDelete}>✕</button>}
+    </span>
+  );
+}
+
+function Tree({ data, selected, onSelect, mut, renaming, setRenaming, askDelete, askMove, askBundle, askFlagMove, askAddUnder, askAddFlag, askMoveItems, askMoveOneItem, onShowPreview, onShowSnapshots, flagState, toggleFlag, selectInBundle, selectRadioFlag, choiceSelection, setChoiceSelection, setViewMode }) {
+  return (
+    <div className="cfg-pane">
+      <div className="cfg-pane-head">
+        <span>{data.trailerName}</span>
+        <span style={{display:'inline-flex',gap:'4px'}}>
+          <button className="cfg-icon-btn" title="Snapshots — save and restore configurator state" onClick={onShowSnapshots}
+                  style={{fontSize:'13px',padding:'2px 8px',border:'1px solid var(--border)',borderRadius:'4px'}}>
+            📸 Snapshots
+          </button>
+          <button className="cfg-icon-btn" title="Preview full structure" onClick={onShowPreview}
+                  style={{fontSize:'13px',padding:'2px 8px',border:'1px solid var(--border)',borderRadius:'4px'}}>
+            📋 Preview
+          </button>
+        </span>
+      </div>
+      <div className="cfg-pane-body">
+        {data.groups.map(grp => (
+          <Group key={grp.id} grp={grp}
+            data={data}
+            selected={selected} onSelect={onSelect}
+            mut={mut} renaming={renaming} setRenaming={setRenaming} askDelete={askDelete} askMove={askMove} askBundle={askBundle} askFlagMove={askFlagMove}
+            askAddUnder={askAddUnder} askAddFlag={askAddFlag} askMoveItems={askMoveItems} askMoveOneItem={askMoveOneItem}
+            flagState={flagState} toggleFlag={toggleFlag} selectInBundle={selectInBundle} selectRadioFlag={selectRadioFlag}
+            choiceSelection={choiceSelection} setChoiceSelection={setChoiceSelection}
+            setViewMode={setViewMode} />
+        ))}
+
+        <button className="cfg-add-btn" onClick={() => mut.addAlwaysGroup()}>
+          + Add "always include" group
+        </button>
+        <button className="cfg-add-btn" onClick={() => mut.addChoiceGroup()}>
+          + Add choice point (pick one)
+        </button>
+        <button className="cfg-add-btn" onClick={() => mut.addFlagsGroup()}>
+          + Add flags group
+        </button>
+
+        {data.unassigned && data.unassigned.length > 0 && (
+          <UnassignedTray data={data} mut={mut} askDelete={askDelete} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Group({ grp, data, selected, onSelect, mut, renaming, setRenaming, askDelete, askMove, askBundle, askFlagMove, askAddUnder, askAddFlag, askMoveItems, askMoveOneItem, flagState, toggleFlag, selectInBundle, selectRadioFlag, choiceSelection, setChoiceSelection, setViewMode }) {
+  const [open, setOpen] = useState(true);
+  const isRenaming = renaming === grp.id;
+
+  const header = (
+    <div className={`cfg-tree-group-hdr ${grp.kind === 'choice' ? 'choice' : ''} ${grp.kind === 'flags' ? 'flags' : ''}`}
+         onClick={() => setOpen(!open)}>
+      <span className="chev">{open ? '▼' : '▶'}</span>
+      {isRenaming
+        ? <InlineRename value={grp.label}
+            onCommit={(v) => { mut.rename([grp.id], v); setRenaming(null); }}
+            onCancel={() => setRenaming(null)} />
+        : <span>{grp.label}</span>
+      }
+      {grp.kind === 'choice' && !isRenaming && (
+        <span style={{fontSize:'9px',background:'rgba(240,165,0,.15)',padding:'1px 6px',borderRadius:'8px',marginLeft:'8px'}}>
+          pick one
+        </span>
+      )}
+      {grp.kind === 'flags' && !isRenaming && (
+        <span style={{fontSize:'9px',background:'rgba(163,113,247,.18)',color:'#a371f7',padding:'1px 6px',borderRadius:'8px',marginLeft:'8px'}}>
+          flags
+        </span>
+      )}
+      {!isRenaming && (
+        <span className="cfg-actions" onClick={(e) => e.stopPropagation()}>
+          <button className="cfg-icon-btn"
+                  title={
+                    grp.kind === 'always' ? `Add section to ${grp.label}` :
+                    grp.kind === 'choice' ? `Add option to ${grp.label}` :
+                    `Add or move flag to ${grp.label}`
+                  }
+                  onClick={() => {
+                    if (grp.kind === 'always') mut.addSection(grp.id, null);
+                    else if (grp.kind === 'choice') mut.addOption(grp.id);
+                    else if (askAddFlag) askAddFlag({ groupId: grp.id, groupLabel: grp.label, dbGroupId: grp.dbGroupId });
+                    else mut.addFlag(grp.id);
+                  }}>＋</button>
+          {grp.kind === 'flags' && grp.parentOptionMasterId && grp.dbGroupId && (
+            <button className="cfg-icon-btn" title="Unlink from gate option (move back to top level)"
+                    style={{color:'#a371f7'}}
+                    onClick={() => mut.unlinkFlagGroup(grp.dbGroupId)}>⇗</button>
+          )}
+          <button className="cfg-icon-btn" title="Rename" onClick={() => setRenaming(grp.id)}>✎</button>
+          <button className="cfg-icon-btn danger" title="Delete"
+                  onClick={() => askDelete({ kind: 'group', path: [grp.id], name: grp.label, grp })}>✕</button>
+        </span>
+      )}
+    </div>
+  );
+
+  if (grp.kind === 'always') {
+    return (
+      <div className="cfg-tree-group">
+        {header}
+        {open && grp.sections.map(sec => (
+          <SectionRow key={sec.id} sec={sec} path={[grp.id, sec.id]}
+            selected={selected} onSelect={onSelect}
+            mut={mut} renaming={renaming} setRenaming={setRenaming}
+            askDelete={askDelete} askMove={askMove} askMoveItems={askMoveItems} askMoveOneItem={askMoveOneItem}
+            flagState={flagState} toggleFlag={toggleFlag} selectRadioFlag={selectRadioFlag}
+            inAlwaysGroup />
+        ))}
+      </div>
+    );
+  }
+
+  if (grp.kind === 'flags') {
+    const onCount = grp.options.filter(o => flagState && flagState[o.name]).length;
+    return (
+      <div className="cfg-tree-group">
+        {header}
+        {open && onCount > 0 && (
+          <div style={{paddingLeft:'18px',fontSize:'10px',color:'#3fb950',marginBottom:'4px'}}>
+            {onCount} of {grp.options.length} on
+          </div>
+        )}
+        {open && grp.options.map(opt => {
+          const optRenaming = renaming === `${grp.id}/${opt.id}`;
+          const on = !!(flagState && flagState[opt.name]);
+          const style = opt.style || 'tick';
+          const isRadio = style === 'radio';
+          const onClickRow = () => {
+            if (optRenaming) return;
+            if (isRadio) selectRadioFlag && selectRadioFlag(grp, opt.name);
+            else toggleFlag && toggleFlag(opt.name);
+          };
+          return (
+            <div key={opt.id} className="cfg-tree-option"
+                 onClick={onClickRow}
+                 style={{cursor: 'pointer'}}>
+              <span style={{
+                width:'14px', height:'14px',
+                display:'inline-flex', alignItems:'center', justifyContent:'center',
+                fontSize:'11px',
+                color: on ? '#fff' : '#a371f7',
+                background: on ? '#a371f7' : 'transparent',
+                border: `1px solid ${on ? '#a371f7' : 'var(--border)'}`,
+                borderRadius: isRadio ? '50%' : '3px', flexShrink:0
+              }}>
+                {on ? (isRadio ? '●' : '✓') : ''}
+              </span>
+              {optRenaming
+                ? <InlineRename value={opt.name}
+                    onCommit={(v) => { mut.rename([grp.id, opt.id], v); setRenaming(null); }}
+                    onCancel={() => setRenaming(null)} />
+                : <span style={{color: on ? 'var(--text)' : 'var(--text-dim)', fontWeight: on ? 500 : 400}}>{opt.name}</span>
+              }
+              {!optRenaming && (
+                <span className="cfg-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="cfg-icon-btn" title={isRadio ? 'Switch to tick box' : 'Switch to radio button'}
+                          onClick={() => mut.toggleFlagStyle(grp.id, opt.id)}
+                          style={isRadio ? {color:'#a371f7'} : {}}>
+                    {isRadio ? '◉' : '☑'}
+                  </button>
+                  {askBundle && /^flag-m\d+$/.test(opt.id) && (
+                    <button className="cfg-icon-btn" title="Move to a mutex bundle"
+                            onClick={() => askBundle({ groupId: grp.id, masterId: parseInt(opt.id.slice(6), 10), name: opt.name })}>
+                      ⊞
+                    </button>
+                  )}
+                  {askFlagMove && /^flag-m\d+$/.test(opt.id) && (
+                    <button className="cfg-icon-btn" title="Move to a different flag group"
+                            onClick={() => askFlagMove({ fromGroupId: grp.id, masterId: parseInt(opt.id.slice(6), 10), name: opt.name })}>
+                      📂
+                    </button>
+                  )}
+                  <button className="cfg-icon-btn" title="Rename" onClick={() => setRenaming(`${grp.id}/${opt.id}`)}>✎</button>
+                  <button className="cfg-icon-btn danger" title="Delete"
+                          onClick={() => askDelete({ kind: 'option', path: [grp.id, opt.id], name: opt.name, opt })}>✕</button>
+                </span>
+              )}
+            </div>
+          );
+        })}
+        {open && (grp.bundles || []).map(bundle => {
+          const activeOpt = bundle.options.find(o => flagState && flagState[o.name]);
+          return (
+            <div key={bundle.id} className="cfg-bundle">
+              <div className="cfg-bundle-hdr">
+                <span>{bundle.label}</span>
+                <span className="pick">pick one</span>
+                {activeOpt && <span style={{marginLeft:'auto',color:'var(--text-dim)',fontSize:'9px'}}>= {activeOpt.name}</span>}
+                <button className="cfg-icon-btn danger"
+                        title="Dissolve bundle (options become independent tick boxes)"
+                        style={{marginLeft: activeOpt ? '6px' : 'auto', fontSize:'10px', padding:'1px 4px'}}
+                        onClick={(e) => { e.stopPropagation(); askDelete({ kind: 'bundle', path: [grp.id, bundle.id], name: bundle.label, bundle, grp }); }}>✕</button>
+              </div>
+              {bundle.options.map(opt => {
+                const on = !!(flagState && flagState[opt.name]);
+                const optRenaming = renaming === `${grp.id}/${bundle.id}/${opt.id}`;
+                const masterId = /^flag-m(\d+)$/.exec(opt.id || '')?.[1];
+                return (
+                  <div key={opt.id}
+                       className={`cfg-bundle-opt ${on ? 'on' : ''}`}
+                       onClick={() => !optRenaming && selectInBundle && selectInBundle(bundle, opt.name)}>
+                    <span className={`radio ${on ? 'on' : ''}`}></span>
+                    {optRenaming
+                      ? <InlineRename value={opt.name}
+                          onCommit={(v) => { mut.rename([grp.id, opt.id], v); setRenaming(null); }}
+                          onCancel={() => setRenaming(null)} />
+                      : <span>{opt.name}</span>
+                    }
+                    {!optRenaming && masterId && (
+                      <span className="cfg-actions" onClick={(e) => e.stopPropagation()}>
+                        <button className="cfg-icon-btn" title="Switch to tick box"
+                                onClick={() => mut.toggleFlagStyle(grp.id, opt.id)}
+                                style={{color:'#a371f7'}}>◉</button>
+                        {askFlagMove && (
+                          <button className="cfg-icon-btn" title="Move to a different flag group"
+                                  onClick={() => askFlagMove({ fromGroupId: grp.id, masterId: parseInt(masterId,10), name: opt.name })}>📂</button>
+                        )}
+                        <button className="cfg-icon-btn" title="Rename"
+                                onClick={() => setRenaming(`${grp.id}/${bundle.id}/${opt.id}`)}>✎</button>
+                        <button className="cfg-icon-btn danger" title="Delete"
+                                onClick={() => askDelete({ kind: 'option', path: [grp.id, opt.id], name: opt.name, opt })}>✕</button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cfg-tree-group">
+      {header}
+      {open && grp.options.map(opt => {
+        const isDefault = opt.id === grp.defaultId;
+        const isActive = (choiceSelection?.[grp.id] || grp.defaultId) === opt.id;
+        const optRenaming = renaming === `${grp.id}/${opt.id}`;
+        // Visual merge: when the gate option owns a section via the explicit
+        // FK (BOMSection.body_option_master_id == this master), render the
+        // option + section as a single row. FK-based match survives renames
+        // — earlier name-based logic split the row when the user renamed.
+        const optMasterId = /^opt-m(\d+)$/.test(opt.id) ? parseInt(opt.id.slice(5), 10) : null;
+        // Merge an option with its same-named owned section, the 1:1 master↔
+        // section pattern. Rules:
+        //   1) Prefer a section whose name matches the option's name (clear
+        //      1:1 intent, survives section-side rename via display fallback).
+        //   2) Else, if the option owns EXACTLY ONE section (via FK), merge
+        //      with that one. (Handles the case where the user renamed the
+        //      section away from the option's name but still wants it merged.)
+        //   3) Otherwise no merge — render every owned section as its own row
+        //      so multi-section options (e.g. WISA → both WISA TRANS FLOOR
+        //      and FLOOR THICKNESS) keep each child visible.
+        let mergedSec = null;
+        if (optMasterId != null) {
+          const fkMatches = opt.sections.filter(s => s.bodyOptionMasterId === optMasterId);
+          const byName = fkMatches.find(s => (s.name || '').trim().toLowerCase() === (opt.name || '').trim().toLowerCase());
+          if (byName) mergedSec = byName;
+          else if (fkMatches.length === 1) mergedSec = fkMatches[0];
+        }
+        const otherSecs = mergedSec ? opt.sections.filter(s => s.id !== mergedSec.id) : opt.sections;
+        const mergedPath = mergedSec ? [grp.id, opt.id, mergedSec.id] : null;
+        // When merged, display the section's name (it's the authoritative,
+        // server-persisted label). Rename then targets the section only.
+        const displayName = mergedSec ? (mergedSec.name || opt.name) : opt.name;
+        return (
+          <React.Fragment key={opt.id}>
+            <div className="cfg-tree-option"
+                 onClick={() => {
+                   setChoiceSelection && setChoiceSelection({...(choiceSelection || {}), [grp.id]: opt.id});
+                   // Clicking the option focuses just that category on the
+                   // right pane. If the option has a same-named (merged)
+                   // section we navigate to it; otherwise we fall back to
+                   // the option's first section so the pane still updates.
+                   const target = mergedPath || (opt.sections[0] ? [grp.id, opt.id, opt.sections[0].id] : null);
+                   if (target) onSelect && onSelect(target);
+                   setViewMode && setViewMode('single');
+                 }}>
+              <span className={`radio ${isActive ? 'on' : ''}`}></span>
+              {optRenaming
+                ? <InlineRename value={displayName}
+                    onCommit={(v) => {
+                      // For merged options, only the section name persists
+                      // server-side (option rename has no API yet). Renaming
+                      // just the section keeps option and section in lockstep
+                      // because the merge now matches by FK, not by name.
+                      if (mergedPath) {
+                        mut.rename(mergedPath, v);
+                      } else {
+                        mut.rename([grp.id, opt.id], v);
+                      }
+                      setRenaming(null);
+                    }}
+                    onCancel={() => setRenaming(null)} />
+                : <span style={{color: isActive ? 'var(--text)' : 'var(--text-dim)', fontWeight: isActive ? 600 : 400}}>{displayName}</span>
+              }
+              {mergedSec && !optRenaming && (
+                <span className="count" style={{marginLeft:'4px',color:'var(--text-dim)',fontSize:'10px'}}>({mergedSec.items.length})</span>
+              )}
+              {isDefault && !optRenaming && <span style={{color:'#f0a500',fontSize:'10px',marginLeft:'4px'}}>★ default</span>}
+              {!optRenaming && (
+                <span className="cfg-actions" onClick={(e) => e.stopPropagation()}>
+                  {!isDefault && (
+                    <button className="cfg-icon-btn" title="Set as default for this gate"
+                            style={{color:'#f0a500'}}
+                            onClick={() => mut.setDefault(grp.id, opt.id)}>☆</button>
+                  )}
+                  <button className="cfg-icon-btn" title={`Add section or link flag group under ${displayName}`}
+                          onClick={() => {
+                            const masterId = /^opt-m(\d+)$/.test(opt.id) ? parseInt(opt.id.slice(5), 10) : null;
+                            if (askAddUnder) {
+                              askAddUnder({ grpId: grp.id, optId: opt.id, optName: displayName, optMasterId: masterId });
+                            } else {
+                              mut.addSection(grp.id, opt.id);
+                            }
+                          }}>＋</button>
+                  <button className="cfg-icon-btn" title="Rename" onClick={() => setRenaming(`${grp.id}/${opt.id}`)}>✎</button>
+                  <button className="cfg-icon-btn danger" title="Delete"
+                          onClick={() => askDelete({ kind: 'option', path: [grp.id, opt.id], name: displayName, opt })}>✕</button>
+                </span>
+              )}
+            </div>
+            {otherSecs.map(sec => (
+              <SectionRow key={sec.id} sec={sec} path={[grp.id, opt.id, sec.id]}
+                selected={selected} onSelect={onSelect}
+                mut={mut} renaming={renaming} setRenaming={setRenaming} askDelete={askDelete}
+                askMoveItems={askMoveItems} askMoveOneItem={askMoveOneItem}
+                flagState={flagState} toggleFlag={toggleFlag} selectRadioFlag={selectRadioFlag}
+                underOption />
+            ))}
+            {(opt.linkedFlagGroups || []).map(lg => (
+              <div key={lg.id} style={{marginLeft:'50px',marginTop:'2px',marginBottom:'4px'}}>
+                <Group grp={lg} data={data}
+                  selected={selected} onSelect={onSelect}
+                  mut={mut} renaming={renaming} setRenaming={setRenaming}
+                  askDelete={askDelete} askMove={askMove} askBundle={askBundle} askFlagMove={askFlagMove}
+                  askAddUnder={askAddUnder} askAddFlag={askAddFlag} askMoveOneItem={askMoveOneItem}
+                  flagState={flagState} toggleFlag={toggleFlag} selectInBundle={selectInBundle} selectRadioFlag={selectRadioFlag}
+                  choiceSelection={choiceSelection} setChoiceSelection={setChoiceSelection}
+                  setViewMode={setViewMode} />
+              </div>
+            ))}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function SectionRow({ sec, path, selected, onSelect, underOption, mut, renaming, setRenaming, askDelete, askMove, askMoveItems, askMoveOneItem, flagState, toggleFlag, selectRadioFlag, inAlwaysGroup }) {
+  const isActive = selected && selected.join('/') === path.join('/');
+  const key = path.join('/');
+  const isRenaming = renaming === key;
+  // The section's DB id (numeric) is needed by the move-items endpoint.
+  // Tree id format is "s<id>" for server-backed sections; locally-created
+  // sections ("s-<rand>") aren't persistable yet, so we hide ＋ for those.
+  const dbIdMatch = typeof sec.id === 'string' ? /^s(\d+)$/.exec(sec.id) : null;
+  const sectionDbId = dbIdMatch ? parseInt(dbIdMatch[1], 10) : null;
+  const flags = sec.flags || [];
+  return (
+    <>
+      <div className={`cfg-tree-section ${underOption ? 'under-option' : ''} ${isActive ? 'active' : ''}`}
+        onClick={() => !isRenaming && onSelect(path)}>
+        <span style={{opacity:.5,fontSize:'10px'}}>▸</span>
+        {isRenaming
+          ? <InlineRename value={sec.name}
+              onCommit={(v) => { mut.rename(path, v); setRenaming(null); }}
+              onCancel={() => setRenaming(null)} />
+          : <>
+              <span>{sec.name}</span>
+              <span className="count">({sec.items.length}{flags.length ? ` + ${flags.length} flag${flags.length===1?'':'s'}` : ''})</span>
+              <span className="cfg-actions" onClick={(e) => e.stopPropagation()}>
+                {askMoveItems && sectionDbId != null && (
+                  <button className="cfg-icon-btn" title={`Move items into ${sec.name}`}
+                          onClick={() => askMoveItems({ sectionTreeId: sec.id, sectionDbId, sectionName: sec.name })}>＋</button>
+                )}
+                {inAlwaysGroup && askMove && (
+                  <button className="cfg-icon-btn" title="Move to choice point"
+                          onClick={() => askMove({ path, sec })}>⇪</button>
+                )}
+                <button className="cfg-icon-btn" title="Rename" onClick={() => setRenaming(key)}>✎</button>
+                <button className="cfg-icon-btn danger" title="Delete"
+                        onClick={() => askDelete({ kind: 'section', path, name: sec.name, sec })}>✕</button>
+              </span>
+            </>
+        }
+      </div>
+      {/* Flag masters moved into this section (bom_section_id-bound). Rendered
+          inline as fully-interactive toggle rows — same affordances as a flag
+          row inside a flag group — plus two extras: ↘ "move to another
+          section" and ↗ "unbind back to flag group". */}
+      {flags.map(f => {
+        const masterId = /^flag-m(\d+)$/.exec(f.id || '')?.[1];
+        const optRenaming = renaming === `${sec.id}/${f.id}`;
+        const isRadio = (f.style || 'tick') === 'radio';
+        const on = !!(flagState && flagState[f.name]);
+        // Synthetic group id so toggleFlagStyle can find the flag in draft
+        // state. The flag still lives in its real body_option_group; we just
+        // need an id the tree walker recognises.
+        const syntheticGroupId = sec.id;
+        const onClickRow = () => {
+          if (optRenaming) return;
+          if (isRadio) selectRadioFlag && selectRadioFlag({ id: syntheticGroupId, options: flags }, f.name);
+          else toggleFlag && toggleFlag(f.name);
+        };
+        return (
+          <div key={f.id} className="cfg-tree-option"
+               style={{marginLeft: underOption ? '70px' : '50px', cursor:'pointer'}}
+               onClick={onClickRow}>
+            <span style={{
+              width:'14px', height:'14px',
+              display:'inline-flex', alignItems:'center', justifyContent:'center',
+              fontSize:'11px',
+              color: on ? '#fff' : '#a371f7',
+              background: on ? '#a371f7' : 'transparent',
+              border: `1px solid ${on ? '#a371f7' : 'var(--border)'}`,
+              borderRadius: isRadio ? '50%' : '3px', flexShrink:0
+            }}>{on ? (isRadio ? '●' : '✓') : ''}</span>
+            {optRenaming
+              ? <InlineRename value={f.name}
+                  onCommit={(v) => { mut.rename([syntheticGroupId, f.id], v); setRenaming(null); }}
+                  onCancel={() => setRenaming(null)} />
+              : <span style={{color: on ? 'var(--text)' : 'var(--text-dim)', fontWeight: on ? 500 : 400}}>{f.name}</span>
+            }
+            {!optRenaming && (
+              <span className="cfg-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="cfg-icon-btn" title={isRadio ? 'Switch to tick box' : 'Switch to radio button'}
+                        onClick={() => masterId && mut.toggleFlagStyle && mut.toggleFlagStyle(syntheticGroupId, f.id)}
+                        style={isRadio ? {color:'#a371f7'} : {}}>
+                  {isRadio ? '◉' : '☑'}
+                </button>
+                {masterId && askMoveOneItem && (
+                  <button className="cfg-icon-btn" title={`Move "${f.name}" to another section`}
+                          onClick={() => askMoveOneItem({ itemId: parseInt(masterId,10), itemName: f.name, currentSectionTreeId: sec.id })}>↘</button>
+                )}
+                {masterId && sectionDbId != null && (
+                  <button className="cfg-icon-btn" title={`Unbind from "${sec.name}" (return to flag group)`}
+                          style={{color:'#a371f7'}}
+                          onClick={() => mut.unbindFlagFromSection && mut.unbindFlagFromSection(parseInt(masterId,10))}>↗</button>
+                )}
+                <button className="cfg-icon-btn" title="Rename" onClick={() => setRenaming(`${sec.id}/${f.id}`)}>✎</button>
+                <button className="cfg-icon-btn danger" title="Delete"
+                        onClick={() => askDelete({ kind: 'option', path: [syntheticGroupId, f.id], name: f.name, opt: f })}>✕</button>
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function UnassignedTray({ data, mut, askDelete }) {
+  // Build the dropdown options: every place a section could land.
+  const targets = [];
+  for (const g of data.groups) {
+    if (g.kind === 'always') {
+      targets.push({ value: `${g.id}|`, label: `Always include: ${g.label}` });
+    } else {
+      for (const o of g.options) {
+        targets.push({ value: `${g.id}|${o.id}`, label: `${g.label} → ${o.name}` });
+      }
+    }
+  }
+  return (
+    <div className="cfg-unassigned">
+      <div className="cfg-unassigned-hdr">⚠ Unassigned ({data.unassigned.length})</div>
+      <div className="cfg-unassigned-hint">
+        Sections orphaned by a delete. Items still live here. Move them to a group/option, or delete to remove permanently.
+      </div>
+      {data.unassigned.map(sec => (
+        <div key={sec.id} className="cfg-unassigned-row">
+          <span className="name">{sec.name} <span style={{opacity:.5,fontSize:'10px'}}>({sec.items.length})</span></span>
+          <select defaultValue="" onChange={(e) => {
+            if (!e.target.value) return;
+            const [gid, oid] = e.target.value.split('|');
+            mut.restoreSection(sec.id, gid, oid || null);
+          }}>
+            <option value="">move to…</option>
+            {targets.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <button className="cfg-icon-btn danger" title="Delete permanently"
+                  onClick={() => askDelete({ kind: 'unassigned-section', path: ['unassigned', sec.id], name: sec.name, sec })}>
+            ✕
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SnapshotsModal({ trailerId, trailerName, writeApi, askInput, askNotice, onClose, onAfterRestore }) {
+  const [snaps, setSnaps] = useState(null);     // null = loading, [] = empty, [...] = loaded
+  const [busy, setBusy] = useState(false);
+
+  const reload = useCallback(() => {
+    setSnaps(null);
+    fetch(`/api/configurator/trailers/${trailerId}/snapshots`, {credentials:'same-origin'})
+      .then(r => r.ok ? r.json() : [])
+      .then(list => setSnaps(list || []))
+      .catch(() => setSnaps([]));
+  }, [trailerId]);
+
+  React.useEffect(() => { reload(); }, [reload]);
+
+  const takeSnapshot = () => {
+    // Default name: "<body type> — YYYY-MM-DD HH:MM" so each snapshot is uniquely
+    // identifiable at a glance and the user can just hit Enter to save.
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    const defaultName = `${trailerName || 'Trailer'} — ${stamp}`;
+    askInput({
+      title: 'Take a snapshot',
+      label: 'Name this snapshot',
+      defaultValue: defaultName,
+      placeholder: 'Snapshot name',
+      submitLabel: 'Save snapshot',
+      onSubmit: (name) => {
+        setBusy(true);
+        writeApi('POST', `/api/configurator/trailers/${trailerId}/snapshots`, { name })
+          .then(() => { setBusy(false); reload(); })
+          .catch(err => { setBusy(false);
+            askNotice({title: 'Snapshot failed', tone: 'error', body: err.message}); });
+      },
+    });
+  };
+
+  const restore = (snap) => {
+    setBusy(true);
+    writeApi('POST', `/api/configurator/snapshots/${snap.id}/restore`)
+      .then((res) => {
+        setBusy(false);
+        const m = res.missing || {};
+        const missingCount = (m.sections?.length || 0) + (m.masters?.length || 0) + (m.items?.length || 0);
+        askNotice({
+          title: 'Snapshot restored', tone: 'success',
+          body: `Restored "${snap.name}". Updated ${res.sectionsUpdated} sections, ${res.mastersUpdated} masters, ${res.itemsUpdated} items.` +
+                (missingCount > 0 ? `\n\n${missingCount} row(s) from the snapshot no longer exist and were skipped.` : ''),
+        });
+        if (onAfterRestore) onAfterRestore();
+      })
+      .catch(err => { setBusy(false);
+        askNotice({title: 'Restore failed', tone: 'error', body: err.message}); });
+  };
+
+  const remove = (snap) => {
+    setBusy(true);
+    writeApi('DELETE', `/api/configurator/snapshots/${snap.id}`)
+      .then(() => { setBusy(false); reload(); })
+      .catch(err => { setBusy(false);
+        askNotice({title: 'Delete failed', tone: 'error', body: err.message}); });
+  };
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onClose(); }}>
+      <div className="cfg-modal cfg-preview-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">📸 Snapshots</span>
+          <button className="btn btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+          <p style={{margin:'0 0 12px',fontSize:'12px',color:'var(--text-dim)'}}>
+            Save the trailer's current configurator state (gates, sections, conditions, archived sections). Restoring rolls every captured field back; rows added since the snapshot are left alone.
+          </p>
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'10px'}}>
+            <button className="btn btn-primary" disabled={busy} onClick={takeSnapshot}>+ Take snapshot now</button>
+          </div>
+          {snaps === null && <div style={{color:'var(--text-dim)',fontStyle:'italic',padding:'8px'}}>Loading…</div>}
+          {snaps && snaps.length === 0 && (
+            <div style={{color:'var(--text-dim)',fontStyle:'italic',padding:'8px',textAlign:'center'}}>
+              No snapshots yet. Take one to lock in the current state.
+            </div>
+          )}
+          {snaps && snaps.length > 0 && (
+            <table className="cfg-table" style={{fontSize:'12px'}}>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Taken</th>
+                  <th>By</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {snaps.map(s => (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td style={{color:'var(--text-dim)',fontSize:'11px'}}>{(s.createdAt || '').replace('T', ' ').slice(0, 16)}</td>
+                    <td style={{color:'var(--text-dim)',fontSize:'11px'}}>{s.createdBy || '—'}</td>
+                    <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+                      <button className="cfg-icon-btn" style={{border:'1px solid var(--border)',borderRadius:'3px',padding:'2px 8px',marginRight:'4px'}}
+                              disabled={busy} onClick={() => restore(s)}>↻ Restore</button>
+                      <button className="cfg-icon-btn danger" style={{border:'1px solid var(--border)',borderRadius:'3px',padding:'2px 6px'}}
+                              disabled={busy} onClick={() => remove(s)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StructurePreview({ data, flagState, setFlagState, choiceSelection, setChoiceSelection, onClose }) {
+  const [mode, setMode] = useState('full');  // 'full' | 'costed'
+  // Per-section collapse state (set of section ids). Empty = all expanded.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleCollapsed = (id) => setCollapsed(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  // Walk every section currently visible and collapse / expand them all.
+  const allSectionIds = useMemo(() => {
+    const ids = [];
+    for (const g of data.groups) {
+      if (g.kind === 'always') for (const s of g.sections) ids.push(s.id);
+      else if (g.kind === 'choice') for (const o of g.options) for (const s of o.sections) ids.push(s.id);
+    }
+    if (data.unassigned) for (const s of data.unassigned) ids.push(s.id);
+    return ids;
+  }, [data]);
+  const collapseAll = () => setCollapsed(new Set(allSectionIds));
+  const expandAll  = () => setCollapsed(new Set());
+  // Use the App-level choiceSelection (shared with the tree's option radios) so the
+  // costed preview reflects the same active branch the user picked on the left rail.
+  const chosen = choiceSelection || {};
+  const setChosen = (next) => {
+    if (typeof next === 'function') setChoiceSelection(prev => next(prev || {}));
+    else setChoiceSelection(next);
+  };
+  // Reuse the App-level flag state so toggles in the tree, BOM rows, and the preview stay in sync.
+  const bodyOpts = flagState || {};
+  const setBodyOpts = (next) => {
+    if (typeof next === 'function') setFlagState(prev => next(prev || {}));
+    else setFlagState(next);
+  };
+
+  const itemPasses = (it) => itemPassesFlags(it, bodyOpts);
+
+  const costed = mode === 'costed';
+
+  const renderConds = (conds) => {
+    if (!conds || conds.length === 0) return null;
+    const txt = conds.map(c => `${c.option}${c.equals === 'N' ? '≠' : '='}${c.equals}`).join(' AND ');
+    return <span className="o-cond">[when {txt}]</span>;
+  };
+
+  const renderSection = (sec) => {
+    const items = costed ? sec.items.filter(itemPasses) : sec.items;
+    // In costed mode, hide sections that end up with zero items.
+    if (costed && items.length === 0) return null;
+    const isCollapsed = collapsed.has(sec.id);
+    return (
+      <li key={sec.id}>
+        <span className="o-sec" onClick={() => toggleCollapsed(sec.id)}
+              style={{cursor:'pointer',userSelect:'none'}}>
+          {isCollapsed ? '▸' : '▾'} {sec.name}
+        </span>
+        <span className="count">({items.length}{costed && items.length !== sec.items.length ? ` of ${sec.items.length}` : ''})</span>
+        {!isCollapsed && items.length > 0 && (
+          <ul>
+            {items.map(it => (
+              <li key={it.id} className="o-item">
+                {it.name}
+                {!costed && renderConds(it.conditions)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  };
+
+  const renderGroup = (grp) => {
+    if (grp.kind === 'flags') {
+      return (
+        <li key={grp.id}>
+          <span className="o-grp" style={{color:'#a371f7'}}>
+            ☑ {grp.label} <span style={{fontSize:'10px',background:'rgba(163,113,247,.18)',padding:'1px 6px',borderRadius:'8px',marginLeft:'4px',fontWeight:400}}>flags</span>
+          </span>
+          {grp.options.length === 0
+            ? <ul><li className="o-empty">— no flags —</li></ul>
+            : <ul>{grp.options.map(opt => {
+                const on = !!bodyOpts[opt.name];
+                const showState = costed;
+                return (
+                  <li key={opt.id} style={{color: showState && on ? 'var(--text)' : 'var(--text-dim)', fontSize:'12px'}}>
+                    {showState ? (on ? '☑' : '☐') : '☐'} {opt.name}
+                    {showState && on && <span style={{color:'#3fb950',fontSize:'10px',marginLeft:'6px'}}>ON</span>}
+                  </li>
+                );
+              })}</ul>}
+        </li>
+      );
+    }
+    if (grp.kind === 'always') {
+      const rows = grp.sections.map(renderSection).filter(Boolean);
+      return (
+        <li key={grp.id}>
+          <span className="o-grp">▼ {grp.label}</span>
+          {rows.length === 0
+            ? <ul><li className="o-empty">— nothing included —</li></ul>
+            : <ul>{rows}</ul>}
+        </li>
+      );
+    }
+    // choice group
+    if (costed) {
+      const opt = grp.options.find(o => o.id === chosen[grp.id]);
+      if (!opt) return (
+        <li key={grp.id}>
+          <span className="o-grp choice">◇ {grp.label}</span>
+          <ul><li className="o-empty">— no option selected —</li></ul>
+        </li>
+      );
+      const rows = opt.sections.map(renderSection).filter(Boolean);
+      return (
+        <li key={grp.id}>
+          <span className="o-grp choice">◇ {grp.label} → <span className="o-opt">{opt.name}</span></span>
+          {rows.length === 0
+            ? <ul><li className="o-empty">— nothing included —</li></ul>
+            : <ul>{rows}</ul>}
+        </li>
+      );
+    }
+    return (
+      <li key={grp.id}>
+        <span className="o-grp choice">◇ {grp.label}<span className="pick">pick one</span></span>
+        {grp.options.length === 0
+          ? <ul><li className="o-empty">— no options —</li></ul>
+          : <ul>
+              {grp.options.map(opt => (
+                <li key={opt.id}>
+                  <span className="o-opt">
+                    {opt.id === grp.defaultId ? '◉' : '○'} {opt.name}
+                    {opt.id === grp.defaultId && <span className="star">★ default</span>}
+                  </span>
+                  {opt.sections.length === 0
+                    ? <ul><li className="o-empty">— no sections —</li></ul>
+                    : <ul>{opt.sections.map(renderSection).filter(Boolean)}</ul>}
+                </li>
+              ))}
+            </ul>}
+      </li>
+    );
+  };
+
+  // Show every body option in the panel so the costed-preview toggles match the
+  // tree's flags/bundles. (Previously this was filtered to options actually
+  // referenced by item conditions, which hid togglable body options like
+  // ALU EXTRUSION FLOOR that no item conditions on yet.)
+  const referencedOpts = useMemo(() => [...(data.bodyOptions || [])], [data]);
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onClose(); }}>
+      <div className="cfg-modal cfg-preview-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">📋 Preview — {data.trailerName}</span>
+          <button className="btn btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+
+          <div style={{display:'flex',gap:'14px',alignItems:'center',marginBottom:'12px',padding:'8px 10px',background:'var(--bg-input)',borderRadius:'4px'}}>
+            <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer',fontSize:'13px'}}>
+              <input type="radio" checked={mode === 'full'} onChange={() => setMode('full')} />
+              Full structure
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer',fontSize:'13px'}}>
+              <input type="radio" checked={mode === 'costed'} onChange={() => setMode('costed')} />
+              As costed (current selections)
+            </label>
+          </div>
+
+          {costed && (
+            <div style={{marginBottom:'14px',padding:'10px 12px',border:'1px solid var(--border)',borderRadius:'4px'}}>
+              <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+                Selections
+              </div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:'10px',marginBottom:'8px'}}>
+                {data.groups.filter(g => g.kind === 'choice').map(g => (
+                  <label key={g.id} style={{fontSize:'12px',display:'inline-flex',alignItems:'center',gap:'6px'}}>
+                    {g.label}:
+                    <select value={chosen[g.id] || ''} onChange={(e) => setChosen({...chosen, [g.id]: e.target.value})}
+                            style={{background:'var(--bg-panel)',border:'1px solid var(--border)',color:'var(--text)',padding:'3px 6px',borderRadius:'3px',fontSize:'12px'}}>
+                      {g.options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {referencedOpts.length > 0 && (
+                <>
+                  <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'4px',marginTop:'6px'}}>
+                    Body option toggles
+                  </div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'10px 14px'}}>
+                    {referencedOpts.map(o => (
+                      <label key={o} style={{fontSize:'11px',display:'inline-flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
+                        <input type="checkbox" checked={!!bodyOpts[o]} onChange={(e) => setBodyOpts(prev => ({...prev, [o]: e.target.checked}))} />
+                        {o}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <div style={{display:'flex',alignItems:'center',gap:'10px',margin:'0 0 10px'}}>
+            <p style={{margin:0,fontSize:'12px',color:'var(--text-dim)',flex:1}}>
+              {costed
+                ? 'Only items that would actually appear in the BOM given the selections above.'
+                : 'Read-only outline of every group, option, section and item. No prices, formulas or quantities.'
+              }
+            </p>
+            <button className="cfg-icon-btn" style={{fontSize:'11px',padding:'3px 8px',border:'1px solid var(--border)',borderRadius:'3px'}} onClick={collapseAll}>Collapse all</button>
+            <button className="cfg-icon-btn" style={{fontSize:'11px',padding:'3px 8px',border:'1px solid var(--border)',borderRadius:'3px'}} onClick={expandAll}>Expand all</button>
+          </div>
+
+          <div className="cfg-outline">
+            <ul>
+              {data.groups.map(renderGroup)}
+              {!costed && data.unassigned && data.unassigned.length > 0 && (
+                <li>
+                  <span className="o-grp" style={{color:'#f0a500'}}>⚠ Unassigned</span>
+                  <ul>{data.unassigned.map(renderSection)}</ul>
+                </li>
+              )}
+            </ul>
+          </div>
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-primary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveFlagToGroupModal({ target, data, onConfirm, onCancel }) {
+  // target: { fromGroupId, masterId, name }   — the flag being moved
+
+  // Find the current group's real DB id — the tree carries dbGroupId on every
+  // top-level group object so we don't need fragile id-string parsing.
+  const currentGroup = (data.groups || []).find(g => g.id === target.fromGroupId);
+  const currentDbGroupId = currentGroup?.dbGroupId ?? null;
+
+  // Build a lookup of masterId → option name for every gate option so we can
+  // annotate nested flag groups with their parent option.
+  const optNameByMasterId = {};
+  (data.groups || []).forEach(g => {
+    (g.options || []).forEach(opt => {
+      const m = /^opt-m(\d+)$/.exec(opt.id || '');
+      if (m) optNameByMasterId[parseInt(m[1], 10)] = opt.name;
+    });
+  });
+
+  // Use the server-side catalog (availableFlagGroups) so nested flag groups
+  // like "FLOOR TYPE TOPPING" (which live under a gate option and are therefore
+  // not in data.groups as top-level entries) are included as valid targets.
+  const allFlagGroups = (data.availableFlagGroups || [])
+    .filter(g => g.dbGroupId && g.dbGroupId !== currentDbGroupId)
+    .map(g => ({
+      dbGroupId: g.dbGroupId,
+      label: g.parentOptionMasterId
+        ? `${g.name}  ↳ sub-area of "${optNameByMasterId[g.parentOptionMasterId] || 'option ' + g.parentOptionMasterId}"`
+        : g.name,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const [mode, setMode] = useState(allFlagGroups.length ? 'existing' : 'new');
+  const [newName, setNewName] = useState('New flag group');
+  const [chosenDbGroupId, setChosenDbGroupId] = useState(allFlagGroups[0]?.dbGroupId ?? '');
+
+  // Other independent flags in the SAME source group that the user might want
+  // to bring along.
+  const sourceGroup = (data.groups || []).find(g => g.id === target.fromGroupId);
+  const candidates = sourceGroup
+    ? sourceGroup.options.filter(o => o.id !== `flag-m${target.masterId}`)
+    : [];
+  const [alsoIds, setAlsoIds] = useState(() => new Set());
+  const toggleAlso = (id) => setAlsoIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const submit = () => {
+    // Use dbGroupId directly — no more fragile id-string parsing.
+    const targetGroup = mode === 'new'
+      ? { newName: (newName || '').trim() }
+      : { existingId: chosenDbGroupId };
+    onConfirm({
+      flagMasterIds: [target.masterId, ...[...alsoIds].map(treeId => {
+        const m = /^flag-m(\d+)$/.exec(treeId);
+        return m ? parseInt(m[1], 10) : null;
+      }).filter(x => x != null)],
+      targetGroup,
+    });
+  };
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal cfg-preview-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">📂 Move flag to a flag group — "{target.name}"</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+          <p style={{margin:'0 0 12px',fontSize:'12px',color:'var(--text-dim)'}}>
+            Reparents the flag under a different flag group — including sub-area groups nested under a gate option.
+          </p>
+
+          <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+            Target flag group
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+            <input type="radio" checked={mode === 'new'} onChange={() => setMode('new')} />
+            <span>+ Create new flag group named</span>
+            {mode === 'new' && (
+              <input className="cfg-rename-input" style={{flex:1,marginLeft:'8px'}}
+                     value={newName} onChange={(e) => setNewName(e.target.value)}
+                     placeholder='e.g. "Floor finishes"' />
+            )}
+          </label>
+          {allFlagGroups.length > 0 && (
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+              <input type="radio" checked={mode === 'existing'} onChange={() => setMode('existing')} />
+              <span>Move into existing flag group:</span>
+              <select disabled={mode !== 'existing'} value={chosenDbGroupId}
+                      onChange={(e) => setChosenDbGroupId(parseInt(e.target.value, 10))}
+                      style={{background:'var(--bg-input)',border:'1px solid var(--border)',color:'var(--text)',padding:'3px 8px',borderRadius:'3px',fontSize:'12px'}}>
+                {allFlagGroups.map(g => <option key={g.dbGroupId} value={g.dbGroupId}>{g.label}</option>)}
+              </select>
+            </label>
+          )}
+
+          {candidates.length > 0 && (
+            <>
+              <div style={{borderTop:'1px solid var(--border)',margin:'14px 0 10px'}}></div>
+              <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+                Also move (optional)
+              </div>
+              <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>
+                Other flags in this group you might want to move together:
+              </div>
+              <div style={{maxHeight:'200px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'4px',padding:'6px 10px'}}>
+                {candidates.map(c => (
+                  <label key={c.id} style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'2px 0',fontSize:'12px'}}>
+                    <input type="checkbox" checked={alsoIds.has(c.id)} onChange={() => toggleAlso(c.id)} />
+                    <span>{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={submit}>Move</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveToBundleModal({ target, data, onConfirm, onCancel }) {
+  // target: { groupId, masterId, name }   — the flag being bundled
+  const flagsGroup = data.groups.find(g => g.id === target.groupId);
+  const existingBundles = (flagsGroup && flagsGroup.bundles) || [];
+
+  const [mode, setMode] = useState(existingBundles.length ? 'existing' : 'new');
+  const [newLabel, setNewLabel] = useState('New bundle');
+  const [chosenBundleId, setChosenBundleId] = useState(existingBundles[0]?.id || '');
+
+  // Pick the bundle's selection_group label (the part after " — ") for joining.
+  const labelForExistingBundle = (bundle) => {
+    if (!bundle) return '';
+    if (bundle.originSelectionGroup) return bundle.originSelectionGroup;
+    // Fallback: parse out the bit after the em-dash.
+    const dash = (bundle.label || '').split(' — ');
+    return dash.length >= 2 ? dash.slice(1).join(' — ') : bundle.label;
+  };
+
+  // Suggest other independent flags the user might want to bundle alongside.
+  const candidates = (flagsGroup ? flagsGroup.options.filter(o => o.id !== `flag-m${target.masterId}`) : []);
+  const [alsoBundleIds, setAlsoBundleIds] = useState(() => new Set());
+  const toggleAlso = (id) => {
+    setAlsoBundleIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const submit = () => {
+    let selectionGroup;
+    if (mode === 'existing') {
+      const b = existingBundles.find(x => x.id === chosenBundleId);
+      if (!b) return;
+      selectionGroup = labelForExistingBundle(b);
+    } else {
+      selectionGroup = (newLabel || '').trim();
+      if (!selectionGroup) return;
+    }
+    onConfirm({
+      flagMasterIds: [target.masterId, ...[...alsoBundleIds].map(treeId => {
+        const m = /^flag-m(\d+)$/.exec(treeId);
+        return m ? parseInt(m[1], 10) : null;
+      }).filter(x => x != null)],
+      bundleSelectionGroup: selectionGroup,
+    });
+  };
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal cfg-preview-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">⊞ Move flag to a bundle — "{target.name}"</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+          <p style={{margin:'0 0 12px',fontSize:'12px',color:'var(--text-dim)'}}>
+            Bundled flags become mutex with each other (radio buttons). Picking one in the costing automatically deselects the others.
+          </p>
+
+          <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+            Bundle
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+            <input type="radio" checked={mode === 'new'} onChange={() => setMode('new')} />
+            <span>+ Create new bundle named</span>
+            {mode === 'new' && (
+              <input className="cfg-rename-input" style={{flex:1,marginLeft:'8px'}}
+                     value={newLabel} onChange={(e) => setNewLabel(e.target.value)}
+                     placeholder="Bundle name (e.g. INSULATION)" />
+            )}
+          </label>
+          {existingBundles.length > 0 && (
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+              <input type="radio" checked={mode === 'existing'} onChange={() => setMode('existing')} />
+              <span>Move into existing bundle:</span>
+              <select disabled={mode !== 'existing'} value={chosenBundleId}
+                      onChange={(e) => setChosenBundleId(e.target.value)}
+                      style={{background:'var(--bg-input)',border:'1px solid var(--border)',color:'var(--text)',padding:'3px 8px',borderRadius:'3px',fontSize:'12px'}}>
+                {existingBundles.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </select>
+            </label>
+          )}
+
+          {candidates.length > 0 && (
+            <>
+              <div style={{borderTop:'1px solid var(--border)',margin:'14px 0 10px'}}></div>
+              <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+                Also move (optional)
+              </div>
+              <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>
+                Other flags in this group you might want in the same bundle:
+              </div>
+              <div style={{maxHeight:'200px',overflow:'auto',border:'1px solid var(--border)',borderRadius:'4px',padding:'6px 10px'}}>
+                {candidates.map(c => (
+                  <label key={c.id} style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'2px 0',fontSize:'12px'}}>
+                    <input type="checkbox" checked={alsoBundleIds.has(c.id)} onChange={() => toggleAlso(c.id)} />
+                    <span>{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={submit}>Move</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveToChoiceModal({ target, data, onConfirm, onCancel }) {
+  // target: { path: ['<always-group-id>', '<section-id>'], sec: {...} }
+  const choiceGroups = data.groups.filter(g => g.kind === 'choice');
+  const alwaysGroup = data.groups.find(g => g.id === target.path[0]);
+
+  // Default mode: create new if no existing choice groups, else use existing.
+  const [mode, setMode] = useState(choiceGroups.length === 0 ? 'new' : 'existing');
+  const [newChoiceLabel, setNewChoiceLabel] = useState('Door type');
+  const [chosenChoiceId, setChosenChoiceId] = useState(choiceGroups[0] ? choiceGroups[0].id : '');
+  const chosenChoice = choiceGroups.find(g => g.id === chosenChoiceId);
+  const [optMode, setOptMode] = useState('new');
+  const [newOptName, setNewOptName] = useState(target.sec.name);
+  const [chosenOptId, setChosenOptId] = useState(chosenChoice && chosenChoice.options[0] ? chosenChoice.options[0].id : '');
+
+  // Smart suggestion: other always-include sections sharing a name prefix get listed
+  // so the user can move related sections (e.g. DRD + DRD DOOR FITTINGS) in one go.
+  const prefix = (target.sec.name.split(/\s+/)[0] || '').toUpperCase();
+  const candidates = (alwaysGroup && alwaysGroup.kind === 'always'
+    ? alwaysGroup.sections.filter(s =>
+        s.id !== target.sec.id &&
+        prefix &&
+        (s.name.toUpperCase() === prefix || s.name.toUpperCase().startsWith(prefix + ' '))
+      )
+    : []);
+  const [alsoMoveIds, setAlsoMoveIds] = useState(() => new Set(candidates.map(s => s.id)));
+
+  const toggleAlsoMove = (id) => {
+    setAlsoMoveIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const submit = () => {
+    const choicePoint = mode === 'new'
+      ? { id: null, label: (newChoiceLabel || 'Choice point').trim() }
+      : { id: chosenChoiceId, label: chosenChoice ? chosenChoice.label : '' };
+    const option = optMode === 'new' || mode === 'new'
+      ? { id: null, name: (newOptName || target.sec.name).trim() }
+      : { id: chosenOptId, name: '' };
+    onConfirm({
+      sourcePath: target.path,
+      alsoMoveIds: [...alsoMoveIds],
+      choicePoint,
+      option,
+    });
+  };
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal cfg-preview-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">⇪ Move section to a choice point — "{target.sec.name}"</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+
+          <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+            Choice point (the gate)
+          </div>
+          <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+            <input type="radio" checked={mode === 'new'} onChange={() => setMode('new')} />
+            <span>+ Create new choice point</span>
+            {mode === 'new' && (
+              <input className="cfg-rename-input" style={{flex:1,marginLeft:'8px'}}
+                     value={newChoiceLabel} onChange={(e) => setNewChoiceLabel(e.target.value)} />
+            )}
+          </label>
+          {choiceGroups.length > 0 && (
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+              <input type="radio" checked={mode === 'existing'} onChange={() => setMode('existing')} />
+              <span>Move into existing:</span>
+              <select disabled={mode !== 'existing'} value={chosenChoiceId}
+                      onChange={(e) => { setChosenChoiceId(e.target.value); const g = choiceGroups.find(x => x.id === e.target.value); setChosenOptId(g && g.options[0] ? g.options[0].id : ''); }}
+                      style={{background:'var(--bg-input)',border:'1px solid var(--border)',color:'var(--text)',padding:'3px 8px',borderRadius:'3px',fontSize:'12px'}}>
+                {choiceGroups.map(g => <option key={g.id} value={g.id}>{g.label}</option>)}
+              </select>
+            </label>
+          )}
+
+          <div style={{borderTop:'1px solid var(--border)',margin:'14px 0 10px'}}></div>
+
+          <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+            Option (which branch holds the section)
+          </div>
+          {mode === 'existing' && chosenChoice && chosenChoice.options.length > 0 && (
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+              <input type="radio" checked={optMode === 'existing'} onChange={() => setOptMode('existing')} />
+              <span>Add to existing option:</span>
+              <select disabled={optMode !== 'existing'} value={chosenOptId} onChange={(e) => setChosenOptId(e.target.value)}
+                      style={{background:'var(--bg-input)',border:'1px solid var(--border)',color:'var(--text)',padding:'3px 8px',borderRadius:'3px',fontSize:'12px'}}>
+                {chosenChoice.options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </label>
+          )}
+          <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'4px 0'}}>
+            <input type="radio" checked={optMode === 'new' || mode === 'new'} onChange={() => setOptMode('new')} />
+            <span>+ Create new option named:</span>
+            {(optMode === 'new' || mode === 'new') && (
+              <input className="cfg-rename-input" style={{flex:1,marginLeft:'8px'}}
+                     value={newOptName} onChange={(e) => setNewOptName(e.target.value)} />
+            )}
+          </label>
+
+          {candidates.length > 0 && (
+            <>
+              <div style={{borderTop:'1px solid var(--border)',margin:'14px 0 10px'}}></div>
+              <div style={{fontSize:'10px',textTransform:'uppercase',color:'var(--text-dim)',letterSpacing:'1px',marginBottom:'6px'}}>
+                Related sections (move together)
+              </div>
+              <div style={{fontSize:'12px',color:'var(--text-dim)',marginBottom:'6px'}}>
+                These sections share the "{prefix}" prefix and may belong to the same option:
+              </div>
+              {candidates.map(s => (
+                <label key={s.id} style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',padding:'2px 0',fontSize:'12px'}}>
+                  <input type="checkbox" checked={alsoMoveIds.has(s.id)} onChange={() => toggleAlsoMove(s.id)} />
+                  <span>{s.name} <span style={{color:'var(--text-dim)'}}>({s.items.length} items)</span></span>
+                </label>
+              ))}
+            </>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" onClick={submit}>Move</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDelete({ target, onConfirm, onCancel }) {
+  // Section deletes get a choice; option/group deletes are info-only ("sections will move to Unassigned").
+  const isSection = target.kind === 'section' || target.kind === 'unassigned-section';
+  const itemCount = target.sec ? target.sec.items.length : 0;
+  const sectionCount = target.kind === 'option' ? (target.opt?.sections.length || 0)
+                     : target.kind === 'group'  ? (target.grp?.kind === 'always'
+                          ? target.grp.sections.length
+                          : (target.grp?.options || []).reduce((a, o) => a + o.sections.length, 0))
+                     : 0;
+  const [mode, setMode] = useState(target.kind === 'unassigned-section' ? 'destroy' : 'unassign');
+
+  // Preview: which trailers' Settings-page configurator drafts reference this
+  // section as a category? Only matters when items will be permanently deleted
+  // (mode='destroy', or the unassigned-section path which is always destroy) —
+  // unassign leaves the section in the DB so drafts stay valid.
+  const [usage, setUsage] = useState(null);
+  useEffect(() => {
+    if (!isSection) return;
+    const last = target.path && target.path[target.path.length - 1];
+    const m = typeof last === 'string' ? /^s(\d+)$/.exec(last) : null;
+    const sid = m ? parseInt(m[1], 10) : null;
+    if (sid == null) return;
+    let cancelled = false;
+    fetch(`/api/configurator/sections/${sid}/usage`, { credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (!cancelled && data) setUsage(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [target]);
+  const wouldDestroy = target.kind === 'unassigned-section' || mode === 'destroy';
+  const showSettingsWarning = wouldDestroy && usage && usage.draft_count > 0;
+
+  const title = target.kind === 'section' ? `Delete section "${target.name}"?`
+              : target.kind === 'unassigned-section' ? `Delete "${target.name}" permanently?`
+              : target.kind === 'option' ? `Delete option "${target.name}"?`
+              : target.kind === 'bundle' ? `Dissolve bundle "${target.name}"?`
+              : `Delete group "${target.name}"?`;
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onCancel(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">{title}</span>
+          <button className="btn btn-icon" onClick={onCancel}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+          {target.kind === 'section' && (
+            <>
+              <p style={{margin:'0 0 12px',fontSize:'13px'}}>
+                This section has <b>{itemCount}</b> item{itemCount === 1 ? '' : 's'}. What should happen to them?
+              </p>
+              <label style={{display:'flex',alignItems:'flex-start',gap:'8px',cursor:'pointer',padding:'6px 0'}}>
+                <input type="radio" checked={mode === 'unassign'} onChange={() => setMode('unassign')} />
+                <span>
+                  <b>Move items to Unassigned tray</b> <span style={{color:'var(--text-dim)'}}>(recommended)</span><br/>
+                  <span style={{fontSize:'12px',color:'var(--text-dim)'}}>You can restore the section later or delete it deliberately.</span>
+                </span>
+              </label>
+              <label style={{display:'flex',alignItems:'flex-start',gap:'8px',cursor:'pointer',padding:'6px 0'}}>
+                <input type="radio" checked={mode === 'destroy'} onChange={() => setMode('destroy')} />
+                <span>
+                  <b style={{color:'var(--red,#f85149)'}}>Delete items too</b><br/>
+                  <span style={{fontSize:'12px',color:'var(--text-dim)'}}>Permanent. The {itemCount} BOM line{itemCount === 1 ? '' : 's'} are gone.</span>
+                </span>
+              </label>
+            </>
+          )}
+          {target.kind === 'unassigned-section' && (
+            <p style={{margin:0,fontSize:'13px'}}>
+              Permanently delete this section and its <b>{itemCount}</b> item{itemCount === 1 ? '' : 's'}. This can't be undone.
+            </p>
+          )}
+          {(target.kind === 'option' || target.kind === 'group') && (
+            <p style={{margin:0,fontSize:'13px'}}>
+              {sectionCount > 0
+                ? <>The <b>{sectionCount}</b> section{sectionCount === 1 ? '' : 's'} below this {target.kind} will move to the <b>Unassigned</b> tray. No items are deleted — you can restore or delete each one explicitly.</>
+                : <>This {target.kind} has no sections. Removing it is safe.</>
+              }
+            </p>
+          )}
+          {target.kind === 'bundle' && (
+            <p style={{margin:0,fontSize:'13px'}}>
+              The <b>{target.bundle?.options?.length || 0}</b> option{(target.bundle?.options?.length === 1) ? '' : 's'} inside this bundle
+              ({(target.bundle?.options || []).map(o => o.name).join(', ')}) will become independent tick-boxes. No flags are deleted — only the radio-button mutex grouping is removed.
+            </p>
+          )}
+          {showSettingsWarning && (
+            <div style={{marginTop:'12px',padding:'10px 12px',background:'var(--orange-dim,#3a2a14)',border:'1px solid var(--orange,#f0a500)',borderRadius:'var(--radius)'}}>
+              <div style={{fontSize:'12px',fontWeight:700,color:'var(--orange,#f0a500)',marginBottom:'6px'}}>
+                ⚠ Used by Settings-page Explorer config
+              </div>
+              <div style={{fontSize:'12px',color:'var(--text-head)',lineHeight:'1.5'}}>
+                This category appears in <b>{usage.draft_count}</b> trailer{usage.draft_count===1?'':'s'}' Settings config
+                ({usage.node_count} node{usage.node_count===1?'':'s'} total). Those references will be removed automatically:
+              </div>
+              <ul style={{margin:'6px 0 0',padding:'0 0 0 18px',fontSize:'11px',color:'var(--text-dim)',fontFamily:'var(--font-mono)'}}>
+                {usage.drafts_affected.slice(0, 8).map(d => (
+                  <li key={d.trailer_type_id}>{d.trailer_name} — {d.node_count} node{d.node_count===1?'':'s'}</li>
+                ))}
+                {usage.drafts_affected.length > 8 && (
+                  <li style={{listStyle:'none'}}>… and {usage.drafts_affected.length - 8} more</li>
+                )}
+              </ul>
+              <div style={{fontSize:'10px',color:'var(--text-dim)',marginTop:'6px',fontStyle:'italic'}}>
+                Existing snapshots are not modified — restoring an older snapshot of one of these trailers stays safe (orphaned category nodes are dropped on restore with a notice).
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onCancel}>Cancel</button>
+          <button className="btn btn-primary" style={{background: mode === 'destroy' ? 'var(--red,#f85149)' : ''}}
+                  onClick={() => onConfirm(mode)}>
+            {target.kind === 'bundle' ? 'Dissolve' : (mode === 'destroy' ? 'Delete permanently' : 'Delete')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Returns a Set<string> of flag names that are currently ON in flagState.
+// Mirrors buildActiveRuleNames from body_type_configurator_rules.md.
+function buildActiveNames(flagState) {
+  if (!flagState) return new Set();
+  return new Set(Object.keys(flagState).filter(k => flagState[k]));
+}
+
+// Pure rule evaluator — mirrors evaluateRule from body_type_configurator_rules.md.
+// rule: { mode?, conditions? }   activeNames: Set<string>
+// Modes: always_include | include | exclude | always_exclude
+function evaluateRule(rule, activeNames) {
+  const mode = (rule && rule.mode) || 'include';
+  if (mode === 'always_exclude') return false;
+  if (mode === 'always_include') return true;
+  const conds = (rule && rule.conditions) || [];
+  if (conds.length === 0) return true;
+  const allMet = conds.every(c => {
+    const isOn = activeNames.has(c.option);
+    return c.equals === 'Y' ? isOn : !isOn;
+  });
+  return mode === 'exclude' ? !allMet : allMet;
+}
+
+// Convenience wrapper used by ItemRow and StructurePreview.
+function itemPassesFlags(item, flagState) {
+  return evaluateRule(
+    { mode: item.conditionMode, conditions: item.conditions },
+    buildActiveNames(flagState)
+  );
+}
+
+function SectionCard({ section, master, onEditConditions, askMoveOneItem, askAddItemAsFlag, flagState, collapsed, onToggleCollapse }) {
+  return (
+    <div style={{marginBottom: collapsed ? '4px' : '18px', paddingBottom: collapsed ? '4px' : '14px', borderBottom:'1px solid var(--border)'}}>
+      <div className="cfg-section-hdr"
+           style={{cursor:'pointer', padding: collapsed ? '4px 0' : '', marginBottom: collapsed ? '4px' : ''}}
+           onClick={onToggleCollapse}>
+        <span style={{opacity:.6,fontSize:'11px',width:'12px',display:'inline-block'}}>{collapsed ? '▸' : '▾'}</span>
+        <span className="name" style={{fontSize: collapsed ? '12px' : '15px', fontWeight: collapsed ? 500 : 600}}>{section.name}</span>
+        <span style={{color:'var(--text-dim)',fontSize:'11px'}}>({section.items.length})</span>
+        {master && (
+          <span className="master" onClick={(e) => e.stopPropagation()}>
+            master toggle:
+            <select defaultValue={master}>
+              <option value={master}>{master}</option>
+            </select>
+          </span>
+        )}
+      </div>
+      {!collapsed && (
+        <table className="cfg-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Qty formula</th>
+              <th className="center">Unit price</th>
+              <th>Inclusion</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {section.items.map(it => (
+              <ItemRow key={it.id} item={it} onEdit={() => onEditConditions(it)}
+                       onMove={askMoveOneItem ? () => askMoveOneItem({ itemId: it.id, itemName: it.name, currentSectionTreeId: section.id }) : undefined}
+                       onContextAddAsFlag={askAddItemAsFlag}
+                       included={itemPassesFlags(it, flagState)} />
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function flattenSections(data, choiceSelection) {
+  // Returns [{ section, master, path }, ...] for sections that are currently active.
+  // For 'always' groups: every section.
+  // For 'choice' groups: only the section list under the actively-selected option
+  // (defaults to the group's ★ default if no selection set).
+  const out = [];
+  for (const grp of data.groups) {
+    if (grp.kind === 'always') {
+      for (const s of grp.sections) out.push({ section: s, master: null, path: [grp.id, s.id] });
+    } else if (grp.kind === 'choice') {
+      const activeOptId = (choiceSelection && choiceSelection[grp.id]) || grp.defaultId;
+      const opt = grp.options.find(o => o.id === activeOptId);
+      if (!opt) continue;
+      for (const s of opt.sections) {
+        out.push({ section: s, master: opt.name, path: [grp.id, opt.id, s.id] });
+      }
+    }
+  }
+  return out;
+}
+
+function Detail({ data, selected, onEditConditions, askMoveOneItem, askAddItemAsFlag, flagState, choiceSelection, askNotice, viewMode, setViewMode }) {
+  const [collapsedAll, setCollapsedAll] = useState(() => new Set());
+  const toggleCollapsedAll = (sid) => setCollapsedAll(prev => {
+    const n = new Set(prev); n.has(sid) ? n.delete(sid) : n.add(sid); return n;
+  });
+  const allSecs = useMemo(() => flattenSections(data, choiceSelection), [data, choiceSelection]);
+  const collapseAllSecs = () => setCollapsedAll(new Set(allSecs.map(x => x.section.id)));
+  const expandAllSecs   = () => setCollapsedAll(new Set());
+
+  // Single-section view ────────────────────────────────────────────────
+  const section = findSection(data, selected);
+  const master  = masterToggleFor(data, selected);
+  const paneHead = (
+    <div className="cfg-pane-head">
+      <span>Section detail</span>
+      <span style={{display:'inline-flex',alignItems:'center',gap:'8px',fontSize:'10px'}}>
+        <label style={{display:'inline-flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
+          <input type="radio" checked={viewMode === 'single'} onChange={() => setViewMode('single')} />
+          Selected
+        </label>
+        <label style={{display:'inline-flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
+          <input type="radio" checked={viewMode === 'all'} onChange={() => {
+            // Default to "everything collapsed" when entering All sections — the
+            // user wants a scannable overview, not 22 expanded tables.
+            setCollapsedAll(new Set(allSecs.map(x => x.section.id)));
+            setViewMode('all');
+          }} />
+          All sections
+        </label>
+        {viewMode === 'all' && (
+          <>
+            <button className="cfg-icon-btn" style={{padding:'2px 6px',border:'1px solid var(--border)',borderRadius:'3px'}} onClick={collapseAllSecs}>Collapse all</button>
+            <button className="cfg-icon-btn" style={{padding:'2px 6px',border:'1px solid var(--border)',borderRadius:'3px'}} onClick={expandAllSecs}>Expand all</button>
+          </>
+        )}
+        <button className="cfg-add-btn" style={{display:'inline-block',width:'auto',padding:'4px 10px',marginTop:0}}
+                onClick={() => askNotice && askNotice({
+                  title: 'Add item',
+                  body: 'Item picker not built yet — Phase 2 will hook this into the materials list and create a new BOM row in the selected section.',
+                  tone: 'info',
+                })}>
+          + Add item
+        </button>
+      </span>
+    </div>
+  );
+
+  if (viewMode === 'single') {
+    if (!section) {
+      return (
+        <div className="cfg-pane">
+          {paneHead}
+          <div className="cfg-pane-body" style={{display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-dim)',fontStyle:'italic'}}>
+            Pick a section on the left.
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="cfg-pane">
+        {paneHead}
+        <div className="cfg-pane-body">
+          <div className="cfg-section-hdr">
+            <span className="name">{section.name}</span>
+            {master && (
+              <span className="master">
+                master toggle:
+                <select defaultValue={master}>
+                  <option value={master}>{master}</option>
+                </select>
+              </span>
+            )}
+            <label className="default">
+              <input type="checkbox" defaultChecked={true} />
+              default selected
+            </label>
+          </div>
+          <table className="cfg-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty formula</th>
+                <th className="center">Unit price</th>
+                <th>Inclusion</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {section.items.map(it => (
+                <ItemRow key={it.id} item={it} onEdit={() => onEditConditions(it)}
+                         onMove={askMoveOneItem ? () => askMoveOneItem({ itemId: it.id, itemName: it.name, currentSectionTreeId: section.id }) : undefined}
+                         onContextAddAsFlag={askAddItemAsFlag}
+                         included={itemPassesFlags(it, flagState)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  // viewMode === 'all' — every section stacked, each individually collapsible.
+  return (
+    <div className="cfg-pane">
+      {paneHead}
+      <div className="cfg-pane-body">
+        {allSecs.length === 0 && (
+          <div style={{color:'var(--text-dim)',fontStyle:'italic',padding:'12px'}}>
+            No sections included for the current selection. Pick a different option on the left to change which branches render.
+          </div>
+        )}
+        {allSecs.map(({ section: sec, master: m }) => (
+          <SectionCard key={sec.id} section={sec} master={m}
+                       onEditConditions={onEditConditions}
+                       askMoveOneItem={askMoveOneItem}
+                       askAddItemAsFlag={askAddItemAsFlag}
+                       flagState={flagState}
+                       collapsed={collapsedAll.has(sec.id)}
+                       onToggleCollapse={() => toggleCollapsedAll(sec.id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ItemRow({ item, onEdit, onMove, included, onContextAddAsFlag }) {
+  const mode = item.conditionMode || 'include';
+  const isAlwaysExclude = mode === 'always_exclude';
+  const hasConds = item.conditions && item.conditions.length > 0;
+  const isAlwaysInclude = !isAlwaysExclude && !hasConds;
+  const excluded = isAlwaysExclude || (hasConds && included === false);
+  const rowStyle = excluded
+    ? { opacity: 0.45, textDecoration: 'line-through', textDecorationColor: 'var(--text-dim)' }
+    : {};
+  const chipPrefix = mode === 'exclude' ? 'exclude when' : 'when';
+  // Right-click on the item row opens the "Add as flag" dialog. We use
+  // onContextMenu (native right-click) and preventDefault so the browser's
+  // own context menu doesn't pop up.
+  const handleContext = (e) => {
+    if (!onContextAddAsFlag) return;
+    e.preventDefault();
+    onContextAddAsFlag({ itemId: item.id, itemName: item.name });
+  };
+  return (
+    <tr style={rowStyle} onContextMenu={handleContext}
+        title={onContextAddAsFlag ? 'Right-click to add this item as a flag' : undefined}>
+      <td>{item.name}</td>
+      <td className="mono">{item.qty}</td>
+      <td className="center mono">R {item.unitPrice.toFixed(2)}</td>
+      <td style={{textDecoration:'none'}}>
+        {isAlwaysInclude && (
+          <span><span className="cfg-dot on"></span>&nbsp;&nbsp;<span style={{color:'var(--text-dim)'}}>always</span></span>
+        )}
+        {isAlwaysExclude && (
+          <span style={{color:'var(--red,#f85149)',fontSize:'11px'}}>⛔ always excluded</span>
+        )}
+        {hasConds && (
+          <span>
+            {item.conditions.map((c, i) => (
+              <span key={i} className="cfg-cond-chip">{chipPrefix} {c.option} = {c.equals}</span>
+            ))}
+            {included === true && <span style={{color:'#3fb950',fontSize:'11px',marginLeft:'4px'}}>✓ included</span>}
+            {included === false && <span style={{color:'var(--text-dim)',fontSize:'11px',marginLeft:'4px'}}>excluded</span>}
+          </span>
+        )}
+      </td>
+      <td style={{textDecoration:'none',whiteSpace:'nowrap'}}>
+        <a className="cfg-edit-link" onClick={onEdit}>edit</a>
+        {onMove && (
+          <>
+            <span style={{margin:'0 4px',color:'var(--text-dim)'}}>·</span>
+            <a className="cfg-edit-link" onClick={onMove}>move</a>
+          </>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function ConditionEditor({ item, options, onSave, onClose }) {
+  // 'always_include' | 'include_when' | 'exclude_when' | 'always_exclude'
+  const initialMode =
+      item.conditionMode === 'always_exclude' ? 'always_exclude'
+    : (item.conditions && item.conditions.length > 0)
+        ? (item.conditionMode === 'exclude' ? 'exclude_when' : 'include_when')
+        : 'always_include';
+  const [mode, setMode] = useState(initialMode);
+  const [conds, setConds] = useState(() => [...(item.conditions || [])]);
+
+  const pickMode = (next) => {
+    setMode(next);
+    if (next === 'always_include' || next === 'always_exclude') setConds([]);
+    else if (conds.length === 0) setConds([{option: options[0], equals: 'Y'}]);
+  };
+
+  const showsRules = (mode === 'include_when' || mode === 'exclude_when');
+  const submitDisabled = showsRules && conds.length === 0;
+
+  // What we send to the server for each picked mode:
+  //   always_include -> { conditions: [], mode: 'include' }     → stored as NULL
+  //   include_when   -> { conditions: [...], mode: 'include' }  → stored as legacy list
+  //   exclude_when   -> { conditions: [...], mode: 'exclude' }  → stored as {mode,all}
+  //   always_exclude -> { conditions: [], mode: 'always_exclude' } → stored as {mode}
+  const submit = () => {
+    let payloadMode, payloadConds;
+    if (mode === 'always_include') { payloadMode = 'include'; payloadConds = []; }
+    else if (mode === 'include_when') { payloadMode = 'include'; payloadConds = conds; }
+    else if (mode === 'exclude_when') { payloadMode = 'exclude'; payloadConds = conds; }
+    else { payloadMode = 'always_exclude'; payloadConds = []; }
+    onSave(item, payloadConds, payloadMode);
+  };
+
+  return (
+    <div className="cfg-modal-bd" onClick={(e) => { if (e.target.className === 'cfg-modal-bd') onClose(); }}>
+      <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="cfg-modal-hd">
+          <span className="title">Inclusion rules — {item.name}</span>
+          <button className="btn btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="cfg-modal-bd-body">
+          <div style={{marginBottom:'14px'}}>
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer'}}>
+              <input type="radio" checked={mode === 'always_include'} onChange={() => pickMode('always_include')} />
+              <span>Always include in BOM</span>
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',marginTop:'6px'}}>
+              <input type="radio" checked={mode === 'always_exclude'} onChange={() => pickMode('always_exclude')} />
+              <span style={{color:'var(--red,#f85149)'}}>Always exclude from BOM <span style={{color:'var(--text-dim)',fontSize:'11px'}}>(never shown)</span></span>
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',marginTop:'6px'}}>
+              <input type="radio" checked={mode === 'include_when'} onChange={() => pickMode('include_when')} />
+              <span>Only include when… <span style={{color:'var(--text-dim)',fontSize:'11px'}}>(all conditions must be true)</span></span>
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',marginTop:'6px'}}>
+              <input type="radio" checked={mode === 'exclude_when'} onChange={() => pickMode('exclude_when')} />
+              <span>Don't include when… <span style={{color:'var(--text-dim)',fontSize:'11px'}}>(all conditions must be true)</span></span>
+            </label>
+          </div>
+
+          {showsRules && (
+            <div style={{paddingLeft:'24px',borderLeft:`2px solid ${mode === 'exclude_when' ? 'var(--red,#f85149)' : 'var(--border)'}`}}>
+              {conds.map((c, idx) => (
+                <div key={idx} className="cfg-cond-row">
+                  <span className="when">{idx === 0 ? 'when' : 'and'}</span>
+                  <select value={c.option} onChange={(e) => {
+                    const next = [...conds]; next[idx] = {...c, option: e.target.value}; setConds(next);
+                  }}>
+                    {options.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                  <span className="when">is</span>
+                  <select value={c.equals} onChange={(e) => {
+                    const next = [...conds]; next[idx] = {...c, equals: e.target.value}; setConds(next);
+                  }}>
+                    <option value="Y">selected</option>
+                    <option value="N">not selected</option>
+                  </select>
+                  <button className="x" onClick={() => setConds(conds.filter((_, i) => i !== idx))}>✕</button>
+                </div>
+              ))}
+              <button className="cfg-add-btn" style={{marginTop:'8px'}}
+                onClick={() => setConds([...conds, {option: options[0], equals: 'Y'}])}>
+                + Add condition
+              </button>
+              {mode === 'exclude_when' && conds.length > 0 && (
+                <div style={{marginTop:'8px',fontSize:'11px',color:'var(--text-dim)'}}>
+                  Item is hidden from the BOM whenever every condition above is true; shown otherwise.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="cfg-modal-ft">
+          <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={submitDisabled} onClick={submit}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const newId = (prefix) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+
+function App({ data, setData, loadState }) {
+  const [selected, setSelected] = useState([]);
+  const [editingItem, setEditingItem] = useState(null);
+
+  // When new tree data arrives, jump selection to the first always-include section.
+  React.useEffect(() => {
+    if (!data || !data.groups) return;
+    const g0 = data.groups.find(g => g.kind === 'always');
+    if (g0 && g0.sections.length) setSelected([g0.id, g0.sections[0].id]);
+    else setSelected([]);
+  }, [data && data.trailerId]);
+  const [renaming, setRenaming] = useState(null);     // string key (path joined or group id)
+  const [pendingDelete, setPendingDelete] = useState(null);  // { kind, path, name, sec/opt/grp }
+  const [pendingMove, setPendingMove] = useState(null);      // { path, sec }
+  const [pendingBundle, setPendingBundle] = useState(null);  // { groupId, masterId, name }
+  const [pendingAddUnder, setPendingAddUnder] = useState(null); // { grpId, optId, optName, optMasterId }
+  const [pendingAddFlag, setPendingAddFlag] = useState(null);   // { groupId, groupLabel, dbGroupId }
+  const [pendingMoveItems, setPendingMoveItems] = useState(null); // { sectionTreeId, sectionDbId, sectionName }
+  const [pendingAddItemAsFlag, setPendingAddItemAsFlag] = useState(null); // { itemId, itemName }
+  const [pendingMoveOneItem, setPendingMoveOneItem] = useState(null); // { itemId, itemName, currentSectionTreeId }
+  const [pendingFlagMove, setPendingFlagMove] = useState(null);  // { fromGroupId, masterId, name }
+  const [showingPreview, setShowingPreview] = useState(false);
+  const [showingSnapshots, setShowingSnapshots] = useState(false);
+  // Active selection for each choice-point group (Door type, etc). Distinct from
+  // data.<group>.defaultId — that's persistent (★), this is the transient pick the
+  // user clicks to preview a different branch.
+  const [choiceSelection, setChoiceSelection] = useState({});
+  // Right-pane view mode. Lifted from Detail so option clicks in the tree can
+  // switch to "all sections" when a user wants to browse everything under the
+  // picked gate option.
+  const [viewMode, setViewMode] = useState('single');  // 'single' | 'all'
+  // In-app modals (replaces native alert/prompt — see memory feedback_no_native_dialogs).
+  const [inputModal, setInputModal] = useState(null);     // { title, label, defaultValue, placeholder, submitLabel, onSubmit }
+  const [noticeModal, setNoticeModal] = useState(null);   // { title, body, tone }
+  const [confirmModal, setConfirmModal] = useState(null);  // { title, body, tone, confirmLabel, cancelLabel, _resolve }
+  const askInput  = useCallback((opts) => setInputModal(opts), []);
+  const askNotice = useCallback((opts) => setNoticeModal(opts), []);
+  // Promise-based yes/no confirm — resolves true on confirm, false on cancel.
+  const askConfirm = useCallback((opts) => new Promise(resolve => {
+    setConfirmModal({ ...opts, _resolve: resolve });
+  }), []);
+  // Shared flag state — drives tree checkboxes, BOM row inclusion, and costed-preview.
+  const [flagState, setFlagState] = useState({});
+  const toggleFlag = useCallback((name) => {
+    setFlagState(prev => ({ ...prev, [name]: !prev[name] }));
+  }, []);
+  // Pick-one bundles: clicking one option turns sibling names off and the chosen one on.
+  const selectInBundle = useCallback((bundle, optName) => {
+    setFlagState(prev => {
+      const next = { ...prev };
+      for (const o of bundle.options) next[o.name] = (o.name === optName);
+      return next;
+    });
+  }, []);
+  // Auto-bundle: any flag in a flags-group with style='radio' is mutex with siblings
+  // of the same style in that same group. Clicking selects this one, turns the rest off.
+  const selectRadioFlag = useCallback((group, optName) => {
+    setFlagState(prev => {
+      const next = { ...prev };
+      for (const o of group.options) {
+        if ((o.style || 'tick') === 'radio') next[o.name] = (o.name === optName);
+      }
+      return next;
+    });
+  }, []);
+
+  // When data loads, seed the active choice-point selection from each group's
+  // ★ defaultId so the user's first view matches the costing default.
+  React.useEffect(() => {
+    if (!data || !data.groups) return;
+    const init = {};
+    for (const g of data.groups) {
+      if (g.kind === 'choice' && g.defaultId) init[g.id] = g.defaultId;
+    }
+    setChoiceSelection(init);
+  }, [data && data.trailerId]);
+
+  // Whenever the active choice-option changes, mirror it into flagState so any
+  // item condition that references the option name (e.g. "when DRD = Y") reacts
+  // in lockstep — same pattern bundles use via selectInBundle.
+  React.useEffect(() => {
+    if (!data || !data.groups) return;
+    setFlagState(prev => {
+      const next = { ...prev };
+      let dirty = false;
+      for (const g of data.groups) {
+        if (g.kind !== 'choice') continue;
+        const activeId = choiceSelection?.[g.id] || g.defaultId;
+        for (const o of g.options) {
+          const want = (o.id === activeId);
+          if (!!next[o.name] !== want) { next[o.name] = want; dirty = true; }
+        }
+      }
+      return dirty ? next : prev;
+    });
+  }, [choiceSelection, data]);
+
+  // When data loads, seed flagState with:
+  //   1. Persisted user state from localStorage (configurator is the master —
+  //      any prior tick / radio pick the user made stays put across reloads
+  //      AND is later read by the costings page).
+  //   2. Each bundle's defaultId for any bundle that didn't already get a
+  //      pick from the persisted state.
+  //   3. Each independent flag master's body_option_default (so a tick that
+  //      the DB says is on by default starts on even before the user clicks).
+  React.useEffect(() => {
+    if (!data || !data.groups) return;
+    let persisted = null;
+    try {
+      const raw = localStorage.getItem(`cfg_user_state_${data.trailerId}`);
+      if (raw) persisted = JSON.parse(raw);
+    } catch(_) {}
+    const persistedFlags = (persisted && persisted.flags) || {};
+    const persistedChoices = (persisted && persisted.choice) || {};
+    // Restore choice gates
+    if (Object.keys(persistedChoices).length) {
+      setChoiceSelection(prev => ({ ...prev, ...persistedChoices }));
+    }
+    // Restore flag ticks + bundle radios — persisted state wins; fall back to
+    // body_option_default for independent flags and to bundle defaultId.
+    setFlagState(prev => {
+      const next = { ...prev, ...persistedFlags };
+      const visit = (g) => {
+        if (!g) return;
+        if (g.kind === 'flags' || g.kind === undefined) {
+          (g.options || []).forEach(o => {
+            // Seed independent flags from default if neither persisted nor prev says anything.
+            if (next[o.name] === undefined) {
+              // Walk bodyOptions catalog to figure out body_option_default — not
+              // surfaced on the tree option directly, but we can read from the
+              // master via the tree's bodyOptions which only has names. We
+              // accept this as best-effort: independent flags missing from
+              // persisted state stay off. If you need them on, save once in
+              // the configurator and that "on" state will follow you.
+            }
+          });
+          (g.bundles || []).forEach(b => {
+            const anyOn = b.options.some(o => !!next[o.name]);
+            if (anyOn) return;
+            const def = b.options.find(o => o.id === b.defaultId) || b.options[0];
+            if (def) for (const o of b.options) next[o.name] = (o.name === def.name);
+          });
+        }
+        if (g.kind === 'choice') {
+          (g.options || []).forEach(o => (o.linkedFlagGroups || []).forEach(visit));
+        }
+      };
+      data.groups.forEach(visit);
+      return next;
+    });
+  }, [data && data.trailerId]);
+
+  // Persist the user's preview state (flag ticks + gate radios) to localStorage
+  // every time it changes. The costings page reads this so the costings panel
+  // always reflects what the user set up in the configurator (one-way flow).
+  React.useEffect(() => {
+    if (!data || data.trailerId == null) return;
+    try {
+      localStorage.setItem(`cfg_user_state_${data.trailerId}`, JSON.stringify({
+        flags: flagState,
+        choice: choiceSelection,
+      }));
+    } catch(_) {}
+  }, [flagState, choiceSelection, data && data.trailerId]);
+
+  // Finds a group in the live data — searches the top-level `d.groups` first,
+  // then every choice option's `linkedFlagGroups` (nested flag groups, Option A).
+  // Returns null if not found. Used by mutators so they keep working for both
+  // top-level and nested flag groups.
+  const findGroupInDraft = (d, groupId) => {
+    const top = d.groups.find(g => g.id === groupId);
+    if (top) return top;
+    for (const g of d.groups) {
+      if (g.kind !== 'choice') continue;
+      for (const o of (g.options || [])) {
+        const lg = (o.linkedFlagGroups || []).find(x => x.id === groupId);
+        if (lg) return lg;
+      }
+    }
+    return null;
+  };
+
+  const apply = useCallback((fn) => {
+    setData(prev => {
+      const draft = JSON.parse(JSON.stringify(prev));
+      if (!draft.unassigned) draft.unassigned = [];
+      fn(draft);
+      return draft;
+    });
+  }, []);
+
+  // Phase 2 write helper. Returns a promise that resolves to the JSON body or
+  // rejects with an Error carrying the server's detail message.
+  const writeApi = useCallback((method, path, body) => {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    const headers = { 'X-CSRF-Token': csrf };
+    if (body) headers['Content-Type'] = 'application/json';
+    return fetch(path, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    }).then(r => r.json().catch(() => ({})).then(j => {
+      if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+      return j;
+    }));
+  }, []);
+
+  // A section id is "s<numeric_db_id>" for rows loaded from the API; locally-
+  // created sections use "s-<random>" which we don't try to persist.
+  const dbSectionId = (treeId) => {
+    if (typeof treeId !== 'string') return null;
+    const m = /^s(\d+)$/.exec(treeId);
+    return m ? parseInt(m[1], 10) : null;
+  };
+  // Master id for an option/flag tree node: "opt-m<num>" or "flag-m<num>".
+  const dbMasterId = (treeId) => {
+    if (typeof treeId !== 'string') return null;
+    const m = /^(?:opt-m|flag-m)(\d+)$/.exec(treeId);
+    return m ? parseInt(m[1], 10) : null;
+  };
+  // Choice-group id for a tree node: "gate-<num>" (synthetic always/door-type
+  // /body-flags ids have no DB equivalent — those return null).
+  const dbGroupId = (treeId) => {
+    if (typeof treeId !== 'string') return null;
+    const m = /^gate-(\d+)$/.exec(treeId);
+    return m ? parseInt(m[1], 10) : null;
+  };
+
+  // Re-fetch the live tree and replace local state. Use after a successful write
+  // so client + server stay in sync (handles cascades like "delete option →
+  // sections appear in Unassigned").
+  const refetchTree = useCallback(() => {
+    const tid = (data && data.trailerId);
+    if (tid == null) return;
+    fetch(`/api/configurator/trailers/${tid}/tree`)
+      .then(r => r.ok ? r.json() : null)
+      .then(tree => { if (tree) { if (!tree.unassigned) tree.unassigned = []; setData(tree); } });
+  }, [data && data.trailerId, setData]);
+
+  const mut = useMemo(() => ({
+    addAlwaysGroup: () => {
+      askInput({
+        title: 'Add "always include" group',
+        label: 'Name for the new group:',
+        defaultValue: 'New group',
+        submitLabel: 'Add',
+        onSubmit: (label) => {
+          const norm = label.trim().toLowerCase();
+          const dup = data.groups.find(g => (g.label || '').trim().toLowerCase() === norm);
+          if (dup) {
+            askNotice({ title: 'Group already exists', tone: 'error',
+              body: `A group named "${dup.label}" already exists. Pick a different name or use the existing one.` });
+            return;
+          }
+          apply(d => d.groups.push({ id: newId('g'), kind: 'always', label, sections: [] }));
+        },
+      });
+    },
+    addChoiceGroup: () => {
+      askInput({
+        title: 'Add choice point (pick one)',
+        label: 'Name for the new choice point (e.g. "Door type"):',
+        defaultValue: 'New choice',
+        submitLabel: 'Add',
+        onSubmit: (label) => {
+          const norm = label.trim().toLowerCase();
+          const dup = data.groups.find(g => (g.label || '').trim().toLowerCase() === norm);
+          if (dup) {
+            askNotice({ title: 'Choice point already exists', tone: 'error',
+              body: `A choice point named "${dup.label}" already exists. Pick a different name or use the existing one — adding a duplicate would make the tree confusing.` });
+            return;
+          }
+          apply(d => d.groups.push({ id: newId('g'), kind: 'choice', label, options: [], defaultId: null, required: true }));
+        },
+      });
+    },
+    addOption: (groupId) => {
+      askInput({
+        title: 'Add option',
+        label: 'Option name (e.g. "ROLLER DOOR"):',
+        placeholder: 'Option name',
+        submitLabel: 'Add',
+        onSubmit: (name) => apply(d => {
+          const g = d.groups.find(x => x.id === groupId);
+          if (!g) return;
+          const o = { id: newId('o'), name, sections: [] };
+          g.options.push(o);
+          if (g.kind === 'choice' && !g.defaultId) g.defaultId = o.id;
+        }),
+      });
+    },
+    toggleFlagStyle: (groupId, optionId) => {
+      let groupSnapshot = null;
+      let originalStyle = null;
+      let nextStyle = null;
+      apply(d => {
+        // Try a real flag group first (top-level or nested under a gate option).
+        let g = findGroupInDraft(d, groupId);
+        let o = (g && g.kind === 'flags') ? g.options.find(x => x.id === optionId) : null;
+        // Fall back to section-bound flag lookup: groupId may be a section
+        // tree id (e.g. "s40") carrying the flag in sec.flags[].
+        if (!o) {
+          const visit = (sec) => {
+            const hit = (sec.flags || []).find(x => x.id === optionId);
+            if (hit && sec.id === groupId) {
+              g = { kind: 'flags', options: sec.flags };  // shape-compat snapshot
+              o = hit;
+            }
+          };
+          d.groups.forEach(grp => {
+            if (grp.kind === 'always') (grp.sections || []).forEach(visit);
+            else if (grp.kind === 'choice') (grp.options || []).forEach(co => (co.sections || []).forEach(visit));
+          });
+          (d.unassigned || []).forEach(visit);
+        }
+        if (!o) return;
+        originalStyle = o.style || 'tick';
+        nextStyle = (originalStyle === 'tick') ? 'radio' : 'tick';
+        o.style = nextStyle;
+        groupSnapshot = g;
+      });
+      // After flipping style: if we just made another radio and >1 radio is ON,
+      // keep one ON (preferring the option we just flipped if it was ON) and
+      // turn the rest off so the mutex constraint holds.
+      if (!groupSnapshot) return;
+      setFlagState(prev => {
+        const next = { ...prev };
+        const radios = groupSnapshot.options.filter(o => (o.style || 'tick') === 'radio');
+        const onRadios = radios.filter(o => next[o.name]);
+        if (onRadios.length > 1) {
+          // Prefer the option we just toggled, otherwise the first ON one.
+          const keepName = onRadios.find(o => o.id === optionId)?.name || onRadios[0].name;
+          for (const o of radios) next[o.name] = (o.name === keepName);
+        }
+        return next;
+      });
+
+      // Persist server-side. Tree-id format for flag options is "flag-m<masterId>";
+      // locally-added flags use "f-<random>" and aren't in the DB yet.
+      const m = /^flag-m(\d+)$/.exec(optionId);
+      if (!m || nextStyle == null) return;
+      const masterId = parseInt(m[1], 10);
+      writeApi('PATCH', `/api/configurator/flags/${masterId}/style`, { style: nextStyle })
+        .catch(err => {
+          askNotice({ title: 'Flag style save failed', tone: 'error',
+            body: `${err.message}\n\nReverting to ${originalStyle}.` });
+          apply(d => {
+            const g = findGroupInDraft(d, groupId);
+            const o = g && g.options.find(x => x.id === optionId);
+            if (o) o.style = originalStyle;
+          });
+        });
+    },
+    addFlag: (groupId) => {
+      askInput({
+        title: 'Add body flag',
+        label: 'Body flag name (e.g. "BAKERY BODY"):',
+        placeholder: 'Flag name',
+        submitLabel: 'Add',
+        onSubmit: (name) => {
+          const tid = (data && data.trailerId);
+          if (tid == null) return;
+          // Resolve the target group's DB id from the tree (top-level or nested).
+          let dbGroupId = null;
+          const probe = findGroupInDraft(data, groupId);
+          if (probe && probe.dbGroupId) dbGroupId = probe.dbGroupId;
+          if (!dbGroupId) {
+            askNotice({ title: 'Cannot add flag', tone: 'error',
+              body: 'The flag group has no server-side id yet. Save it first by reloading, or add the flag via the move-flags flow.' });
+            return;
+          }
+          writeApi('POST', `/api/configurator/trailers/${tid}/flag-groups/${dbGroupId}/flags`, { name })
+            .then(() => refetchTree())
+            .catch(err => askNotice({ title: 'Add flag failed', tone: 'error',
+              body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+        },
+      });
+    },
+    addFlagsGroup: () => {
+      askInput({
+        title: 'Add flags group',
+        label: 'Name for the flags group:',
+        defaultValue: '',
+        placeholder: 'e.g. "FLOOR THICKNESS"',
+        submitLabel: 'Add',
+        onSubmit: (label) => {
+          const tid = (data && data.trailerId);
+          if (tid == null) return;
+          writeApi('POST', `/api/configurator/trailers/${tid}/flag-groups`, { name: label })
+            .then(() => refetchTree())
+            .catch(err => askNotice({ title: 'Add flag group failed', tone: 'error',
+              body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+        },
+      });
+    },
+    addSection: (groupId, optionId) => {
+      askInput({
+        title: 'Add section',
+        label: 'Section name (e.g. "REAR"):',
+        placeholder: 'Section name',
+        submitLabel: 'Add',
+        onSubmit: (name) => apply(d => {
+          const g = d.groups.find(x => x.id === groupId);
+          if (!g) return;
+          const s = { id: newId('s'), name, items: [] };
+          if (g.kind === 'always') g.sections.push(s);
+          else {
+            const o = g.options.find(x => x.id === optionId);
+            if (o) o.sections.push(s);
+          }
+        }),
+      });
+    },
+    rename: (path, newLabel) => {
+      // Snapshot original label so we can revert on server failure.
+      let original = null;
+      let renamedGroupDbId = null;  // set when this is a flag-group rename we should persist
+      apply(d => {
+        const g = findGroupInDraft(d, path[0]);
+        if (!g) return;
+        if (path.length === 1) {
+          original = g.label;
+          g.label = newLabel;
+          // Flag groups carry the underlying BodyOptionGroup id; persist
+          // their renames server-side. Other group kinds (always/choice)
+          // stay client-only for now.
+          if (g.kind === 'flags' && g.dbGroupId) renamedGroupDbId = g.dbGroupId;
+          return;
+        }
+        if (g.kind === 'always') {
+          const s = g.sections.find(x => x.id === path[1]);
+          if (s) { original = s.name; s.name = newLabel; }
+        } else {
+          const o = g.options.find(x => x.id === path[1]);
+          if (!o) return;
+          if (path.length === 2) { original = o.name; o.name = newLabel; }
+          else {
+            const s = o.sections.find(x => x.id === path[2]);
+            if (s) { original = s.name; s.name = newLabel; }
+          }
+        }
+      });
+
+      // Persist section renames + flag-group renames server-side.
+      const leaf = path[path.length - 1];
+      const sid = dbSectionId(leaf);
+      if (sid != null) {
+        writeApi('PATCH', `/api/configurator/sections/${sid}`, { name: newLabel })
+          .catch(err => {
+            askNotice({ title: 'Section rename failed', tone: 'error',
+              body: `${err.message}\n\nReverting to the previous name.` });
+            if (original != null) {
+              apply(d => {
+                const g = findGroupInDraft(d, path[0]);
+                if (!g) return;
+                if (g.kind === 'always') {
+                  const s = g.sections.find(x => x.id === path[1]); if (s) s.name = original;
+                } else {
+                  const o = g.options.find(x => x.id === path[1]);
+                  if (o && path.length === 3) {
+                    const s = o.sections.find(x => x.id === path[2]); if (s) s.name = original;
+                  }
+                }
+              });
+            }
+          });
+      } else if (renamedGroupDbId != null) {
+        writeApi('PATCH', `/api/configurator/groups/${renamedGroupDbId}`, { name: newLabel })
+          .then(() => refetchTree())
+          .catch(err => {
+            askNotice({ title: 'Group rename failed', tone: 'error',
+              body: `${err.message}\n\nReverting to the previous name.` });
+            if (original != null) {
+              apply(d => {
+                const g = findGroupInDraft(d, path[0]);
+                if (g) g.label = original;
+              });
+            }
+          });
+      } else if (/^(?:opt-m|flag-m)\d+$/.test(leaf || '')) {
+        // Flag or gate-option rename: persist via Material.name update and
+        // cascade-rewrite any bom_conditions referencing the old name.
+        const masterId = dbMasterId(leaf);
+        writeApi('PATCH', `/api/configurator/flags/${masterId}/rename`, { name: newLabel })
+          .then(() => refetchTree())
+          .catch(err => {
+            askNotice({ title: 'Rename failed', tone: 'error',
+              body: `${err.message}\n\nReloading the live tree.` });
+            refetchTree();
+          });
+      }
+    },
+    setDefault: (groupId, optionId) => {
+      // Local optimistic update so the ★ moves immediately.
+      apply(d => {
+        const g = d.groups.find(x => x.id === groupId);
+        if (g && g.kind === 'choice') g.defaultId = optionId;
+      });
+      // Persist server-side when this is a real DB-backed option (opt-m<num>).
+      const masterId = dbMasterId(optionId);
+      if (masterId == null) return;
+      writeApi('PATCH', `/api/configurator/options/${masterId}/set-default`)
+        .then(() => refetchTree())
+        .catch(err => {
+          askNotice({ title: 'Default change failed', tone: 'error',
+            body: `${err.message}\n\nReloading the live tree.` });
+          refetchTree();
+        });
+    },
+    deleteNode: (target, mode) => {
+      // Local optimistic update.
+      apply(d => {
+        const path = target.path;
+        if (path[0] === 'unassigned') {
+          d.unassigned = d.unassigned.filter(s => s.id !== path[1]);
+          return;
+        }
+        // Walk top-level groups + nested linkedFlagGroups so deletes inside
+        // a nested flag group (e.g. FLOOR TYPE TOPPING under WISA TRANS
+        // FLOOR) update the UI immediately, not just after the refetch.
+        let g = d.groups.find(x => x.id === path[0]);
+        let nestedParent = null;  // [choice option, idx-in-linkedFlagGroups] when g is nested
+        if (!g) {
+          for (const cg of d.groups) {
+            if (cg.kind !== 'choice') continue;
+            for (const co of (cg.options || [])) {
+              const idx = (co.linkedFlagGroups || []).findIndex(lg => lg.id === path[0]);
+              if (idx >= 0) { g = co.linkedFlagGroups[idx]; nestedParent = [co, idx]; break; }
+            }
+            if (g) break;
+          }
+        }
+        if (!g) return;
+
+        if (target.kind === 'group') {
+          if (mode !== 'destroy') {
+            if (g.kind === 'always') d.unassigned.push(...g.sections);
+            else for (const o of (g.options || [])) d.unassigned.push(...(o.sections || []));
+          }
+          if (nestedParent) {
+            nestedParent[0].linkedFlagGroups.splice(nestedParent[1], 1);
+          } else {
+            const gIdx = d.groups.findIndex(x => x.id === path[0]);
+            if (gIdx >= 0) d.groups.splice(gIdx, 1);
+          }
+          return;
+        }
+
+        if (g.kind === 'always') {
+          // section delete
+          const sIdx = g.sections.findIndex(s => s.id === path[1]);
+          if (sIdx < 0) return;
+          const removed = g.sections.splice(sIdx, 1)[0];
+          if (mode === 'unassign') d.unassigned.push(removed);
+          return;
+        }
+
+        // choice OR flags group — both use g.options
+        const oIdx = g.options.findIndex(o => o.id === path[1]);
+        if (oIdx < 0) return;
+        const opt = g.options[oIdx];
+        if (target.kind === 'option') {
+          if (mode !== 'destroy' && opt.sections) d.unassigned.push(...opt.sections);
+          g.options.splice(oIdx, 1);
+          if (g.defaultId === path[1]) g.defaultId = g.options[0]?.id || null;
+          return;
+        }
+        // section under option (choice only — flags don't nest sections under options)
+        const sIdx = (opt.sections || []).findIndex(s => s.id === path[2]);
+        if (sIdx < 0) return;
+        const removed = opt.sections.splice(sIdx, 1)[0];
+        if (mode === 'unassign') d.unassigned.push(removed);
+      });
+
+      // Persist server-side based on target kind.
+      const tid = (data && data.trailerId);
+      if (tid == null) return;  // SAMPLE / local-only
+      const path = target.path;
+      let apiPromise = null;
+
+      if (target.kind === 'section' || target.kind === 'unassigned-section') {
+        const sid = dbSectionId(path[path.length - 1]);
+        if (sid != null) {
+          const m = target.kind === 'unassigned-section' ? 'destroy' : (mode || 'unassign');
+          apiPromise = writeApi('DELETE', `/api/configurator/sections/${sid}?mode=${m}`);
+        }
+      } else if (target.kind === 'option') {
+        const mid = dbMasterId(path[path.length - 1]);
+        if (mid != null) {
+          // Use a raw fetch so we can peek inside the 409 response when the
+          // server says "this flag is still referenced by N item conditions"
+          // — that case opens a follow-up confirm to optionally cleanup.
+          const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+          const tryDelete = (cleanup) => fetch(
+            `/api/configurator/options/${mid}${cleanup ? '?cleanup_references=true' : ''}`,
+            { method: 'DELETE', headers: { 'X-CSRF-Token': csrf }, credentials: 'same-origin' },
+          ).then(r => r.json().catch(() => ({})).then(j => ({ status: r.status, body: j })));
+
+          tryDelete(false).then(res => {
+            if (res.status === 200 || res.status === 204) {
+              refetchTree();
+              return;
+            }
+            // Structured 409 → ask whether to cleanup-and-delete.
+            const d = res.body && res.body.detail;
+            if (res.status === 409 && d && typeof d === 'object' && d.code === 'has_references') {
+              const refs = d.references || [];
+              const sample = refs.slice(0, 6).map(r => `• ${r.itemName} (in ${r.section || 'Unassigned'})`).join('\n');
+              const tail = refs.length > 6 ? `\n… and ${refs.length - 6} more.` : '';
+              askConfirm({
+                title: 'Flag is still referenced',
+                tone: 'warn',
+                body: `${refs.length} item condition${refs.length===1?'':'s'} reference${refs.length===1?'s':''} this flag:\n\n${sample}${tail}\n\nDelete the flag and strip those references?`,
+                confirmLabel: 'Delete + strip refs',
+                cancelLabel: 'Cancel',
+              }).then(ok => {
+                if (!ok) { refetchTree(); return; }
+                tryDelete(true).then(res2 => {
+                  if (res2.status === 200 || res2.status === 204) refetchTree();
+                  else askNotice({ title: 'Delete failed', tone: 'error',
+                    body: `${(res2.body && (res2.body.detail || res2.body.message)) || 'HTTP ' + res2.status}` });
+                  refetchTree();
+                });
+              });
+              return;
+            }
+            askNotice({ title: 'Delete failed', tone: 'error',
+              body: `${(d && (d.message || d)) || 'HTTP ' + res.status}\n\nReloading the live tree.` });
+            refetchTree();
+          });
+          return;  // we've handled the option-delete path; skip the shared promise plumbing
+        }
+      } else if (target.kind === 'group') {
+        const gid = dbGroupId(path[0]);
+        if (gid != null) apiPromise = writeApi('DELETE', `/api/configurator/groups/${gid}`);
+      }
+      if (!apiPromise) return;
+      apiPromise
+        .then(() => refetchTree())
+        .catch(err => {
+          askNotice({ title: 'Delete failed', tone: 'error',
+            body: `${err.message}\n\nReloading the live tree to revert local changes.` });
+          refetchTree();
+        });
+    },
+    createSectionUnderOption: ({ name, optionMasterId }) => {
+      const tid = (data && data.trailerId);
+      if (tid == null) return;
+      writeApi('POST', `/api/configurator/trailers/${tid}/sections`, { name, optionMasterId })
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Create section failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    unbindFlagFromSection: (masterId) => {
+      const tid = (data && data.trailerId);
+      if (tid == null || !masterId) return;
+      // Clearing the flag's bom_section_id sends it back to its body_option_group
+      // bucket. We re-use the section endpoint with sectionId=0 sentinel? No —
+      // simpler: a dedicated PATCH on the flag master that clears bom_section_id.
+      writeApi('PATCH', `/api/configurator/flags/${masterId}/unbind-section`, {})
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Unbind failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    moveItemsToSection: ({ sectionDbId, itemIds }) => {
+      writeApi('POST', `/api/configurator/sections/${sectionDbId}/move-items`, { itemIds })
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Move items failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    moveFlagsToGroup: ({ flagMasterIds, targetGroup }) => {
+      const tid = (data && data.trailerId);
+      if (tid == null) return;
+      writeApi('POST', `/api/configurator/trailers/${tid}/move-flags-to-group`, {
+        flagMasterIds, targetGroup,
+      })
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Move failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    linkFlagGroupToOption: ({ dbGroupId, optionMasterId }) => {
+      writeApi('PATCH', `/api/configurator/groups/${dbGroupId}/parent-option`, {
+        optionMasterId,
+      })
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Link failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    unlinkFlagGroup: (dbGroupId) => {
+      writeApi('PATCH', `/api/configurator/groups/${dbGroupId}/parent-option`, {
+        optionMasterId: null,
+      })
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Unlink failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    bundleFlags: ({ flagMasterIds, bundleSelectionGroup }) => {
+      const tid = (data && data.trailerId);
+      if (tid == null) return;
+      writeApi('POST', `/api/configurator/trailers/${tid}/bundle-flags`, {
+        flagMasterIds,
+        bundleSelectionGroup,
+      })
+        .then(() => refetchTree())
+        .catch(err => askNotice({ title: 'Bundle failed', tone: 'error',
+          body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+    },
+    dissolveBundle: (groupId, bundleId) => {
+      const tid = (data && data.trailerId);
+      if (tid == null) return;
+      // Find the bundle in current state to recover its origin labels for the API.
+      const g = data.groups.find(x => x.id === groupId);
+      const bundle = g && Array.isArray(g.bundles) ? g.bundles.find(b => b.id === bundleId) : null;
+      if (!bundle) return;
+      const originGroup = bundle.originGroup || '';
+      const originSelectionGroup = bundle.originSelectionGroup || '';
+      // Optimistic local update so the user sees the change immediately.
+      apply(d => {
+        const lg = d.groups.find(x => x.id === groupId);
+        if (!lg || lg.kind !== 'flags' || !Array.isArray(lg.bundles)) return;
+        const idx = lg.bundles.findIndex(b => b.id === bundleId);
+        if (idx < 0) return;
+        const lb = lg.bundles[idx];
+        for (const opt of lb.options) {
+          lg.options.push({ id: opt.id, name: opt.name, sections: opt.sections || [], style: 'tick' });
+        }
+        lg.bundles.splice(idx, 1);
+      });
+      // Persist: clear selection_group + set selection_mode='multi' on each master.
+      writeApi('POST', `/api/configurator/trailers/${tid}/dissolve-bundle`, {
+        originGroup,
+        originSelectionGroup,
+      })
+        .then(() => refetchTree())
+        .catch(err => {
+          refetchTree();
+          askNotice({ title: 'Dissolve failed', tone: 'error',
+            body: `${err.message}\n\nNo changes applied; tree reloaded from server.` });
+        });
+    },
+    moveSectionToChoice: ({ sourcePath, alsoMoveIds, choicePoint, option }) => {
+      // Block moves that would put the same section under more than one gate.
+      const idsToMoveCheck = new Set([sourcePath[1], ...(alsoMoveIds || [])]);
+      const conflicts = [];
+      for (const g of data.groups) {
+        if (g.kind !== 'choice') continue;
+        for (const o of g.options) {
+          for (const s of o.sections) {
+            if (idsToMoveCheck.has(s.id)) {
+              conflicts.push(`"${s.name}" is already under "${g.label} → ${o.name}"`);
+            }
+          }
+        }
+      }
+      if (conflicts.length > 0) {
+        askNotice({ title: 'Section already in a gate', tone: 'error',
+          body: conflicts.join('\n') + '\n\nA section can only belong to one gate. Move it out of its current gate first, or pick a different section.' });
+        return;
+      }
+
+      // Local optimistic update so the tree feels instant.
+      apply(d => {
+        const sourceGrp = d.groups.find(g => g.id === sourcePath[0]);
+        if (!sourceGrp || sourceGrp.kind !== 'always') return;
+
+        const idsToMove = new Set([sourcePath[1], ...(alsoMoveIds || [])]);
+        const moved = [];
+        sourceGrp.sections = sourceGrp.sections.filter(s => {
+          if (idsToMove.has(s.id)) { moved.push(s); return false; }
+          return true;
+        });
+        if (moved.length === 0) return;
+
+        let cg = choicePoint.id ? d.groups.find(g => g.id === choicePoint.id && g.kind === 'choice') : null;
+        if (!cg) {
+          cg = { id: newId('g'), kind: 'choice', label: choicePoint.label || 'Choice point',
+                 defaultId: null, options: [], required: true };
+          d.groups.push(cg);
+        }
+        let opt = option.id ? cg.options.find(o => o.id === option.id) : null;
+        if (!opt) {
+          opt = { id: newId('o'), name: option.name || moved[0].name, sections: [] };
+          cg.options.push(opt);
+          if (!cg.defaultId) cg.defaultId = opt.id;
+        }
+        opt.sections.push(...moved);
+      });
+
+      // Persist server-side when this is a real (DB-backed) trailer + sections.
+      const tid = (data && data.trailerId) || null;
+      const srcDbId = dbSectionId(sourcePath[sourcePath.length - 1]);
+      if (tid == null || srcDbId == null) return;  // local-only / SAMPLE — skip API
+      const alsoDbIds = (alsoMoveIds || []).map(dbSectionId).filter(x => x != null);
+      writeApi('POST', `/api/configurator/trailers/${tid}/move-section`, {
+        sourceSectionId: srcDbId,
+        alsoMoveSectionIds: alsoDbIds,
+        choicePoint: { label: choicePoint.label || '' },
+        option:      { name: option.name || '' },
+      })
+        .then(() => {
+          // Re-fetch authoritative tree so synthetic ids get replaced with DB ones.
+          fetch(`/api/configurator/trailers/${tid}/tree`)
+            .then(r => r.json())
+            .then(tree => { if (!tree.unassigned) tree.unassigned = []; setData(tree); });
+        })
+        .catch(err => askNotice({ title: 'Move failed', tone: 'error',
+          body: `${err.message}\n\nLocal state kept — reload the page to revert.` }));
+    },
+    restoreSection: (sectionId, groupId, optionId) => {
+      // Local optimistic update — same as before.
+      apply(d => {
+        const sIdx = d.unassigned.findIndex(s => s.id === sectionId);
+        if (sIdx < 0) return;
+        const sec = d.unassigned.splice(sIdx, 1)[0];
+        const g = d.groups.find(x => x.id === groupId);
+        if (!g) { d.unassigned.unshift(sec); return; }
+        if (g.kind === 'always') g.sections.push(sec);
+        else {
+          const o = g.options.find(x => x.id === optionId);
+          if (o) o.sections.push(sec);
+          else d.unassigned.unshift(sec);
+        }
+      });
+
+      // Persist server-side if this is a real DB section.
+      const tid = (data && data.trailerId);
+      const sid = dbSectionId(sectionId);
+      if (tid == null || sid == null) return;
+      const masterId = dbMasterId(optionId);  // null if Always-include
+      writeApi('POST', `/api/configurator/sections/${sid}/restore`, { masterId })
+        .then(() => refetchTree())
+        .catch(err => {
+          askNotice({ title: 'Restore failed', tone: 'error',
+            body: `${err.message}\n\nReloading the live tree to revert local changes.` });
+          refetchTree();
+        });
+    },
+  }), [apply, data, setData, writeApi, dbSectionId, dbMasterId, dbGroupId, refetchTree, askInput, askNotice]);
+
+  const askDelete = useCallback((target) => setPendingDelete(target), []);
+  const askMove   = useCallback((target) => setPendingMove(target), []);
+  const askBundle = useCallback((target) => setPendingBundle(target), []);
+  const askAddUnder = useCallback((target) => setPendingAddUnder(target), []);
+  const askAddFlag  = useCallback((target) => setPendingAddFlag(target), []);
+  const askMoveItems = useCallback((target) => setPendingMoveItems(target), []);
+  const askAddItemAsFlag = useCallback((target) => setPendingAddItemAsFlag(target), []);
+  const askMoveOneItem = useCallback((target) => setPendingMoveOneItem(target), []);
+  const askFlagMove = useCallback((target) => setPendingFlagMove(target), []);
+
+  const handleSaveConditions = useCallback((item, conditions, mode) => {
+    // mode arrives from ConditionEditor as 'include' | 'exclude' | 'always_exclude'.
+    const finalMode = (mode === 'exclude') ? 'exclude'
+                    : (mode === 'always_exclude') ? 'always_exclude'
+                    : 'include';
+    // Snapshot original for revert on failure.
+    let originalConds = null;
+    let originalMode = null;
+    const findAndUpdate = (mutator) => {
+      apply(d => {
+        for (const g of d.groups) {
+          const sectionLists = g.kind === 'always' ? [g.sections]
+                             : g.kind === 'choice' ? g.options.map(o => o.sections)
+                             : [];
+          for (const list of sectionLists) {
+            for (const sec of list) {
+              const it = sec.items.find(x => x.id === item.id);
+              if (it) {
+                if (originalConds === null) {
+                  originalConds = it.conditions || [];
+                  originalMode = it.conditionMode || 'include';
+                }
+                mutator(it);
+                return;
+              }
+            }
+          }
+        }
+      });
+    };
+    findAndUpdate(it => { it.conditions = conditions; it.conditionMode = finalMode; });
+    setEditingItem(null);
+
+    // Persist if this is a real DB-backed item (numeric id).
+    if (typeof item.id !== 'number') return;
+    writeApi('PATCH', `/api/configurator/items/${item.id}/conditions`, { conditions, mode: finalMode })
+      .catch(err => {
+        askNotice({ title: 'Conditions save failed', tone: 'error',
+          body: `${err.message}\n\nReverting to the previous conditions.` });
+        if (originalConds !== null) findAndUpdate(it => { it.conditions = originalConds; it.conditionMode = originalMode; });
+      });
+  }, [apply, writeApi, askNotice]);
+
+  return (
+    <>
+      <Tree data={data} selected={selected} onSelect={setSelected}
+            mut={mut} renaming={renaming} setRenaming={setRenaming} askDelete={askDelete} askMove={askMove} askBundle={askBundle} askFlagMove={askFlagMove}
+            askAddUnder={askAddUnder} askAddFlag={askAddFlag} askMoveItems={askMoveItems} askMoveOneItem={askMoveOneItem}
+            flagState={flagState} toggleFlag={toggleFlag} selectInBundle={selectInBundle} selectRadioFlag={selectRadioFlag}
+            choiceSelection={choiceSelection} setChoiceSelection={setChoiceSelection}
+            setViewMode={setViewMode}
+            onShowPreview={() => setShowingPreview(true)}
+            onShowSnapshots={() => setShowingSnapshots(true)} />
+      <ResizeHandle />
+      <Detail data={data} selected={selected} onEditConditions={setEditingItem}
+              askMoveOneItem={askMoveOneItem}
+              askAddItemAsFlag={askAddItemAsFlag}
+              flagState={flagState}
+              choiceSelection={choiceSelection}
+              viewMode={viewMode} setViewMode={setViewMode}
+              askNotice={askNotice} />
+      {editingItem && (
+        <ConditionEditor
+          item={editingItem}
+          options={data.bodyOptions}
+          onSave={handleSaveConditions}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
+      {showingPreview && (
+        <StructurePreview data={data}
+          flagState={flagState} setFlagState={setFlagState}
+          choiceSelection={choiceSelection} setChoiceSelection={setChoiceSelection}
+          onClose={() => setShowingPreview(false)} />
+      )}
+      {showingSnapshots && data && data.trailerId != null && (
+        <SnapshotsModal trailerId={data.trailerId} trailerName={data.trailerName}
+          writeApi={writeApi} askInput={askInput} askNotice={askNotice}
+          onClose={() => setShowingSnapshots(false)}
+          onAfterRestore={() => { setShowingSnapshots(false); refetchTree(); }} />
+      )}
+      {pendingMove && (
+        <MoveToChoiceModal target={pendingMove} data={data}
+          onCancel={() => setPendingMove(null)}
+          onConfirm={(payload) => { mut.moveSectionToChoice(payload); setPendingMove(null); }} />
+      )}
+      {pendingBundle && (
+        <MoveToBundleModal target={pendingBundle} data={data}
+          onCancel={() => setPendingBundle(null)}
+          onConfirm={(payload) => { mut.bundleFlags(payload); setPendingBundle(null); }} />
+      )}
+      {pendingFlagMove && (
+        <MoveFlagToGroupModal target={pendingFlagMove} data={data}
+          onCancel={() => setPendingFlagMove(null)}
+          onConfirm={(payload) => { mut.moveFlagsToGroup(payload); setPendingFlagMove(null); }} />
+      )}
+      {pendingMoveOneItem && (
+        <MoveOneItemModal target={pendingMoveOneItem} data={data}
+          onCancel={() => setPendingMoveOneItem(null)}
+          onMove={(secTreeId) => {
+            const m = /^s(\d+)$/.exec(secTreeId);
+            if (!m) { setPendingMoveOneItem(null); return; }
+            mut.moveItemsToSection({ sectionDbId: parseInt(m[1],10), itemIds: [pendingMoveOneItem.itemId] });
+            setPendingMoveOneItem(null);
+          }} />
+      )}
+      {pendingMoveItems && (
+        <MoveItemsToSectionModal target={pendingMoveItems} data={data}
+          onCancel={() => setPendingMoveItems(null)}
+          onMoveItems={(itemIds) => {
+            mut.moveItemsToSection({ sectionDbId: pendingMoveItems.sectionDbId, itemIds });
+            setPendingMoveItems(null);
+          }} />
+      )}
+      {pendingAddItemAsFlag && (
+        <AddItemAsFlagModal target={pendingAddItemAsFlag} data={data}
+          onCancel={() => setPendingAddItemAsFlag(null)}
+          onConfirm={(dbGroupId) => {
+            const tid = (data && data.trailerId);
+            if (tid == null) { setPendingAddItemAsFlag(null); return; }
+            writeApi('POST', `/api/configurator/trailers/${tid}/flag-groups/${dbGroupId}/flags`,
+                     { name: pendingAddItemAsFlag.itemName })
+              .then(() => { refetchTree(); setPendingAddItemAsFlag(null); })
+              .catch(err => {
+                setPendingAddItemAsFlag(null);
+                askNotice({ title: 'Add as flag failed', tone: 'error',
+                  body: `${err.message}\n\nNo changes applied; tree reloaded from server.` });
+                refetchTree();
+              });
+          }} />
+      )}
+      {pendingAddFlag && (
+        <AddOrMoveFlagModal target={pendingAddFlag} data={data}
+          onCancel={() => setPendingAddFlag(null)}
+          onAddNewFlag={(name) => {
+            // Persist the new flag server-side via the flag-groups endpoint
+            // so it survives a navigation/reload. Requires the destination
+            // group to have a DB id — locally-created groups need to be
+            // persisted first (addFlagsGroup does that as of the same fix).
+            const tid = (data && data.trailerId);
+            if (tid == null || !pendingAddFlag.dbGroupId) {
+              askNotice({ title: 'Cannot add flag', tone: 'error',
+                body: 'This flag group has no server-side id yet. Reload the configurator so the group is loaded fresh, then add the flag here.' });
+              setPendingAddFlag(null);
+              return;
+            }
+            writeApi('POST', `/api/configurator/trailers/${tid}/flag-groups/${pendingAddFlag.dbGroupId}/flags`, { name })
+              .then(() => refetchTree())
+              .catch(err => askNotice({ title: 'Add flag failed', tone: 'error',
+                body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+            setPendingAddFlag(null);
+          }}
+          onMoveExistingFlag={(masterId) => {
+            if (!pendingAddFlag.dbGroupId) {
+              askNotice({ title: 'Cannot move', tone: 'error',
+                body: 'This flag group has no DB id (it may be a local-only group). Save the group first, then move flags in.' });
+              setPendingAddFlag(null);
+              return;
+            }
+            mut.moveFlagsToGroup({
+              flagMasterIds: [masterId],
+              targetGroup: { existingId: pendingAddFlag.dbGroupId },
+            });
+            setPendingAddFlag(null);
+          }} />
+      )}
+      {pendingAddUnder && (
+        <AddUnderOptionModal target={pendingAddUnder} data={data}
+          onCancel={() => setPendingAddUnder(null)}
+          onAddSection={(name) => {
+            // Persist the new section server-side so it survives a reload.
+            // optionMasterId carries the gate option's master id (numeric) so
+            // the new row's body_option_master_id FK is set in the same call.
+            mut.createSectionUnderOption({
+              name,
+              optionMasterId: pendingAddUnder.optMasterId,
+            });
+            setPendingAddUnder(null);
+          }}
+          onLinkFlagGroup={(dbGroupId) => {
+            if (pendingAddUnder.optMasterId != null) {
+              mut.linkFlagGroupToOption({ dbGroupId, optionMasterId: pendingAddUnder.optMasterId });
+            } else {
+              askNotice({ title: 'Cannot link', tone: 'error',
+                body: 'This option has no underlying master row, so a flag group cannot be linked to it.' });
+            }
+            setPendingAddUnder(null);
+          }}
+          onCreateAndLinkFlagGroup={(name) => {
+            if (pendingAddUnder.optMasterId == null) {
+              askNotice({ title: 'Cannot create', tone: 'error',
+                body: 'This option has no underlying master row, so a flag group cannot be linked to it.' });
+              setPendingAddUnder(null);
+              return;
+            }
+            const tid = (data && data.trailerId);
+            if (tid == null) { setPendingAddUnder(null); return; }
+            // Create + link in one POST — backend accepts parentOptionMasterId
+            // on flag-group create so we skip the second round-trip.
+            writeApi('POST', `/api/configurator/trailers/${tid}/flag-groups`, {
+              name, parentOptionMasterId: pendingAddUnder.optMasterId,
+            })
+              .then(() => refetchTree())
+              .catch(err => askNotice({ title: 'Create flag group failed', tone: 'error',
+                body: `${err.message}\n\nNo changes applied; tree reloaded from server.` }));
+            setPendingAddUnder(null);
+          }} />
+      )}
+      {inputModal && (
+        <InputModal {...inputModal}
+          onCancel={() => setInputModal(null)}
+          onSubmit={(value) => { const fn = inputModal.onSubmit; setInputModal(null); fn && fn(value); }} />
+      )}
+      {confirmModal && (
+        <NoticeModal title={confirmModal.title} body={confirmModal.body} tone={confirmModal.tone}
+          onClose={() => { const r = confirmModal._resolve; setConfirmModal(null); r && r(false); }}
+          footer={(
+            <>
+              <button className="btn btn-outline"
+                      onClick={() => { const r = confirmModal._resolve; setConfirmModal(null); r && r(false); }}>
+                {confirmModal.cancelLabel || 'Cancel'}
+              </button>
+              <button className="btn btn-primary"
+                      style={confirmModal.tone === 'warn' || confirmModal.tone === 'error' ? {background:'var(--red,#f85149)'} : {}}
+                      onClick={() => { const r = confirmModal._resolve; setConfirmModal(null); r && r(true); }}>
+                {confirmModal.confirmLabel || 'Confirm'}
+              </button>
+            </>
+          )} />
+      )}
+      {noticeModal && (
+        <NoticeModal {...noticeModal} onClose={() => setNoticeModal(null)} />
+      )}
+      {pendingDelete && (
+        <ConfirmDelete
+          target={pendingDelete}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={(mode) => {
+            // Bundle dissolution is a different mutator (no items destroyed/unassigned).
+            if (pendingDelete.kind === 'bundle') {
+              const [groupId, bundleId] = pendingDelete.path;
+              mut.dissolveBundle(groupId, bundleId);
+              setPendingDelete(null);
+              return;
+            }
+            // If the section being viewed is going to disappear, fall back to first always-include section.
+            mut.deleteNode(pendingDelete, mode);
+            setPendingDelete(null);
+            const stillExists = (() => {
+              const g = data.groups.find(x => x.id === selected[0]);
+              if (!g) return false;
+              if (g.kind === 'always') return g.sections.some(s => s.id === selected[1]);
+              const o = g.options.find(x => x.id === selected[1]);
+              return o ? o.sections.some(s => s.id === selected[2]) : false;
+            })();
+            if (!stillExists) {
+              const g0 = data.groups[0];
+              if (g0?.kind === 'always' && g0.sections[0]) setSelected([g0.id, g0.sections[0].id]);
+              else if (g0?.options?.[0]?.sections?.[0]) setSelected([g0.id, g0.options[0].id, g0.options[0].sections[0].id]);
+            }
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function Banner({ trailerList, trailerId, setTrailerId, loadState, loadError }) {
+  return (
+    <div className="cfg-mock-banner">
+      <span>✓ <b>Live.</b> Rename, delete, move-to-gate, conditions, flag style, and snapshots all persist. The calculator honours these rules per-trailer via the <i>Use Configurator v2 logic</i> checkbox on /admin/templates.</span>
+      <span style={{marginLeft:'auto',display:'inline-flex',alignItems:'center',gap:'8px'}}>
+        <span style={{fontSize:'11px',color:'var(--text-dim)'}}>Trailer:</span>
+        <select value={trailerId || ''} onChange={(e) => setTrailerId(parseInt(e.target.value, 10))}
+                style={{background:'var(--bg-input)',border:'1px solid var(--border)',color:'var(--text)',padding:'4px 8px',borderRadius:'3px',fontSize:'12px',minWidth:'240px'}}>
+          {trailerList.length === 0 && <option value="">— loading… —</option>}
+          {trailerList.map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <span style={{fontSize:'11px'}}>
+          {loadState === 'loading' && <span style={{color:'var(--text-dim)'}}>loading…</span>}
+          {loadState === 'live'    && <span style={{color:'#3fb950'}}>● live</span>}
+          {loadState === 'error'   && <span style={{color:'var(--red,#f85149)'}} title={loadError || ''}>✕ load failed (using sample)</span>}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function Root() {
+  // Single owner of state so Banner + App share the same fetch.
+  const [trailerList, setTrailerList] = useState([]);
+  const [trailerId, setTrailerId] = useState(null);
+  const [data, setData] = useState(SAMPLE);
+  const [loadState, setLoadState] = useState('idle');
+  const [loadError, setLoadError] = useState(null);
+
+  React.useEffect(() => {
+    fetch('/api/configurator/trailers')
+      .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+      .then(list => {
+        setTrailerList(list);
+        const preferred = list.find(t => /RIGID DRY FREIGHT.*TEST/i.test(t.name))
+                       || list.find(t => /RIGID DRY FREIGHT/i.test(t.name))
+                       || list[0];
+        if (preferred) setTrailerId(preferred.id);
+      })
+      .catch(err => { setLoadState('error'); setLoadError(String(err)); });
+  }, []);
+
+  React.useEffect(() => {
+    if (trailerId == null) return;
+    setLoadState('loading');
+    fetch(`/api/configurator/trailers/${trailerId}/tree`)
+      .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+      .then(tree => {
+        if (!tree.bodyOptions) tree.bodyOptions = [];
+        if (!tree.unassigned)  tree.unassigned = [];
+        setData(tree);
+        setLoadState('live');
+      })
+      .catch(err => { setLoadState('error'); setLoadError(String(err)); });
+  }, [trailerId]);
+
+  return (
+    <>
+      <BannerPortal>
+        <Banner trailerList={trailerList} trailerId={trailerId} setTrailerId={setTrailerId}
+                loadState={loadState} loadError={loadError} />
+      </BannerPortal>
+      <App data={data} setData={setData} loadState={loadState} />
+    </>
+  );
+}
+
+function BannerPortal({ children }) {
+  const target = document.getElementById('cfg-banner-mount');
+  return target ? ReactDOM.createPortal(children, target) : null;
+}
+
+ReactDOM.createRoot(document.getElementById('cfg-root')).render(<Root />);
+</script>
+{% endraw %}
+{% endblock %}

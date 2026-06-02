@@ -1,0 +1,524 @@
+{% extends "base.html" %}
+{% block title %}Formula reference scan{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Trailer Templates / Formula reference scan{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:1400px">
+  <div class="card-header">
+    <span class="card-title">Formula reference scan</span>
+  </div>
+  <div class="card-body">
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px;line-height:1.5">
+      Scans <strong>GRP Costings 2018.xlsx</strong> and reports which BOM rows
+      derive their PRICE from <strong>FORMULAS 2018.xls</strong> &mdash; following
+      intra-sheet cell references recursively. Read-only: no DB changes are made.
+    </div>
+
+    <!-- Workbook upload -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);
+                padding:12px 16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-weight:600;font-size:13px;color:var(--text)">📤 Workbook</div>
+        <span id="up-status" style="font-size:11px;color:var(--text-dim)"></span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        Upload your GRP Costings .xlsx, or leave empty to use the server-configured workbook.
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="up-costing" accept=".xlsx,.xlsm,.xls" class="form-control" style="max-width:380px"/>
+        <button class="btn btn-outline btn-sm" id="up-btn" onclick="uploadWorkbook()">Upload</button>
+        <button class="btn btn-outline btn-sm" id="up-clear" onclick="clearUpload()" style="display:none">Clear</button>
+        <span id="up-msg" style="font-size:12px;color:var(--text-dim)"></span>
+      </div>
+    </div>
+
+    <!-- Run scan / Apply -->
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="scan-btn" onclick="runScan()">
+        <span id="scan-spin" class="spinner" style="display:none"></span>
+        <span>Run scan</span>
+      </button>
+      <button class="btn btn-success" id="apply-btn" onclick="applySuggestions()" disabled
+              title="Bulk-write FK columns on bill_of_materials for all 'set' suggestions"
+              style="background:#238636;border-color:#238636;color:white">
+        <span id="apply-spin" class="spinner" style="display:none"></span>
+        <span>Apply suggestions</span>
+      </button>
+      <label style="font-size:12px;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="apply-overwrites" style="width:14px;height:14px"/>
+        also overwrite mismatched links
+      </label>
+      <span id="scan-msg" style="font-size:12px;color:var(--text-dim);margin-left:auto"></span>
+    </div>
+
+    <!-- Summary panel -->
+    <div id="summary" style="display:none;margin-bottom:16px;padding:12px 16px;
+         border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel)">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 24px;font-size:12px"
+           id="summary-grid"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div id="tabs-bar" style="display:none;border-bottom:1px solid var(--border);margin-bottom:12px">
+      <button class="tab-btn active" data-tab="proposals" onclick="showTab('proposals')">DB suggestions</button>
+      <button class="tab-btn"        data-tab="linked"    onclick="showTab('linked')">Linked rows</button>
+      <button class="tab-btn"        data-tab="sheets"    onclick="showTab('sheets')">Per-sheet totals</button>
+    </div>
+
+    <!-- Filters -->
+    <div id="filters" style="display:none;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px;font-size:12px">
+      <input id="filter-text" type="text" placeholder="filter rows…" class="form-control"
+             style="max-width:240px;font-size:12px" oninput="renderActive()"/>
+      <select id="filter-status" class="form-control" style="max-width:200px;font-size:12px"
+              onchange="renderActive()">
+        <option value="">all statuses</option>
+        <option value="set">set (suggest)</option>
+        <option value="overwrite">overwrite (mismatch)</option>
+        <option value="ok">ok (already linked)</option>
+        <option value="no_trailer">no_trailer</option>
+        <option value="unknown_ref">unknown_ref</option>
+        <option value="no_bom_row">no_bom_row</option>
+      </select>
+      <select id="filter-body" class="form-control" style="max-width:260px;font-size:12px"
+              onchange="renderActive()">
+        <option value="">all body types</option>
+      </select>
+      <span id="row-count" style="margin-left:auto;color:var(--text-dim)"></span>
+      <button class="btn btn-outline btn-sm" onclick="downloadCSV()">Download CSV</button>
+    </div>
+
+    <!-- Tab panes -->
+    <div id="pane-proposals" class="tab-pane"></div>
+    <div id="pane-linked"    class="tab-pane" style="display:none"></div>
+    <div id="pane-sheets"    class="tab-pane" style="display:none"></div>
+  </div>
+</div>
+
+<style>
+  .tab-btn {
+    background:transparent; border:none; color:var(--text-dim); cursor:pointer;
+    padding:8px 14px; font-size:13px; border-bottom:2px solid transparent;
+    margin-bottom:-1px;
+  }
+  .tab-btn.active { color:var(--blue-hi); border-bottom-color:var(--blue); font-weight:600; }
+  .tab-btn:hover { color:var(--text); }
+
+  .scan-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .scan-table th {
+    background:var(--bg-panel); padding:6px 10px; text-align:left;
+    color:var(--text-dim); font-size:10px; letter-spacing:.5px;
+    border-bottom:1px solid var(--border); white-space:nowrap;
+    position:sticky; top:0;
+  }
+  .scan-table td {
+    padding:5px 10px; border-bottom:1px solid var(--border-soft, var(--border));
+    vertical-align:top;
+  }
+  .scan-table tr:hover td { background:var(--bg-raise); }
+  .scan-table .mono { font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+
+  .badge {
+    display:inline-block; padding:1px 7px; border-radius:10px;
+    font-size:10px; font-weight:600; letter-spacing:.4px;
+  }
+  .b-set        { background:#1a3a1a; color:#7ee787; }
+  .b-overwrite  { background:#3a2400; color:#f0a500; }
+  .b-ok         { background:#1c2a3a; color:#79c0ff; }
+  .b-no_trailer { background:#3a1a1a; color:#ff7b72; }
+  .b-unknown_ref{ background:#2a2a3a; color:#a371f7; }
+  .b-no_bom_row { background:#3a1a1a; color:#ff7b72; }
+
+  .scroll-area { max-height:60vh; overflow:auto;
+                 border:1px solid var(--border); border-radius:var(--radius);
+                 background:var(--bg-panel); }
+</style>
+
+<script>
+const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+let _uploadId = null;
+let _data = null;
+let _activeTab = 'proposals';
+
+function setStatus(el, msg, color) {
+  const e = document.getElementById(el);
+  e.textContent = msg || '';
+  if (color) e.style.color = color;
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024*1024) return `${(n/1024).toFixed(1)} KB`;
+  return `${(n/1024/1024).toFixed(1)} MB`;
+}
+
+async function uploadWorkbook() {
+  const f = document.getElementById('up-costing').files[0];
+  if (!f) { setStatus('up-msg', 'Pick a file first', 'var(--red)'); return; }
+  const fd = new FormData();
+  fd.append('costing', f);
+  setStatus('up-msg', 'Uploading…', 'var(--text-dim)');
+  try {
+    const r = await fetch('/api/import/upload', {
+      method:'POST', headers:{'X-CSRF-Token': csrf}, body: fd,
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Upload failed');
+    _uploadId = d.upload_id;
+    setStatus('up-msg', `${d.costing_name} (${fmtBytes(d.costing_size)}) ready`, 'var(--green)');
+    document.getElementById('up-clear').style.display = '';
+  } catch (e) {
+    setStatus('up-msg', e.message, 'var(--red)');
+  }
+}
+
+function clearUpload() {
+  _uploadId = null;
+  document.getElementById('up-costing').value = '';
+  setStatus('up-msg', '');
+  document.getElementById('up-clear').style.display = 'none';
+}
+
+async function runScan() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled = true;
+  document.getElementById('scan-spin').style.display = '';
+  setStatus('scan-msg', 'Scanning workbook… (a few seconds)', 'var(--text-dim)');
+  try {
+    const r = await fetch('/api/admin/formula-scan/run', {
+      method:'POST',
+      headers:{'X-CSRF-Token': csrf, 'Content-Type':'application/json'},
+      body: JSON.stringify({upload_id: _uploadId}),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Scan failed');
+    _data = d;
+    const applyable = (d.counts.set || 0) + (d.counts.overwrite || 0);
+    setStatus('scan-msg', `Done: ${d.linked.length} references across ${d.sheets.length} sheets · ${applyable} actionable`, 'var(--green)');
+    document.getElementById('apply-btn').disabled = (applyable === 0);
+    populateSummary();
+    populateBodyFilter();
+    document.getElementById('tabs-bar').style.display = '';
+    document.getElementById('filters').style.display = 'flex';
+    document.getElementById('summary').style.display = '';
+    showTab('proposals');
+  } catch (e) {
+    setStatus('scan-msg', e.message, 'var(--red)');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('scan-spin').style.display = 'none';
+  }
+}
+
+function populateSummary() {
+  const c = _data.counts;
+  const total = _data.proposals.length;
+  const grid = document.getElementById('summary-grid');
+  const cell = (label, value, color) =>
+    `<div><div style="color:var(--text-dim);font-size:10px">${label}</div>
+      <div style="font-size:18px;font-weight:600;color:${color || 'var(--text)'}">${value}</div></div>`;
+  grid.innerHTML = [
+    cell('Source', `<span style="font-size:11px;font-family:var(--font-mono)">${escapeHtml(basename(_data.source))}</span>`, 'var(--text)'),
+    cell('References', _data.linked.length,   'var(--blue-hi)'),
+    cell('Body types', _data.sheets.length,   'var(--text)'),
+    cell('• Set',         c.set,         'var(--green)'),
+    cell('• Overwrite',   c.overwrite,   'var(--orange, #f0a500)'),
+    cell('• OK',          c.ok,          'var(--blue-hi)'),
+    cell('• No trailer',  c.no_trailer,  'var(--red)'),
+    cell('• Unknown ref', c.unknown_ref, '#a371f7'),
+    cell('• No BOM row',  c.no_bom_row,  'var(--red)'),
+  ].join('');
+}
+
+function populateBodyFilter() {
+  const sel = document.getElementById('filter-body');
+  // Per-body counts so the dropdown shows what kind of work is left:
+  //   pending = set + overwrite (Apply will write these)
+  //   review  = unknown_ref     (manual link required on Body Templates)
+  const pending = {}, review = {};
+  _data.proposals.forEach(p => {
+    if (p.status === 'set' || p.status === 'overwrite') {
+      pending[p.body_type] = (pending[p.body_type] || 0) + 1;
+    } else if (p.status === 'unknown_ref') {
+      review[p.body_type] = (review[p.body_type] || 0) + 1;
+    }
+  });
+  sel.innerHTML = '<option value="">all body types</option>' +
+    [..._data.sheets].sort((a,b)=>a.name.localeCompare(b.name))
+      .map(s => {
+        const pn = pending[s.name] || 0;
+        const rn = review[s.name]  || 0;
+        const tags = [];
+        if (pn) tags.push(`${pn} pending`);
+        if (rn) tags.push(`${rn} review`);
+        const tag = tags.length ? ' — ' + tags.join(', ') : ' — done';
+        return `<option value="${escapeAttr(s.name)}">${escapeHtml(s.name)} (${s.linked_count} refs${tag})</option>`;
+      })
+      .join('');
+}
+
+function showTab(name) {
+  _activeTab = name;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  ['proposals','linked','sheets'].forEach(t => {
+    document.getElementById('pane-' + t).style.display = (t === name) ? '' : 'none';
+  });
+  // status filter only applies to proposals
+  document.getElementById('filter-status').style.display =
+    (name === 'proposals') ? '' : 'none';
+  // body filter doesn't apply to sheets tab
+  document.getElementById('filter-body').style.display = (name === 'sheets') ? 'none' : '';
+  renderActive();
+}
+
+function renderActive() {
+  if (!_data) return;
+  const tab = _activeTab;
+  const ftext = document.getElementById('filter-text').value.trim().toLowerCase();
+  const fstat = document.getElementById('filter-status').value;
+  const fbody = document.getElementById('filter-body').value;
+
+  const rowMatch = (r) => {
+    if (fbody && r.body_type !== fbody) return false;
+    if (!ftext) return true;
+    const hay = [
+      r.body_type, r.section, r.item, r.ref_sheet, r.ref_cell,
+      r.chain, r.raw_formula, r.bom_material_name, r.target_option_name, r.status_reason,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(ftext);
+  };
+
+  let rows;
+  if (tab === 'proposals') {
+    rows = _data.proposals.filter(p => (!fstat || p.status === fstat) && rowMatch(p));
+    document.getElementById('pane-proposals').innerHTML = renderProposals(rows);
+  } else if (tab === 'linked') {
+    rows = _data.linked.filter(rowMatch);
+    document.getElementById('pane-linked').innerHTML = renderLinked(rows);
+  } else if (tab === 'sheets') {
+    rows = _data.sheets;
+    document.getElementById('pane-sheets').innerHTML = renderSheets(rows);
+  }
+  document.getElementById('row-count').textContent = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
+  _refreshApplyButtonLabel();
+}
+
+function renderProposals(rows) {
+  if (!rows.length) return emptyMsg('No proposals match the current filter.');
+  const head = `
+    <table class="scan-table">
+      <thead><tr>
+        <th>Body type</th>
+        <th>Section</th>
+        <th>Excel item</th>
+        <th>Ref</th>
+        <th>Suggested option</th>
+        <th>BOM row match</th>
+        <th>Status</th>
+      </tr></thead><tbody>`;
+  const body = rows.map(p => {
+    const ref = `${escapeHtml(p.ref_sheet)}!${escapeHtml(p.ref_cell)}`;
+    const opt = p.target_option_name
+      ? `<span class="mono">${escapeHtml(p.target_table || '')}</span><br>${escapeHtml(p.target_option_name)}`
+      : `<span style="color:var(--text-dim)">—</span>`;
+    const bom = p.bom_id
+      ? `<span class="mono">#${p.bom_id}</span> ${escapeHtml(p.bom_material_name || '')}<br>
+         <span class="mono" style="color:var(--text-dim)">${escapeHtml(p.bom_section || '')}</span>`
+      : `<span style="color:var(--text-dim)">${escapeHtml(p.status_reason || '')}</span>`;
+    return `
+      <tr>
+        <td>${escapeHtml(p.body_type)}</td>
+        <td>${escapeHtml(p.section || '')}</td>
+        <td>${escapeHtml(p.item)} <span class="mono">[${escapeHtml(p.price_col)}${p.row}]</span></td>
+        <td><span class="mono">${ref}</span></td>
+        <td>${opt}</td>
+        <td>${bom}</td>
+        <td><span class="badge b-${p.status}">${p.status}</span></td>
+      </tr>`;
+  }).join('');
+  return `<div class="scroll-area">${head}${body}</tbody></table></div>`;
+}
+
+function renderLinked(rows) {
+  if (!rows.length) return emptyMsg('No linked rows match the current filter.');
+  const head = `
+    <table class="scan-table">
+      <thead><tr>
+        <th>Body type</th><th>Section</th><th>Item</th>
+        <th>Price cell</th><th>External ref</th><th>Chain</th><th>Agg</th>
+      </tr></thead><tbody>`;
+  const body = rows.map(r => `
+      <tr>
+        <td>${escapeHtml(r.body_type)}</td>
+        <td>${escapeHtml(r.section || '')}</td>
+        <td>${escapeHtml(r.item)}</td>
+        <td><span class="mono">${escapeHtml(r.price_col)}${r.row}</span></td>
+        <td><span class="mono">${escapeHtml(r.ref_sheet)}!${escapeHtml(r.ref_cell)}</span></td>
+        <td class="mono" style="font-size:10px">${escapeHtml(r.chain)}</td>
+        <td>${r.had_aggregate ? '⚠' : ''}</td>
+      </tr>`).join('');
+  return `<div class="scroll-area">${head}${body}</tbody></table></div>`;
+}
+
+function renderSheets(rows) {
+  const total_l = rows.reduce((a,b)=>a + b.linked_count, 0);
+  const head = `
+    <table class="scan-table">
+      <thead><tr>
+        <th>Body type (sheet)</th>
+        <th style="text-align:right">References</th>
+      </tr></thead><tbody>`;
+  const body = rows.map(s => `
+      <tr>
+        <td>${escapeHtml(s.name)}</td>
+        <td style="text-align:right" class="mono">${s.linked_count}</td>
+      </tr>`).join('');
+  const foot = `
+      <tr style="background:var(--bg-panel);font-weight:600">
+        <td>TOTAL (${rows.length} sheets)</td>
+        <td style="text-align:right" class="mono">${total_l}</td>
+      </tr>`;
+  return `<div class="scroll-area">${head}${body}${foot}</tbody></table></div>`;
+}
+
+function emptyMsg(s) {
+  return `<div style="padding:20px;color:var(--text-dim);font-style:italic;
+          border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);
+          text-align:center">${escapeHtml(s)}</div>`;
+}
+
+function downloadCSV() {
+  if (!_data) return;
+  const tab = _activeTab;
+  let rows, headers;
+  if (tab === 'proposals') {
+    headers = ['body_type','section','item','row','price_col','ref_sheet','ref_cell',
+               'target_table','target_option_name','target_option_id',
+               'bom_id','bom_material_name','bom_section','current_link_id',
+               'status','status_reason','chain','raw_formula'];
+    rows = _data.proposals;
+  } else if (tab === 'linked') {
+    headers = ['body_type','section','item','row','price_col','ref_sheet','ref_cell',
+               'had_aggregate','raw_formula','chain'];
+    rows = _data.linked;
+  } else {
+    headers = ['name','linked_count'];
+    rows = _data.sheets;
+  }
+  const esc = (v) => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = [headers.join(','), ...rows.map(r => headers.map(h => esc(r[h])).join(','))].join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `formula_scan_${tab}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function _activeBodyScope() {
+  // If the user has the body-type filter set, scope the apply to that
+  // trailer type. Returns {trailer_type_id, body_type, set, overwrite} or null.
+  if (!_data) return null;
+  const body = document.getElementById('filter-body').value;
+  if (!body) return null;
+  const scoped = _data.proposals.filter(p => p.body_type === body);
+  if (!scoped.length) return null;
+  const tid = scoped.map(p => p.trailer_type_id).find(v => v != null);
+  if (tid == null) return null;
+  return {
+    trailer_type_id: tid,
+    body_type: body,
+    set:       scoped.filter(p => p.status === 'set').length,
+    overwrite: scoped.filter(p => p.status === 'overwrite').length,
+  };
+}
+
+function _refreshApplyButtonLabel() {
+  const btn = document.getElementById('apply-btn');
+  if (!btn) return;
+  const lbl = btn.querySelector('span:last-child');
+  const scope = _activeBodyScope();
+  if (scope) {
+    lbl.textContent = `Apply for: ${scope.body_type}`;
+    btn.title = `Write ${scope.set} new link(s)` +
+                (scope.overwrite ? ` (+${scope.overwrite} mismatch — toggle checkbox to overwrite)` : '') +
+                ` for body type "${scope.body_type}"`;
+  } else {
+    lbl.textContent = 'Apply suggestions';
+    btn.title = 'Bulk-write FK columns for all set/overwrite suggestions';
+  }
+}
+
+async function applySuggestions() {
+  if (!_data) return;
+  const overwrites = document.getElementById('apply-overwrites').checked;
+  const scope = _activeBodyScope();
+
+  const setN = scope ? scope.set       : (_data.counts.set || 0);
+  const owN  = scope ? scope.overwrite : (_data.counts.overwrite || 0);
+  const total = setN + (overwrites ? owN : 0);
+  if (!total) {
+    let msg;
+    if (scope) {
+      msg = (owN > 0)
+        ? `"${scope.body_type}" has ${owN} mismatched link(s) — tick "also overwrite mismatched links" to apply them.`
+        : `"${scope.body_type}" has no pending links — already migrated, or no formula refs.`;
+    } else {
+      msg = (owN > 0)
+        ? `Nothing new to apply. ${owN} mismatched link(s) waiting — tick the overwrite checkbox if you want them written.`
+        : 'Nothing to apply — every flagged item is already linked correctly.';
+    }
+    setStatus('scan-msg', msg, 'var(--text-dim)');
+    return;
+  }
+  const where = scope ? ` for "${scope.body_type}"` : ' across all body types';
+  const msg = overwrites
+    ? `Apply ${setN} new link(s)${where} AND overwrite ${owN} mismatched link(s)?`
+    : `Apply ${setN} new link(s)${where}? (${owN} overwrites will be skipped)`;
+  if (!await confirmModal(msg, { title: 'Apply suggestions', okText: 'Apply' })) return;
+
+  const btn = document.getElementById('apply-btn');
+  btn.disabled = true;
+  document.getElementById('apply-spin').style.display = '';
+  setStatus('scan-msg', 'Applying…', 'var(--text-dim)');
+  try {
+    const payload = {include_overwrites: overwrites};
+    if (scope) payload.trailer_type_id = scope.trailer_type_id;
+    const r = await fetch('/api/admin/formula-scan/apply', {
+      method:'POST',
+      headers:{'X-CSRF-Token': csrf, 'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Apply failed');
+    const parts = [`Wrote ${d.written}`];
+    if (d.skipped_overwrite) parts.push(`skipped ${d.skipped_overwrite} overwrites`);
+    if (d.skipped_unknown)   parts.push(`${d.skipped_unknown} review-only`);
+    if (d.skipped_other)     parts.push(`skipped ${d.skipped_other} unmappable`);
+    if (d.skipped_other_tt)  parts.push(`${d.skipped_other_tt} other body types untouched`);
+    if (d.failures && d.failures.length) parts.push(`${d.failures.length} error(s)`);
+    setStatus('scan-msg', parts.join(' · ') + ' · re-running scan…', 'var(--green)');
+    await runScan();
+  } catch (e) {
+    setStatus('scan-msg', e.message, 'var(--red)');
+  } finally {
+    document.getElementById('apply-spin').style.display = 'none';
+  }
+}
+
+function basename(p) {
+  if (!p) return '';
+  const m = String(p).split(/[\\/]/);
+  return m[m.length - 1];
+}
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+</script>
+{% endblock %}

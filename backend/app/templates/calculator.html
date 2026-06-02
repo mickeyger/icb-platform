@@ -1,0 +1,1094 @@
+{% extends "base.html" %}
+{% block title %}Calculator{% endblock %}
+{% block breadcrumb %}
+  <strong id="topbar-title" data-default="Cost Calculator">Cost Calculator</strong>
+{% endblock %}
+{% block topbar_actions %}
+{% if is_dev_mode() and is_admin %}
+<button onclick="openModal('modal-pid-check')"
+  title="Dev: check for multiple uvicorn processes competing on port 8000"
+  style="background:none;border:1px solid #f0922a55;color:#f0922a;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:5px;line-height:1.4;font-family:var(--font-sans)">
+  ⚠ Port Check
+</button>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<script type="application/json" id="help-page-context">{"page":"calculator","description":"The Cost Calculator — pick a body, pick a chassis, set dimensions, toggle optional extras, see line items and grand total."}</script>
+<div class="calc-shell">
+  <!-- LEFT: Parts bin / config -->
+  <div class="calc-panel calc-panel--config">
+    <div class="panel-header">
+      <span>◈ Configuration</span>
+    </div>
+    <!-- Tab bar -->
+    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg-panel)">
+      <button id="cfg-tab-body" onclick="switchCfgTab('body')"
+        style="flex:1;padding:8px 4px;font-size:10px;letter-spacing:1px;text-transform:uppercase;
+               border:none;border-bottom:2px solid var(--blue);background:transparent;
+               color:var(--blue);cursor:pointer;font-weight:600">BODY</button>
+      <button id="cfg-tab-chassis" onclick="switchCfgTab('chassis')"
+        style="flex:1;padding:8px 4px;font-size:10px;letter-spacing:1px;text-transform:uppercase;
+               border:none;border-bottom:2px solid transparent;background:transparent;
+               color:var(--text-dim);cursor:pointer">CHASSIS</button>
+    </div>
+
+    <div class="panel-body">
+
+      <!-- ══ BODY TAB ══════════════════════════════════════════════════════════ -->
+      <div id="cfg-pane-body">
+
+      <!-- ── BODY TYPE PARAMETERS (collapsible) ─────────────────────────────── -->
+      <div id="btp-wrap">
+        <button id="btp-toggle" onclick="toggleBTP()" title="Show / hide parameters"
+          style="width:100%;display:flex;align-items:center;justify-content:space-between;
+                 background:none;border:none;border-bottom:1px solid var(--border);
+                 padding:7px 0;cursor:pointer;color:var(--text-dim);
+                 font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:600;
+                 margin-bottom:10px">
+          <span>Body Type Parameters</span>
+          <span id="btp-chevron" style="font-size:11px;transition:transform .15s">▼</span>
+        </button>
+
+        <div id="btp-body">
+
+          <div class="form-group">
+            <label class="form-label">Body Type</label>
+            <select id="trailer-select" onchange="loadBOM()">
+              <option value="">— Select —</option>
+              {% for t in trailers %}
+              <option value="{{ t.id }}">{{ t.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Length (m)</label>
+            <input class="form-control" type="number" id="f-length" value="13.6" step="0.1" min="0.1"/>
+            <span class="field-error" id="err-length">Must be greater than 0</span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Width (m)</label>
+              <input class="form-control" type="number" id="f-width" value="2.5" step="0.05" min="0.01"/>
+              <span class="field-error" id="err-width">Must be greater than 0</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Height (m)</label>
+              <input class="form-control" type="number" id="f-height" value="2.7" step="0.05" min="0.01"/>
+              <span class="field-error" id="err-height">Must be greater than 0</span>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border);margin:10px 0 0;padding-top:10px">
+            <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+              color:var(--text-dim);margin-bottom:8px">Profit Margin (optional)</div>
+            <div class="form-group">
+              <label class="form-label">Margin %</label>
+              <input class="form-control" type="number" id="f-margin" value="0" min="0" max="100"/>
+            </div>
+            <div class="form-group" style="margin-top:8px">
+              <label class="form-label">Ratio</label>
+              <select class="form-control" id="f-ratio">
+                <option value="">— None —</option>
+                <option value="0.3">30%</option>
+                <option value="0.325">32.5%</option>
+                <option value="0.35">35%</option>
+                <option value="0.375">37.5%</option>
+                <option value="0.4">40%</option>
+                <option value="0.425">42.5%</option>
+                <option value="0.45">45%</option>
+                <option value="0.475">47.5%</option>
+                <option value="0.5">50%</option>
+                <option value="0.525">52.5%</option>
+                <option value="0.55">55%</option>
+                <option value="0.575">57.5%</option>
+                <option value="0.6">60%</option>
+                <option value="0.625">62.5%</option>
+                <option value="0.65">65%</option>
+                <option value="0.675">67.5%</option>
+                <option value="0.7">70%</option>
+              </select>
+              <div class="form-hint">Selling price = Cost ÷ Ratio</div>
+            </div>
+          </div>
+
+        </div><!-- end #btp-body -->
+      </div><!-- end #btp-wrap -->
+
+      <!-- Body-engine variables retained as hidden defaults (UI moved to Chassis section) -->
+      <input type="hidden" id="f-floor-thick" value="0.028"/>
+      <input type="hidden" id="f-panel-thick" value="0.063"/>
+      <input type="hidden" id="f-insul-thick" value="0.076"/>
+      <input type="hidden" id="f-axles" value="3"/>
+      <input type="hidden" id="f-doors" value="2"/>
+      <span class="field-error" id="err-floor-thick" style="display:none"></span>
+      <span class="field-error" id="err-panel-thick" style="display:none"></span>
+      <span class="field-error" id="err-insul-thick" style="display:none"></span>
+
+      <!-- ── Body Options (populated from draft / Excel import when present) ── -->
+      <div id="body-options-section" style="display:none;border-top:1px solid var(--border);margin:12px 0 0;padding-top:12px">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+          color:var(--text-dim);margin-bottom:10px">Body Options</div>
+        <div id="body-options-list"></div>
+      </div>
+
+      </div><!-- end #cfg-pane-body -->
+
+      <!-- ══ CHASSIS TAB ═══════════════════════════════════════════════════════ -->
+      <div id="cfg-pane-chassis" style="display:none">
+
+        <div style="margin-bottom:14px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+            <input type="checkbox" id="f-chassis-on" style="accent-color:var(--blue);width:14px;height:14px;cursor:pointer"
+                   onchange="onChassisToggle()"/>
+            <span style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim)">
+              Include Chassis
+            </span>
+          </label>
+        </div>
+
+        <div id="chassis-fields" style="display:none">
+          <div class="form-group">
+            <label class="form-label">Chassis length (m)</label>
+            <input class="form-control" type="number" id="f-ch-length" value="15.5" step="0.1" min="1"/>
+            <div class="form-hint" id="ch-length-hint">Defaults to body length — override if chassis differs.</div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Axle count</label>
+              <select class="form-control" id="f-ch-axles" onchange="onChassisAxleChange()">
+                <option value="1">1 — Single</option>
+                <option value="2">2 — Tandem</option>
+                <option value="3" selected>3 — Tridem</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Lifting axles</label>
+              <select class="form-control" id="f-ch-lift-count">
+                <option value="0" selected>0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+              </select>
+              <div class="form-hint" id="ch-lift-hint" style="display:none">Only available with 3 axles.</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Suspension</label>
+            <select class="form-control" id="f-ch-suspension"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Lifting axle type</label>
+            <select class="form-control" id="f-ch-lift-type" disabled></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Brake kit</label>
+            <select class="form-control" id="f-ch-brake"></select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Tyre style</label>
+              <select class="form-control" id="f-ch-tyre-style" onchange="onChassisTyreStyleChange()">
+                <option value="dual" selected>Dual</option>
+                <option value="super_single">Super single</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tyre</label>
+              <select class="form-control" id="f-ch-tyre"></select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Rim</label>
+            <select class="form-control" id="f-ch-rim"></select>
+          </div>
+          <div class="form-hint" id="ch-totals" style="margin-top:8px;color:var(--text-dim)">
+            Tyres needed: <span id="ch-tyre-count">12</span> · Rims needed: <span id="ch-rim-count">12</span>
+          </div>
+        </div>
+
+      </div><!-- end #cfg-pane-chassis -->
+
+    </div>
+    <div class="panel-footer">
+      <div id="geo-summary" style="font-family:var(--font-mono);font-size:11px;
+        color:var(--text-dim);line-height:1.8"></div>
+    </div>
+  </div>
+
+  <!-- CENTRE: Assembly / BOM lines -->
+  <div class="calc-panel calc-panel--bom">
+    <div class="panel-header">
+      <span>⊡ Bill of Materials</span>
+      <label id="bom-sort-lbl" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);user-select:none;margin-left:10px">
+        Sort:
+        <select id="bom-sort-mode" onchange="onBomSortChange()"
+          style="background:var(--bg-raise);color:var(--text);border:1px solid var(--border);
+                 border-radius:4px;padding:1px 4px;font-size:11px;cursor:pointer">
+          <option value="sheet">Sheet order</option>
+          <option value="alpha">A–Z</option>
+        </select>
+      </label>
+      <label id="bom-collapse-lbl" style="display:none;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);cursor:pointer;user-select:none">
+        <input type="checkbox" id="bom-collapse-all-chk" onchange="calcBomCollapseAll(this.checked)"
+          style="accent-color:var(--blue);width:12px;height:12px;cursor:pointer">
+        Collapse all
+      </label>
+      <span id="bom-count" style="color:var(--text-dim);font-size:10px"></span>
+    </div>
+    <div class="panel-body" id="bom-area">
+      <div style="color:var(--text-dim);font-size:13px;padding:20px 0;text-align:center">
+        Select a body type to load the bill of materials
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Cost summary + Customer -->
+  <div class="calc-panel calc-panel--summary">
+    <div class="panel-header">
+      <span>Ξ Cost Summary</span>
+    </div>
+    <div class="panel-body" id="summary-area">
+      <div style="color:var(--text-dim);font-size:13px;padding:20px 0;text-align:center">
+        Select a body type to begin
+      </div>
+    </div>
+
+    <!-- Customer selector -->
+    <div style="padding:6px 12px;border-top:1px solid var(--border);background:var(--bg-panel)">
+      <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;
+        color:var(--text-dim);margin-bottom:3px">Customer</div>
+      <input class="form-control" id="cust-search" placeholder="Search customers…"
+        oninput="filterCustomers()" autocomplete="off"
+        style="font-size:12px;margin-bottom:4px"/>
+      <select id="cust-select" size="3" style="width:100%;font-size:12px;
+        background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);
+        color:var(--text);padding:4px">
+        <option value="">— No customer —</option>
+      </select>
+    </div>
+
+    <div class="panel-footer">
+      <div class="grand-total-display">
+        <div class="grand-total-label">Total Cost</div>
+        <div class="grand-total-amount" id="grand-total">—</div>
+        <div class="grand-total-sub" id="grand-total-sub"></div>
+      </div>
+      <div id="calc-status" style="text-align:center;font-size:11px;color:var(--text-dim);min-height:14px;margin-top:4px"></div>
+      <button class="btn btn-primary" id="approve-btn" onclick="approveCosting()"
+        disabled style="width:100%;margin-top:6px;font-size:13px;padding:8px 14px">
+        <span id="approve-spin" class="spinner" style="display:none"></span>
+        ✓ Approve &amp; Save Costing
+      </button>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-outline btn-sm" style="flex:1" onclick="printResults()" id="print-btn" disabled>
+          Print
+        </button>
+        <button class="btn btn-success btn-sm" style="flex:1" onclick="viewFullResults()" id="view-btn" disabled>
+          Full Report
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- BOM right-click context menu -->
+<div class="ctx-menu" id="bom-ctx-menu">
+  <div class="ctx-menu-label">Bill of Materials</div>
+  <div class="ctx-menu-name" id="ctx-menu-mat"></div>
+  <div class="ctx-menu-item" onclick="ctxEditQuoteOnly()">
+    <span class="ctx-icon" style="color:var(--red)">✎</span>
+    <div>
+      <div style="font-weight:600">Edit price for this quote</div>
+      <div style="font-size:11px;color:var(--text-dim)">Highlighted red · not saved permanently</div>
+    </div>
+  </div>
+  <div class="ctx-menu-item" onclick="ctxEditPermanentSection()">
+    <span class="ctx-icon" style="color:var(--blue-hi)">⊞</span>
+    <div>
+      <div style="font-weight:600">Edit permanently (this section)</div>
+      <div style="font-size:11px;color:var(--text-dim)">Saved per BOM row — only affects this section</div>
+    </div>
+  </div>
+  <div class="ctx-menu-item" onclick="ctxEditPermanent()">
+    <span class="ctx-icon" style="color:var(--text-dim)">⊞</span>
+    <div>
+      <div style="font-weight:600">Edit permanently (all sections)</div>
+      <div style="font-size:11px;color:var(--text-dim)">Material-level price · affects every trailer/section</div>
+    </div>
+  </div>
+  <div class="ctx-menu-item" id="ctx-edit-formula-item" onclick="ctxEditFormula()">
+    <span class="ctx-icon" style="color:var(--orange)">ƒ</span>
+    <div>
+      <div style="font-weight:600">Edit formula</div>
+      <div style="font-size:11px;color:var(--text-dim)">Update quantity formula for this body type</div>
+    </div>
+  </div>
+</div>
+
+<!-- Duplicate costing modal -->
+<div class="modal-backdrop hidden" id="modal-duplicate">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--orange)">⚠ Duplicate Costing Found</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-duplicate')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text);margin-bottom:12px" id="dup-message"></p>
+      <div id="dup-version-list" style="font-family:var(--font-mono);font-size:12px;
+        background:var(--bg-panel);border:1px solid var(--border);
+        border-radius:var(--radius);padding:10px 14px;margin-bottom:4px;
+        line-height:2"></div>
+      <label id="dup-reuse-qno-wrap" style="display:none;font-size:12px;margin-top:10px;cursor:pointer;user-select:none">
+        <input type="checkbox" id="dup-reuse-qno" style="vertical-align:middle"> Reuse quote number
+        <span id="dup-reuse-qno-val" style="font-family:var(--font-mono);color:var(--blue-hi)"></span>
+        <span style="color:var(--text-dim)"> for this revision</span>
+      </label>
+      <p style="font-size:11px;color:var(--text-dim);margin-top:10px">
+        Choose how to proceed:
+      </p>
+    </div>
+    <div class="modal-footer" style="flex-direction:column;gap:8px;align-items:stretch">
+      <button class="btn btn-primary" style="width:100%;justify-content:center"
+        id="dup-newver-btn" onclick="approveWithAction('new_version')">
+        ⊞ Save as Revision <span id="dup-next-ver"></span>
+      </button>
+      <button class="btn" style="width:100%;justify-content:center;
+        background:rgba(248,81,73,.15);border:1px solid var(--red);color:var(--red)"
+        onclick="approveWithAction('replace')">
+        🗑 Replace — delete today's existing costing(s) and save new
+      </button>
+      <button class="btn btn-outline" style="width:100%;justify-content:center"
+        onclick="closeModal('modal-duplicate')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Insulation switch confirmation modal -->
+<div class="modal-backdrop hidden" id="modal-insulation-switch">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title" id="insulation-switch-title"></span>
+      <button class="btn btn-icon" onclick="closeModal('modal-insulation-switch')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="insulation-switch-body" style="font-size:13px;color:var(--text);margin:0"></p>
+    </div>
+    <div class="modal-footer" style="gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" style="min-width:80px"
+        onclick="closeModal('modal-insulation-switch')">No</button>
+      <button class="btn btn-primary" id="insulation-switch-yes" style="min-width:80px">Yes</button>
+    </div>
+  </div>
+</div>
+
+<!-- No customer selected modal -->
+<div class="modal-backdrop hidden" id="modal-no-customer">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--orange)">⚠ No Customer Selected</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-no-customer')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text);line-height:1.6">
+        This costing has no customer linked to it.<br><br>
+        Saving without a customer makes it harder to track quotes per client.
+        Would you like to go back and select a customer, or continue saving without one?
+      </p>
+    </div>
+    <div class="modal-footer" style="flex-direction:column;gap:8px;align-items:stretch">
+      <button class="btn btn-primary" style="width:100%;justify-content:center"
+        onclick="closeModal('modal-no-customer')">
+        ← Go Back &amp; Select Customer
+      </button>
+      <button class="btn btn-outline" style="width:100%;justify-content:center;color:var(--text-dim)"
+        onclick="closeModal('modal-no-customer'); _doApprove(null, null);">
+        Continue Without Customer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Rename Body Option Group modal (admin pencil ✎ next to a group header) -->
+<div class="modal-backdrop hidden" id="modal-rename-body-option-group">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title">Rename Body Option Group</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-rename-body-option-group')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        Renaming <b><span id="rename-bog-current"></span></b> on this trailer.
+        Other trailers using the same group name aren't affected.
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label" for="rename-bog-input">New name</label>
+        <input type="text" id="rename-bog-input" class="form-control" autocomplete="off"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();confirmRenameBodyOptionGroup();}else if(event.key==='Escape'){closeModal('modal-rename-body-option-group');}"
+               placeholder="e.g. FLOOR" />
+      </div>
+    </div>
+    <div class="modal-footer" style="gap:10px;justify-content:flex-end">
+      <button class="btn btn-outline" style="min-width:80px"
+        onclick="closeModal('modal-rename-body-option-group')">Cancel</button>
+      <button class="btn btn-primary" style="min-width:80px" id="rename-bog-confirm"
+        onclick="confirmRenameBodyOptionGroup()">Rename</button>
+    </div>
+  </div>
+</div>
+
+<!-- Kickplate / Rice Grain warning modal -->
+<div class="modal-backdrop hidden" id="modal-kickplate-warning">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--orange)">⚠ Kick Plates Recommended</span>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text);line-height:1.6">
+        With a <strong>Rice Grain Floor</strong>, 1st row kick plates are normally also installed.
+      </p>
+    </div>
+    <div class="modal-footer" style="justify-content:flex-end">
+      <button class="btn btn-primary" style="min-width:80px"
+        onclick="closeModal('modal-kickplate-warning')">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- Formula edit modal -->
+<div class="modal-backdrop hidden" id="modal-formula-edit">
+  <div class="modal" style="max-width:700px;width:95vw">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--orange)">ƒ Edit Formula — Body Type</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-formula-edit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:14px;font-weight:600;color:var(--text-head);margin-bottom:12px;padding:8px 12px;background:var(--bg-panel);border-radius:6px;border-left:3px solid var(--orange)" id="formula-edit-mat-name"></div>
+
+      <!-- Formula library picker -->
+      <div style="margin-bottom:14px;padding:10px 12px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">Pick from formula library</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="formula-library-select" class="form-input" style="flex:1;font-size:13px"
+                  onchange="applyLibraryFormula(this)">
+            <option value="">— select a saved formula —</option>
+          </select>
+          <span id="formula-library-status" style="font-size:11px;color:var(--text-dim);white-space:nowrap"></span>
+        </div>
+        <div id="formula-library-desc" style="font-size:11px;color:var(--text-dim);margin-top:5px;min-height:14px"></div>
+      </div>
+
+      <!-- Variable reference chips -->
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Available variables</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          {% for v in ['length','width','height','wall_area','roof_area','floor_area','front_rear_area','surface_area','total_panel_area','volume','floor_thickness','insulation_thickness','num_doors','num_axles'] %}
+          <code style="font-family:var(--font-mono);background:var(--bg-panel);color:var(--blue-hi);padding:3px 8px;border-radius:4px;font-size:11px;border:1px solid var(--border)">{{ v }}</code>
+          {% endfor %}
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:5px">Operators: + − * / ** &nbsp;·&nbsp; Functions: abs() round() min() max() sqrt()</div>
+      </div>
+
+      <!-- Body Variables chip palette -->
+      <div id="formula-edit-bv-section" style="display:none;margin-bottom:12px;padding:10px 12px;background:#0d2140;border:1px solid #388bfd;border-radius:6px">
+        <div style="font-size:11px;color:#58a6ff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">
+          Body Variables — double-click a chip to insert at cursor
+        </div>
+        <div id="formula-edit-bv-chips" style="display:flex;flex-wrap:wrap;gap:5px"></div>
+      </div>
+
+      <!-- Formula textarea -->
+      <div class="form-group" style="margin-bottom:6px">
+        <label class="form-label">Formula expression</label>
+        <textarea class="form-input" id="formula-edit-input" rows="4"
+          placeholder="e.g.  wall_area * 2 + (length * width)"
+          spellcheck="false" autocomplete="off"
+          style="font-family:var(--font-mono);font-size:14px;resize:vertical;min-height:90px;line-height:1.6;letter-spacing:.3px"></textarea>
+      </div>
+
+      <!-- Resolved Body Variables found in the formula -->
+      <div id="formula-edit-resolved" style="display:none;margin-bottom:10px;padding:6px 10px;background:var(--bg-panel);border-left:3px solid #58a6ff;border-radius:4px;font-size:11px;font-family:var(--font-mono);color:var(--text-dim)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:3px">
+          <span style="color:#58a6ff;letter-spacing:.5px">VARIABLES IN THIS FORMULA</span>
+          <span id="formula-edit-result" style="color:var(--text-head);font-size:13px;font-weight:600"></span>
+        </div>
+        <div id="formula-edit-resolved-list"></div>
+      </div>
+
+      <!-- Quick-insert buttons -->
+      <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-dim);align-self:center;margin-right:2px">Insert:</span>
+        {% for v in ['length','width','height','wall_area','roof_area','floor_area','front_rear_area','surface_area','total_panel_area','volume','floor_thickness','insulation_thickness','num_doors','num_axles'] %}
+        <button class="btn btn-outline btn-sm" style="font-size:11px;font-family:var(--font-mono)" onclick="formulaInsert('{{ v }}')">{{ v }}</button>
+        {% endfor %}
+      </div>
+
+      <div class="form-hint" style="color:var(--orange)">This permanently updates the formula for this body type. Ctrl+Enter to save.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-formula-edit')">Cancel</button>
+      <button class="btn btn-primary" style="background:var(--orange);border-color:var(--orange)" onclick="saveFormulaEdit()">Save Formula</button>
+    </div>
+  </div>
+</div>
+
+<!-- Per-section permanent price modal -->
+<div class="modal-backdrop hidden" id="modal-section-price">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--blue-hi)">⊞ Edit Price — This Section Only</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-section-price')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:4px" id="sprice-mat-name"></div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px" id="sprice-section"></div>
+
+      <!-- Skin formula notice — shown instead of price input when row is skin-priced -->
+      <div id="sprice-skin-notice" style="display:none;margin-top:8px">
+        <div style="
+          background:rgba(30,100,200,0.1);
+          border:1px solid var(--blue-hi);
+          border-radius:var(--radius);
+          padding:14px 16px;
+        ">
+          <div style="font-size:14px;font-weight:700;color:var(--red);letter-spacing:0.06em;margin-bottom:6px;text-transform:uppercase">
+            ⚠ WARNING
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.55;margin-bottom:10px">
+            This item is priced from the
+            <strong id="sprice-skin-name" style="color:var(--blue-hi)"></strong>
+            skin formula. The price is computed live from the formula ingredients and cannot be overridden here.
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.5">
+            To use a custom price on this item, an admin must unlink it from the Skin Formula in
+            <strong>Body Templates</strong> — this will affect all future costings for this trailer type.
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            {% if user_can(user, 'menu.body_templates') %}
+            <button class="btn btn-outline" style="color:var(--blue-hi);border-color:var(--blue-hi);font-size:12px"
+                    onclick="showMeHowFromSpriceModal()">🎯 Show me how to unlink</button>
+            {% endif %}
+            <div id="sprice-skin-edit-btn-wrap" style="display:none">
+              <button class="btn btn-outline" style="color:var(--blue-hi);border-color:var(--blue-hi);font-size:12px"
+                      onclick="openInlineSkinEdit()">✎ Edit Skin Formula Prices</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Taping block notice — shown instead of price input when row is taping-priced -->
+      <div id="sprice-taping-notice" style="display:none;margin-top:8px">
+        <div style="
+          background:rgba(240,165,0,0.08);
+          border:1px solid #b07800;
+          border-radius:var(--radius);
+          padding:14px 16px;
+        ">
+          <div style="font-size:14px;font-weight:700;color:var(--red);letter-spacing:0.06em;margin-bottom:6px;text-transform:uppercase">
+            ⚠ WARNING
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.55;margin-bottom:10px">
+            This item is priced from the
+            <strong id="sprice-taping-name" style="color:#f0a500"></strong>
+            taping block. The price is computed live from the block ingredients and cannot be overridden here.
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.5">
+            To use a custom price on this item, an admin must unlink it from the Taping Block in
+            <strong>Body Templates</strong> — this will affect all future costings for this trailer type.
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            {% if user_can(user, 'menu.body_templates') %}
+            <button class="btn btn-outline" style="color:var(--blue-hi);border-color:var(--blue-hi);font-size:12px"
+                    onclick="showMeHowFromSpriceModal()">🎯 Show me how to unlink</button>
+            {% endif %}
+            <div id="sprice-taping-edit-btn-wrap" style="display:none">
+              <button class="btn btn-outline" style="color:#f0a500;border-color:#b07800;font-size:12px"
+                      onclick="openInlineTapingEdit()">✎ Edit Taping Block Prices</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floor plate notice — shown instead of price input when row is floor-plate priced -->
+      <div id="sprice-floor-notice" style="display:none;margin-top:8px">
+        <div style="
+          background:rgba(61,153,112,0.08);
+          border:1px solid #2d7a57;
+          border-radius:var(--radius);
+          padding:14px 16px;
+        ">
+          <div style="font-size:14px;font-weight:700;color:var(--red);letter-spacing:0.06em;margin-bottom:6px;text-transform:uppercase">
+            ⚠ WARNING
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.55;margin-bottom:10px">
+            This item is priced from the
+            <strong id="sprice-floor-name" style="color:#3d9970"></strong>
+            floor plate assembly. The price is computed live from the assembly components and cannot be overridden here.
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.5">
+            To use a custom price on this item, an admin must unlink it from the Floor Plate in
+            <strong>Body Templates</strong> — this will affect all future costings for this trailer type.
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            {% if user_can(user, 'menu.body_templates') %}
+            <button class="btn btn-outline" style="color:#3d9970;border-color:#2d7a57;font-size:12px"
+                    onclick="showMeHowFromSpriceModal()">🎯 Show me how to unlink</button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Mounting cleat notice — shown instead of price input when row is cleat priced -->
+      <div id="sprice-cleat-notice" style="display:none;margin-top:8px">
+        <div style="
+          background:rgba(74,144,217,0.08);
+          border:1px solid #2a6db5;
+          border-radius:var(--radius);
+          padding:14px 16px;
+        ">
+          <div style="font-size:14px;font-weight:700;color:var(--red);letter-spacing:0.06em;margin-bottom:6px;text-transform:uppercase">
+            ⚠ WARNING
+          </div>
+          <div style="font-size:13px;color:var(--text);line-height:1.55;margin-bottom:10px">
+            This item is priced from the
+            <strong id="sprice-cleat-name" style="color:#4a90d9"></strong>
+            mounting cleat assembly. The price is computed live from the assembly components and cannot be overridden here.
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);line-height:1.5">
+            To use a custom price on this item, an admin must unlink it from the Mounting Cleat in
+            <strong>Body Templates</strong> — this will affect all future costings for this trailer type.
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+            {% if user_can(user, 'menu.body_templates') %}
+            <button class="btn btn-outline" style="color:#4a90d9;border-color:#2a6db5;font-size:12px"
+                    onclick="showMeHowFromSpriceModal()">🎯 Show me how to unlink</button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared body-types list — loaded async when modal opens -->
+      <div id="sprice-usage-wrap" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px">
+          Also used in these body types
+        </div>
+        <div id="sprice-usage-list" style="font-size:12px;max-height:150px;overflow-y:auto;line-height:1.6"></div>
+      </div>
+
+      <!-- Normal price editor — hidden when row is skin-priced or taping-priced -->
+      <div id="sprice-edit-panel">
+        <!-- Override active banner — shown only when a unit_price_override exists -->
+        <div id="sprice-override-banner" style="display:none;margin-bottom:14px;padding:8px 12px;border-radius:6px;background:rgba(240,165,0,.08);border:1px solid rgba(240,165,0,.35)">
+          <div style="font-size:11px;font-weight:700;color:#f0a500;letter-spacing:.4px;margin-bottom:4px">⚠ OVERRIDE ACTIVE</div>
+          <div style="font-size:12px;color:var(--text-dim)">
+            Original price in materials table:
+            <span style="font-family:var(--font-mono);color:var(--text);font-weight:600" id="sprice-original-price"></span>
+          </div>
+        </div>
+        <!-- No-override info line — shown when no override exists -->
+        <div id="sprice-nooverride-line" style="font-size:12px;color:var(--text-dim);margin-bottom:16px">
+          Materials table price: <span style="font-family:var(--font-mono);color:var(--text)" id="sprice-material"></span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Price per Unit for this BOM row (R)</label>
+          <input class="form-control" type="number" id="sprice-input" step="0.01" min="0"
+            style="font-size:16px;font-family:var(--font-mono)" placeholder="0.00"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();saveSectionPrice();}"/>
+          <div class="form-hint" style="color:var(--blue-hi)">Saved as a per-row override. Other sections using the same material are unaffected.</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <!-- Restore/clear button — hidden for computed-price rows, label changes based on override state -->
+      <button class="btn btn-outline" id="sprice-clear-btn" style="color:var(--text-dim)" onclick="clearSectionPrice()"></button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="closeModal('modal-section-price')" id="sprice-cancel-btn">Cancel</button>
+        <button class="btn btn-primary" onclick="saveSectionPrice()" id="sprice-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Quote-only price modal -->
+<div class="modal-backdrop hidden" id="modal-quote-price">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--red)">✎ Edit Price — This Quote Only</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-quote-price')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:4px" id="qprice-mat-name"></div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">
+        Current price: <span style="font-family:var(--font-mono);color:var(--text)" id="qprice-current"></span>
+      </div>
+
+      <!-- Taping block notice (shown for taping rows) -->
+      <div id="qprice-taping-notice" style="display:none;margin-bottom:12px">
+        <div style="
+          background:rgba(240,165,0,0.08);
+          border:1px solid #b07800;
+          border-radius:var(--radius);
+          padding:10px 14px;
+          font-size:12px;
+          color:var(--text-dim);
+          line-height:1.5;
+        ">
+          <span style="font-weight:700;color:#f0a500;text-transform:uppercase;letter-spacing:0.06em">⚠ WARNING</span>
+          — This item is priced from the
+          <strong id="qprice-taping-name" style="color:var(--text)"></strong>
+          taping block. You can override the price for this quote below, but the taping block pricing remains unchanged in Body Templates.
+        </div>
+      </div>
+
+      <!-- Skin formula notice (shown for skin rows) -->
+      <div id="qprice-skin-notice" style="display:none;margin-bottom:12px">
+        <div style="
+          background:rgba(200,30,30,0.08);
+          border:1px solid var(--red);
+          border-radius:var(--radius);
+          padding:10px 14px;
+          font-size:12px;
+          color:var(--text-dim);
+          line-height:1.5;
+        ">
+          <span style="font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.06em">⚠ WARNING</span>
+          — This item is priced from the
+          <strong id="qprice-skin-name" style="color:var(--text)"></strong>
+          skin formula. You can override the price for this quote below, but the skin formula pricing remains unchanged in Body Templates.
+        </div>
+      </div>
+
+      <!-- Revert button (shown when a skin row has an active override) -->
+      <div id="qprice-revert-row" style="display:none;margin-bottom:12px">
+        <button class="btn btn-outline" style="width:100%;color:var(--blue-hi);border-color:var(--blue-hi)"
+                onclick="revertToSkinPrice()">
+          ↺ Revert to skin formula price
+        </button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">New Price per Unit (R)</label>
+        <input class="form-control" type="number" id="qprice-input" step="0.01" min="0"
+          style="font-size:16px;font-family:var(--font-mono)" placeholder="0.00"/>
+        <div class="form-hint" style="color:var(--red)">This change applies only to the current quote and will not update the material database.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Price change reason <span style="color:var(--red)">*</span></label>
+        <textarea class="form-control" id="qprice-reason" rows="2" maxlength="500"
+          placeholder="Why is this price being overridden? (min 5 characters)"
+          style="font-size:13px;resize:vertical"></textarea>
+        <div class="form-hint" id="qprice-reason-hint">Required — minimum 5 characters. Saved with the quote and shown as a tooltip on the line item.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-quote-price')">Cancel</button>
+      <button class="btn btn-primary" style="background:var(--red);border-color:var(--red)" onclick="saveQuotePrice()">Apply to This Quote</button>
+    </div>
+  </div>
+</div>
+
+<!-- Taping block permanent-edit warning modal -->
+<div class="modal-backdrop hidden" id="modal-taping-perm-warning">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:#f0a500">⚠ WARNING</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-taping-perm-warning')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:10px" id="tapingwarn-mat-name"></div>
+      <div style="
+        background:rgba(240,165,0,0.08);
+        border:1px solid #b07800;
+        border-radius:var(--radius);
+        padding:14px 16px;
+        font-size:13px;
+        color:var(--text);
+        line-height:1.6;
+      ">
+        This item is priced from the
+        <strong id="tapingwarn-block-name" style="color:#f0a500"></strong>
+        taping block. Editing the material price will have <strong>no effect</strong> on this BOM row — the cost is computed from the taping block ingredients, not the material price.
+        <div style="margin-top:10px;font-size:12px;color:var(--text-dim)">
+          To change this item's price, edit the taping block ingredients in
+          <strong>Taping Blocks</strong>, or unlink it from the taping block in <strong>Body Templates</strong>.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-taping-perm-warning')">Cancel</button>
+      <button class="btn btn-outline" style="color:var(--text-dim)" onclick="proceedToMaterialEditFromTaping()">Continue to Material Editor anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- Floor plate permanent-edit warning modal -->
+<div class="modal-backdrop hidden" id="modal-floor-perm-warning">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:#3d9970">⚠ WARNING</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-floor-perm-warning')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:10px" id="floorwarn-mat-name"></div>
+      <div style="
+        background:rgba(61,153,112,0.08);
+        border:1px solid #2d7a57;
+        border-radius:var(--radius);
+        padding:12px 14px;
+      ">
+        <div style="font-size:12px;color:#3d9970;font-weight:600;margin-bottom:6px">
+          ⊞ FLOOR PLATE: <span id="floorwarn-plate-name"></span>
+        </div>
+        <div style="font-size:12px;color:var(--text);line-height:1.5">
+          This material's price is computed from a floor plate assembly. Editing the material directly
+          will not change the price in the costing.<br><br>
+          To change this item's price, edit the floor plate components in
+          <strong>Floor Plates</strong>, or unlink it from the floor plate in <strong>Body Templates</strong>.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-floor-perm-warning')">Cancel</button>
+      {% if user_can(user, 'menu.body_templates') %}
+      <button class="btn btn-outline" style="color:#3d9970;border-color:#2d7a57" onclick="showMeHowFloorUnlink()">🎯 Show me how to unlink</button>
+      {% endif %}
+      <button class="btn btn-outline" style="color:var(--text-dim)" onclick="proceedToMaterialEditFromFloor()">Continue to Material Editor anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mounting cleat permanent-edit warning modal -->
+<div class="modal-backdrop hidden" id="modal-cleat-perm-warning">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:#4a90d9">⚠ WARNING</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-cleat-perm-warning')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:10px" id="cleatwarn-mat-name"></div>
+      <div style="
+        background:rgba(74,144,217,0.08);
+        border:1px solid #2a6db5;
+        border-radius:var(--radius);
+        padding:12px 14px;
+      ">
+        <div style="font-size:12px;color:#4a90d9;font-weight:600;margin-bottom:6px">
+          ⊟ MOUNTING CLEAT: <span id="cleatwarn-cleat-name"></span>
+        </div>
+        <div style="font-size:12px;color:var(--text);line-height:1.5">
+          This material's price is computed from a mounting cleat assembly. Editing the material directly
+          will not change the price in the costing.<br><br>
+          To change this item's price, edit the cleat components in
+          <strong>Mounting Cleats</strong>, or unlink it from the cleat in <strong>Body Templates</strong>.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-cleat-perm-warning')">Cancel</button>
+      {% if user_can(user, 'menu.body_templates') %}
+      <button class="btn btn-outline" style="color:#4a90d9;border-color:#2a6db5" onclick="showMeHowCleatUnlink()">🎯 Show me how to unlink</button>
+      {% endif %}
+      <button class="btn btn-outline" style="color:var(--text-dim)" onclick="proceedToMaterialEditFromCleat()">Continue to Material Editor anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- Skin formula permanent-edit warning modal -->
+<div class="modal-backdrop hidden" id="modal-skin-perm-warning">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--red)">⚠ WARNING</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-skin-perm-warning')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;font-weight:600;color:var(--text-head);margin-bottom:10px" id="skinwarn-mat-name"></div>
+      <div style="
+        background:rgba(200,30,30,0.08);
+        border:1px solid var(--red);
+        border-radius:var(--radius);
+        padding:14px 16px;
+        font-size:13px;
+        color:var(--text);
+        line-height:1.6;
+      ">
+        This item is priced from the
+        <strong id="skinwarn-formula-name" style="color:var(--blue-hi)"></strong>
+        skin formula. Editing the material price will have <strong>no effect</strong> on this BOM row — the cost is computed from the skin formula ingredients, not the material price.
+        <div style="margin-top:10px;font-size:12px;color:var(--text-dim)">
+          To change this item's price, edit the skin formula ingredients in
+          <strong>Skin Formulas</strong>, or unlink it from the skin formula in <strong>Body Templates</strong>.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-skin-perm-warning')">Cancel</button>
+      {% if user_can(user, 'menu.body_templates') %}
+      <button class="btn btn-outline" style="color:var(--blue-hi);border-color:var(--blue-hi)" onclick="showMeHowSkinUnlink()">🎯 Show me how</button>
+      {% endif %}
+      <button class="btn btn-outline" style="color:var(--text-dim)" onclick="proceedToMaterialEdit()">Continue to Material Editor anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Inline Skin Formula Edit Modal ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-inline-skin-edit">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--blue-hi)">✎ Edit Skin Formula Prices</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-inline-skin-edit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:2px" id="inline-skin-formula-name"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:14px">
+        Changes update the ingredient price globally — all formulas using this ingredient are affected.
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px" id="inline-skin-table">
+        <thead>
+          <tr style="color:var(--text-dim);font-size:11px;border-bottom:1px solid var(--border)">
+            <th style="padding:4px 8px 6px 0;text-align:left">Ingredient</th>
+            <th style="padding:4px 8px 6px;text-align:right">Qty/m²</th>
+            <th style="padding:4px 8px 6px;text-align:right">Std Price</th>
+            <th style="padding:4px 8px 6px;text-align:right">KZN Price</th>
+          </tr>
+        </thead>
+        <tbody id="inline-skin-tbody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-inline-skin-edit')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveInlineSkinEdit()">Save Prices</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Inline Taping Block Edit Modal ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-inline-taping-edit">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:#f0a500">✎ Edit Taping Block Prices</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-inline-taping-edit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:2px" id="inline-taping-block-name"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:14px">
+        Changes update the taping block item price globally — all BOM rows using this block are affected.
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="color:var(--text-dim);font-size:11px;border-bottom:1px solid var(--border)">
+            <th style="padding:4px 8px 6px 0;text-align:left">Item</th>
+            <th style="padding:4px 8px 6px;text-align:right">M²</th>
+            <th style="padding:4px 8px 6px;text-align:right">Qty</th>
+            <th style="padding:4px 8px 6px;text-align:right">Price/m²</th>
+            <th style="padding:4px 0 6px;text-align:right">Line</th>
+          </tr>
+        </thead>
+        <tbody id="inline-taping-tbody"></tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-inline-taping-edit')">Cancel</button>
+      <button class="btn btn-primary" style="background:#b07800;border-color:#b07800" onclick="saveInlineTapingEdit()">Save Prices</button>
+    </div>
+  </div>
+</div>
+
+<!-- Formula expansion tooltip (populated by JS on BOM row hover) -->
+<div id="formula-tooltip" style="
+  display:none;position:fixed;z-index:9999;
+  max-width:480px;min-width:220px;
+  background:#161b22;border:1px solid var(--border);border-radius:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,.55);padding:10px 14px;
+  pointer-events:none">
+</div>
+
+{% if is_dev_mode() and is_admin %}
+<!-- ── Dev-only: Port-conflict warning modal ─────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-pid-check">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:#f0922a">⚠ Multiple Server Processes on Port 8000</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-pid-check')">✕</button>
+    </div>
+    <div class="modal-body" style="font-size:13px;line-height:1.6">
+      <p style="color:var(--text-head);margin:0 0 10px">
+        If you're seeing stale pages, 404 errors on new routes, or missing features — multiple
+        <code>uvicorn</code> processes may be competing on port 8000. This happens when old Claude
+        worktree sessions leave their server running.
+      </p>
+
+      <p style="color:var(--text-dim);margin:0 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Step 1 — find all PIDs on port 8000</p>
+      <div style="position:relative">
+        <code id="pid-cmd-1" style="display:block;background:var(--bg-input,#1e2330);border:1px solid var(--border);border-radius:4px;padding:8px 36px 8px 12px;font-size:12px;font-family:var(--font-mono);color:var(--blue-hi);margin-bottom:4px;white-space:nowrap;overflow-x:auto">netstat -ano | findstr ":8000"</code>
+        <button onclick="_pidCopy('pid-cmd-1',this)" title="Copy" style="position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:13px;padding:2px 4px;border-radius:3px">⎘</button>
+      </div>
+      <p style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Look at the last column — any row marked <strong>LISTENING</strong> with a unique PID is a competing server.</p>
+
+      <p style="color:var(--text-dim);margin:0 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Step 2 — kill each extra PID</p>
+      <div style="position:relative">
+        <code id="pid-cmd-2" style="display:block;background:var(--bg-input,#1e2330);border:1px solid var(--border);border-radius:4px;padding:8px 36px 8px 12px;font-size:12px;font-family:var(--font-mono);color:var(--blue-hi);margin-bottom:4px">taskkill /PID &lt;pid&gt; /F</code>
+        <button onclick="_pidCopy('pid-cmd-2',this)" title="Copy" style="position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:13px;padding:2px 4px;border-radius:3px">⎘</button>
+      </div>
+      <p style="color:var(--text-dim);font-size:12px;margin:0 0 10px">Repeat for each stray PID. Keep only the one you started from the root project.</p>
+
+      <p style="color:var(--text-dim);margin:0 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Step 3 — restart cleanly</p>
+      <p style="color:var(--text-dim);font-size:12px;margin:0">
+        Open a <strong>new terminal at</strong> <code style="font-size:11px">C:\Users\micge\Documents\Costing model\</code>
+        and run <code style="font-size:11px">start.bat</code>. Do not run <code style="font-size:11px">start.bat</code> from inside any
+        <code style="font-size:11px">.claude\worktrees\*</code> subdirectory.
+      </p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('modal-pid-check')">Got it</button>
+    </div>
+  </div>
+</div>
+<script>
+function _pidCopy(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+    const prev = btn.textContent;
+    btn.textContent = '✓';
+    btn.style.color = '#56b08a';
+    setTimeout(() => { btn.textContent = prev; btn.style.color = ''; }, 1400);
+  });
+}
+</script>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* Page-specific server config — must be defined before calculator.js loads */
+const hasFullCostAccess = {{ 'true' if user.can_view_full_cost else 'false' }};
+const isAdmin           = {{ 'true' if user.is_admin else 'false' }};
+const canEditRecipes    = {{ 'true' if user_can(user, 'recipes.edit_inline') else 'false' }};
+const CURRENT_USER_ID   = {{ user.id }};
+</script>
+<script defer src="/static/js/optional_sections.js?v=3"></script>
+<script defer src="/static/js/calculator.js?v=112"></script>
+<script>
+// ── Body Type Parameters accordion ──────────────────────────────────────────
+function toggleBTP() {
+  const body = document.getElementById('btp-body');
+  const chev = document.getElementById('btp-chevron');
+  if (!body) return;
+  const nowCollapsed = body.style.display !== 'none';
+  body.style.display = nowCollapsed ? 'none' : '';
+  chev.textContent   = nowCollapsed ? '▶' : '▼';
+  localStorage.setItem('btp-collapsed', nowCollapsed ? '1' : '0');
+}
+// Restore collapsed state on page load
+(function () {
+  if (localStorage.getItem('btp-collapsed') === '1') {
+    const body = document.getElementById('btp-body');
+    const chev = document.getElementById('btp-chevron');
+    if (body) body.style.display = 'none';
+    if (chev) chev.textContent = '▶';
+  }
+})();
+</script>
+
+{% endblock %}

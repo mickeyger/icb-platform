@@ -1,0 +1,1481 @@
+{% extends "base.html" %}
+{% block title %}Materials{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Materials & Prices{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary btn-sm" onclick="openAddModal()">+ Add Material</button>
+{% endblock %}
+
+{% block head %}
+<style>
+  @keyframes mat-row-pulse {
+    0%   { background: rgba(56,139,253,.22); box-shadow: inset 0 0 0 2px var(--blue); }
+    60%  { background: rgba(56,139,253,.10); box-shadow: inset 0 0 0 2px var(--blue); }
+    100% { background: transparent;          box-shadow: none; }
+  }
+  tr.mat-row-highlight > td { animation: mat-row-pulse 2.6s ease forwards; }
+
+  /* Tab chrome */
+  .mat-tabs { display:flex; gap:0; border-bottom:2px solid var(--border); margin-bottom:18px; }
+  .mat-tab  { padding:9px 20px; font-size:13px; font-weight:600; cursor:pointer;
+               color:var(--text-dim); border-bottom:2px solid transparent; margin-bottom:-2px;
+               background:none; border-top:none; border-left:none; border-right:none; }
+  .mat-tab.active { color:var(--blue-hi); border-bottom-color:var(--blue); }
+  .mat-tab:hover:not(.active) { color:var(--text); }
+
+  /* Override badge */
+  .ovr-badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:10px;
+               font-weight:700; cursor:pointer; margin-left:5px;
+               background:rgba(255,179,64,.18); color:#FFB454; border:1px solid rgba(255,179,64,.35); }
+  .ovr-badge:hover { background:rgba(255,179,64,.3); }
+
+  /* BT override table */
+  #ovr-table td, #ovr-table th { padding:6px 10px; }
+  .diff-pos { color:var(--green); font-weight:600; }
+  .diff-neg { color:var(--red);   font-weight:600; }
+  .diff-neu { color:var(--text-dim); }
+  .protect-badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:10px;
+                   font-weight:700; background:rgba(148,108,255,.18); color:#a371f7;
+                   border:1px solid rgba(148,108,255,.35); }
+</style>
+{% endblock %}
+
+{% block content %}
+<script type="application/json" id="help-page-context">{"page":"materials","description":"Materials & Prices admin — master list of every material. Click a price cell to edit. Filter by manufacture sub-category. Bulk update via the Bulk Update button or /admin/import."}</script>
+
+<!-- ── Tab bar ──────────────────────────────────────────────────────────────── -->
+<div class="mat-tabs">
+  <button class="mat-tab active" id="tab-global" onclick="switchTab('global')">
+    Global Prices
+  </button>
+  <button class="mat-tab" id="tab-overrides" onclick="switchTab('overrides')">
+    Body Type Overrides
+    <span id="ovr-tab-count" style="display:none;margin-left:5px;background:rgba(255,179,64,.2);color:#FFB454;border-radius:10px;padding:0 7px;font-size:11px"></span>
+  </button>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     TAB 1 — GLOBAL PRICES
+════════════════════════════════════════════════════════════════ -->
+<div id="pane-global">
+
+<!-- Filter + view bar -->
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+  <select id="cat-filter" onchange="applyFilter()"
+    style="font-size:13px;padding:7px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);min-width:190px">
+    <option value="">All Categories</option>
+    {% for c in categories %}
+    <option value="{{ c.id }}">{{ c.name }}</option>
+    {% endfor %}
+  </select>
+  <select id="subcat-filter" onchange="applyFilter()"
+    style="font-size:13px;padding:7px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);min-width:190px"
+    title="Manufacture sub-category (sheet name from PRICE 2017 MARCH.xlsx)">
+    <option value="">All Sub-Categories</option>
+  </select>
+  <input id="search" style="flex:1;min-width:200px;padding:7px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px"
+    placeholder="Search name, SAP code, supplier…" oninput="applyFilter()" autocomplete="off"/>
+  <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-dim);white-space:nowrap;cursor:pointer">
+    <input type="checkbox" id="outdated-only" onchange="applyFilter()"/> Outdated (&gt;90d)
+  </label>
+  <div class="view-toggle-group">
+    <button class="view-toggle active" data-view="grouped"   onclick="setMatView('grouped')"   title="Group by category">▣ Category</button>
+    <button class="view-toggle"        data-view="subcat"    onclick="setMatView('subcat')"    title="Group by manufacture sub-category">▦ Sub-Cat</button>
+    <button class="view-toggle"        data-view="flat"      onclick="setMatView('flat')"      title="Flat sortable list">≡ Flat</button>
+  </div>
+  <button id="collapse-toggle" class="btn btn-outline btn-sm" onclick="toggleAllGroups()"
+    style="font-size:11px;padding:4px 10px" title="Collapse or expand all groups">▾ Collapse all</button>
+  <span id="mat-count" style="font-size:12px;color:var(--text-dim);white-space:nowrap"></span>
+</div>
+
+<!-- Bulk price bar -->
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px;padding:8px 12px;background:rgba(56,139,253,.06);border:1px solid rgba(56,139,253,.2);border-radius:var(--radius)">
+  <span style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--blue-hi);font-family:var(--font-mono)">Bulk price update</span>
+  <span style="font-size:12px;color:var(--text-dim)">Apply</span>
+  <input id="bulk-pct" type="number" step="0.5" min="-50" max="50" placeholder="10"
+    style="width:75px;padding:5px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;text-align:right"/>
+  <span style="font-size:12px;color:var(--text-dim)">%  to the</span>
+  <span id="bulk-affected" style="font-size:12px;color:var(--blue-hi);font-weight:600">0 currently filtered items</span>
+  <button class="btn btn-primary btn-sm" onclick="openBulkPriceModal()" style="font-size:12px;padding:4px 12px">Preview &amp; Apply</button>
+  <div style="flex:1"></div>
+  <button class="btn btn-outline btn-sm" onclick="undoLastBulkUpdate()"
+    style="font-size:11px;padding:4px 10px;color:#ffb340;border-color:rgba(255,179,64,.4)"
+    title="Revert the most recent global material price bulk update">↶ Undo material prices</button>
+  <button class="btn btn-outline btn-sm" id="undo-bom-btn" onclick="undoBomOverrideBulk()"
+    style="font-size:11px;padding:4px 10px;color:#a371f7;border-color:rgba(148,108,255,.4);display:none"
+    title="Revert the most recent BT override bulk update">↶ Undo BT overrides</button>
+</div>
+
+<!-- Materials table -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Material Price Database</span>
+    <span style="font-size:11px;color:var(--text-dim)">Double-click any cell to edit in-place · or click Edit button · click column header in Flat view to sort · <span style="color:#FFB454">●</span> badge = body-type overrides exist</span>
+  </div>
+  <div class="table-wrap">
+    <table id="mat-table">
+      <thead>
+        <tr>
+          <th data-sort="name">Material Name</th>
+          <th data-sort="category">Category</th>
+          <th data-sort="manufacture_sub_category">Sub-Category</th>
+          <th data-sort="size">Size</th>
+          <th data-sort="unit">Unit</th>
+          <th data-sort="price" style="text-align:right">Price / Unit (R)</th>
+          <th data-sort="supplier">Supplier</th>
+          <th data-sort="sap_code">SAP Code</th>
+          <th data-sort="last_updated">Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="mat-body">
+      </tbody>
+    </table>
+  </div>
+  <div class="tbl-pagination" id="mat-pager" style="display:none">
+    <span class="pg-info" id="pager-info"></span>
+    <div class="pg-btns" id="pager-btns"></div>
+    <select id="page-size" onchange="changePageSize()"
+      style="background:var(--bg-panel);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
+      <option value="25">25 / page</option>
+      <option value="50" selected>50 / page</option>
+      <option value="100">100 / page</option>
+      <option value="0">All</option>
+    </select>
+  </div>
+</div>
+
+</div><!-- /pane-global -->
+
+
+<!-- ════════════════════════════════════════════════════════════════
+     TAB 2 — BODY TYPE OVERRIDES
+════════════════════════════════════════════════════════════════ -->
+<div id="pane-overrides" style="display:none">
+
+<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+  <select id="ovr-bt-filter" onchange="loadOverrides()"
+    style="font-size:13px;padding:7px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);min-width:220px">
+    <option value="">All Body Types</option>
+  </select>
+  <input id="ovr-search" style="flex:1;min-width:200px;padding:7px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px"
+    placeholder="Search material name…" oninput="renderOverrides()" autocomplete="off"/>
+  <span id="ovr-count" style="font-size:12px;color:var(--text-dim);white-space:nowrap"></span>
+</div>
+
+<!-- Per-body-type bulk actions bar (shown when a body type is selected) -->
+<div id="ovr-bulk-bar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+     padding:8px 12px;background:rgba(148,108,255,.06);border:1px solid rgba(148,108,255,.25);border-radius:var(--radius)">
+  <span style="font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#a371f7;font-family:var(--font-mono)">Body Type Override Update</span>
+  <span style="font-size:12px;color:var(--text-dim)">Apply</span>
+  <input id="ovr-bulk-pct" type="number" step="0.5" min="-50" max="50" placeholder="5"
+    style="width:70px;padding:5px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px;text-align:right"/>
+  <span style="font-size:12px;color:var(--text-dim)">% to all visible overrides in this body type</span>
+  <button class="btn btn-sm" onclick="openOvrBulkModal()"
+    style="font-size:12px;padding:4px 12px;background:rgba(148,108,255,.2);color:#a371f7;border:1px solid rgba(148,108,255,.4)">Preview &amp; Apply</button>
+  <div style="flex:1"></div>
+  <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer" id="protect-label">
+    <input type="checkbox" id="ovr-protect-chk" onchange="toggleProtect()"/>
+    <span>Protect from bulk material updates</span>
+    <span style="color:var(--text-dim);font-size:11px" title="When protected, this body type's overrides are excluded from global bulk price propagation">ⓘ</span>
+  </label>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Body Type Price Overrides</span>
+    <span style="font-size:11px;color:var(--text-dim)">Overrides take precedence over global material price · Diff = Override − Base</span>
+  </div>
+  <div class="table-wrap">
+    <table id="ovr-table">
+      <thead>
+        <tr>
+          <th>Material</th>
+          <th>Body Type</th>
+          <th>Section</th>
+          <th style="text-align:right">Override (R)</th>
+          <th style="text-align:right">Base Price (R)</th>
+          <th style="text-align:right">Diff (R)</th>
+          <th style="text-align:right">Diff %</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ovr-body">
+        <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /pane-overrides -->
+
+
+<!-- ── Add Material Modal ──────────────────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-add">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add Material</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-add')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input class="form-control" id="add-name" placeholder="e.g. 3mm Mild Steel Plate"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="add-cat">
+            {% for c in categories %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Unit of Measure</label>
+          <select id="add-unit">
+            <option>each</option><option>metre</option><option>m²</option>
+            <option>kg</option><option>litre</option><option>sheet</option>
+            <option>set</option><option>roll</option><option>pack</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Price per Unit (R)</label>
+          <input class="form-control" type="number" id="add-price" step="0.01" min="0"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Size / Spec</label>
+          <input class="form-control" id="add-size" placeholder="e.g. 1250×2500"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Supplier</label>
+          <input class="form-control" id="add-supplier"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">SAP Code</label>
+          <input class="form-control" id="add-sap"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Manufacture Sub-Category</label>
+        <input class="form-control" id="add-subcat" list="subcat-datalist" placeholder="e.g. PLYWOODS + TIMBER"/>
+        <datalist id="subcat-datalist"></datalist>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-add')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMaterial(null)">Add Material</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Bulk Price Update Modal (Global) ───────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-bulk">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <span class="modal-title">Confirm bulk price update</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-bulk')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="bulk-summary" style="font-size:13px;line-height:1.6"></div>
+      <div id="bulk-preview" style="margin-top:12px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-size:12px;font-family:var(--font-mono)"></div>
+      <div style="margin-top:10px;font-size:12px;color:var(--text-dim)">Note: <span id="bulk-note-preview" style="color:var(--text)"></span></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-bulk')">Cancel</button>
+      <button class="btn btn-primary" id="bulk-apply-btn" onclick="applyBulkPrice()">Apply price update</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── BT Override Propagation Modal (shown after bulk apply) ─────────────── -->
+<div class="modal-backdrop hidden" id="modal-bom-overrides">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:#FFB454">⚠ Body Type Overrides Not Updated</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-bom-overrides')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px">
+        The global price update is complete. The following body type overrides use these same materials but were <strong style="color:var(--text)">not changed</strong> — they take precedence over the global price. Select which ones to also update by the same percentage.
+      </p>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="bom-select-all" onchange="toggleSelectAll(this)"/> Select all
+        </label>
+        <span id="bom-selected-count" style="font-size:12px;color:var(--text-dim)">0 selected</span>
+      </div>
+
+      <!-- Protected overrides notice (collapsed by default) -->
+      <div id="protected-notice" style="display:none;background:rgba(148,108,255,.08);border:1px solid rgba(148,108,255,.25);border-radius:var(--radius);padding:8px 12px;margin-bottom:10px;font-size:12px">
+        <strong style="color:#a371f7">🔒 Protected body types</strong> — the following are excluded from propagation because their overrides are set to "Protect from bulk updates":
+        <div id="protected-list" style="margin-top:6px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)"></div>
+      </div>
+
+      <div id="bom-overrides-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius)">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-bom-overrides')">Skip — keep overrides as is</button>
+      <button class="btn btn-primary" id="bom-apply-btn" onclick="applyBomOverrides()"
+        style="background:rgba(255,179,64,.2);color:#FFB454;border-color:rgba(255,179,64,.4)">
+        Apply to selected overrides
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Override Drilldown Modal (badge click) ─────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-ovr-drill">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <span class="modal-title" id="drill-title">Body Type Overrides</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-ovr-drill')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px">
+        These body types have a price override for this material that differs from the global base price.
+      </p>
+      <div id="drill-body" style="font-size:13px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-ovr-drill')">Close</button>
+      <button class="btn btn-outline" onclick="closeModal('modal-ovr-drill');switchTab('overrides')" style="color:#FFB454;border-color:rgba(255,179,64,.4)">
+        Open BT Overrides tab →
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Per-row Adjust % Modal (BT overrides tab) ─────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-ovr-adjust">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title">Adjust Override Price</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-ovr-adjust')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="adj-item-label" style="font-size:13px;color:var(--text-dim);margin:0 0 14px"></p>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Set price directly (R)</label>
+          <input class="form-control" type="number" id="adj-direct" step="0.0001" min="0" placeholder="e.g. 125.50"/>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin:6px 0 14px">— or —</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Apply % change</label>
+          <input class="form-control" type="number" id="adj-pct" step="0.5" min="-50" max="50" placeholder="e.g. 5"/>
+        </div>
+        <div class="form-group" style="align-self:flex-end">
+          <button class="btn btn-outline btn-sm" onclick="calcAdjPct()">Calculate</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-ovr-adjust')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveOvrAdjust()">Save Override</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── BT Override Bulk Apply Modal (overrides tab) ──────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-ovr-bulk">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title">Confirm BT Override Bulk Update</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-ovr-bulk')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="ovr-bulk-summary" style="font-size:13px;line-height:1.6"></div>
+      <div id="ovr-bulk-preview" style="margin-top:12px;max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-size:12px;font-family:var(--font-mono)"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-ovr-bulk')">Cancel</button>
+      <button class="btn btn-primary" id="ovr-bulk-apply-btn" onclick="applyOvrBulk()"
+        style="background:rgba(148,108,255,.2);color:#a371f7;border-color:rgba(148,108,255,.4)">
+        Apply to all visible overrides
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit Material Modal ─────────────────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-edit">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-modal-title">Edit Material</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-edit')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-id"/>
+      <input type="hidden" id="edit-version-ts"/>
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input class="form-control" id="edit-name"/>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="edit-cat">
+            {% for c in categories %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Unit of Measure</label>
+          <select id="edit-unit">
+            <option>each</option><option>metre</option><option>m²</option>
+            <option>kg</option><option>litre</option><option>sheet</option>
+            <option>set</option><option>roll</option><option>pack</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Price per Unit (R)</label>
+          <input class="form-control" type="number" id="edit-price" step="0.01" min="0"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Size / Spec</label>
+          <input class="form-control" id="edit-size"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Supplier</label>
+          <input class="form-control" id="edit-supplier"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">SAP Code</label>
+          <input class="form-control" id="edit-sap"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Manufacture Sub-Category</label>
+        <input class="form-control" id="edit-subcat" list="subcat-datalist"/>
+      </div>
+      <div id="price-history-section" style="margin-top:8px;display:none">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px">Price History</div>
+        <div id="price-history-list" style="font-size:12px;font-family:var(--font-mono)"></div>
+      </div>
+
+      <!-- Body-type usage — loaded async when modal opens -->
+      <div id="edit-usage-section" style="margin-top:10px;display:none">
+        <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px">
+          Used in body types (<span id="edit-usage-count">0</span>)
+        </div>
+        <div id="edit-usage-list" style="font-size:12px;max-height:160px;overflow-y:auto;line-height:1.6"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="deleteMaterial()">Delete</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-outline" onclick="closeModal('modal-edit')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMaterial(document.getElementById('edit-id').value)">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── URL params ──────────────────────────────────────────────────────────────
+const _urlParams  = new URLSearchParams(location.search);
+const _editOnLoad = +_urlParams.get('edit') || null;
+const _returnUrl  = _urlParams.get('return') || null;
+
+// ── State ───────────────────────────────────────────────────────────────────
+let matMap    = {};
+let filtered  = [];
+let matView   = localStorage.getItem('mat-view')      || 'grouped';
+let sortKey   = localStorage.getItem('mat-sort-key')  || 'name';
+let sortDir   = localStorage.getItem('mat-sort-dir')  || 'asc';
+let curPage   = 1;
+let pgSize    = +(localStorage.getItem('mat-page-size') || 50);
+
+// State for BT override propagation after bulk update
+let _pendingBomOverrides = [];  // bypassed_overrides from last bulk update
+let _pendingBulkPct      = 0;
+
+// State for BT overrides tab
+let ovrData      = [];  // all loaded override rows
+let ovrFiltered  = [];
+let _adjBomId    = null;
+let _adjCurPrice = 0;
+
+// ── Tab switching ───────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('pane-global').style.display    = tab === 'global'    ? '' : 'none';
+  document.getElementById('pane-overrides').style.display = tab === 'overrides' ? '' : 'none';
+  document.getElementById('tab-global').classList.toggle('active',    tab === 'global');
+  document.getElementById('tab-overrides').classList.toggle('active', tab === 'overrides');
+  if (tab === 'overrides') loadOverrides();
+}
+
+// ── Load materials ──────────────────────────────────────────────────────────
+async function loadMaterials() {
+  document.getElementById('mat-body').innerHTML = skeletonRows(9, 8);
+  try {
+    const mats = await api('GET', '/api/materials');
+    matMap = {};
+    mats.forEach(m => matMap[m.id] = m);
+    populateSubcatOptions();
+    applyFilter();
+    _handleDeepLink();
+    // Update BT overrides tab count badge
+    const totalOverrides = mats.reduce((s, m) => s + (m.override_count || 0), 0);
+    const tc = document.getElementById('ovr-tab-count');
+    if (totalOverrides > 0) {
+      tc.textContent = totalOverrides;
+      tc.style.display = '';
+    } else {
+      tc.style.display = 'none';
+    }
+  } catch(e) {
+    document.getElementById('mat-body').innerHTML =
+      `<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--red)">⚠ Failed to load — ${escHtml(e.message)}</td></tr>`;
+    toast('Failed to load materials: ' + e.message, 'error');
+  }
+}
+
+// ── Deep-link ───────────────────────────────────────────────────────────────
+function _handleDeepLink() {
+  if (!_editOnLoad || !matMap[_editOnLoad]) return;
+  const m = matMap[_editOnLoad];
+  if (matView !== 'flat') setMatView('flat');
+  document.getElementById('search').value = '';
+  document.getElementById('cat-filter').value = '';
+  document.getElementById('outdated-only').checked = false;
+  applyFilter();
+  setTimeout(() => {
+    const row = document.querySelector(`tr[data-id="${_editOnLoad}"]`);
+    if (row) {
+      row.classList.add('mat-row-highlight');
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    openEditModal(_editOnLoad);
+    setTimeout(() => {
+      const priceInput = document.getElementById('edit-price');
+      if (priceInput) { priceInput.focus(); priceInput.select(); }
+    }, 180);
+  }, 120);
+}
+
+function isOutdated(m) {
+  if (!m.last_updated) return false;
+  const d = new Date(m.last_updated);
+  return !isNaN(d) && (Date.now() - d) > 90 * 864e5;
+}
+
+// ── Filter & sort ───────────────────────────────────────────────────────────
+function populateSubcatOptions() {
+  const sel = document.getElementById('subcat-filter');
+  const dl  = document.getElementById('subcat-datalist');
+  const subs = Array.from(new Set(
+    Object.values(matMap).map(m => m.manufacture_sub_category).filter(Boolean)
+  )).sort((a,b) => a.localeCompare(b));
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Sub-Categories</option>'
+    + subs.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('');
+  if (subs.includes(cur)) sel.value = cur;
+  if (dl) dl.innerHTML = subs.map(s => `<option value="${escHtml(s)}">`).join('');
+}
+
+function applyFilter() {
+  const catId       = +document.getElementById('cat-filter').value || null;
+  const subCat      = document.getElementById('subcat-filter').value || '';
+  const q           = document.getElementById('search').value.toLowerCase().trim();
+  const outdatedOnly = document.getElementById('outdated-only').checked;
+
+  filtered = Object.values(matMap).filter(m => {
+    if (catId && m.category_id !== catId) return false;
+    if (subCat && (m.manufacture_sub_category || '') !== subCat) return false;
+    if (q && !m.name.toLowerCase().includes(q) &&
+        !(m.sap_code||'').toLowerCase().includes(q) &&
+        !(m.supplier||'').toLowerCase().includes(q)) return false;
+    if (outdatedOnly && !isOutdated(m)) return false;
+    return true;
+  });
+
+  doSort();
+  curPage = 1;
+  document.getElementById('mat-count').textContent =
+    `${filtered.length} of ${Object.keys(matMap).length} items`;
+  const bulkAffected = document.getElementById('bulk-affected');
+  if (bulkAffected) bulkAffected.textContent = `${filtered.length} currently filtered item${filtered.length===1?'':'s'}`;
+  renderTable();
+}
+
+function _currentFilterSummary() {
+  const parts = [];
+  const catSel = document.getElementById('cat-filter');
+  if (catSel.value) parts.push(`Category: ${catSel.options[catSel.selectedIndex].text}`);
+  const subSel = document.getElementById('subcat-filter');
+  if (subSel.value) parts.push(`Sub-Category: ${subSel.value}`);
+  const q = document.getElementById('search').value.trim();
+  if (q) parts.push(`Search: "${q}"`);
+  if (document.getElementById('outdated-only').checked) parts.push(`Outdated only`);
+  return parts.join('; ');
+}
+
+// ── Bulk price modal ─────────────────────────────────────────────────────────
+function openBulkPriceModal() {
+  const pct = parseFloat(document.getElementById('bulk-pct').value);
+  if (!pct || isNaN(pct)) { toast('Enter a non-zero percentage', 'error'); return; }
+  if (Math.abs(pct) > 50) { toast('Maximum is ±50%', 'error'); return; }
+  if (!filtered.length) { toast('No items in current filter', 'error'); return; }
+  const summary = _currentFilterSummary() || 'All materials';
+  const factor  = 1 + pct/100;
+  const sign    = pct > 0 ? '+' : '';
+  const noteText = `${sign}${pct}% on ${new Date().toISOString().slice(0,10)}${summary ? ' — ' + summary : ''}`;
+  document.getElementById('bulk-note-preview').textContent = noteText;
+
+  const totalOld = filtered.reduce((s,m)=>s+(m.price||0), 0);
+  const totalNew = totalOld * factor;
+  const sumEl = document.getElementById('bulk-summary');
+  sumEl.innerHTML =
+    `<div><strong>${filtered.length}</strong> items will change by <strong style="color:${pct>0?'var(--green)':'var(--red)'}">${sign}${pct}%</strong></div>
+     <div style="margin-top:4px;color:var(--text-dim)">Filter: ${escHtml(summary)}</div>
+     <div style="margin-top:6px;font-family:var(--font-mono)">
+       Total: R ${totalOld.toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2})}
+       → R ${totalNew.toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2})}
+       <span style="color:${pct>0?'var(--green)':'var(--red)'}">(${sign}R ${(totalNew-totalOld).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2})})</span>
+     </div>`;
+  const sample = filtered.slice(0,30).map(m =>
+    `<div style="display:flex;gap:10px;padding:2px 0;border-bottom:1px solid rgba(48,54,61,.4)">
+       <span style="flex:1;color:var(--text)">${escHtml(m.name)}</span>
+       <span style="color:var(--text-dim)">R ${(+m.price).toFixed(2)}</span>
+       <span style="color:var(--text-dim)">→</span>
+       <span style="color:${pct>0?'var(--green)':'var(--red)'};min-width:80px;text-align:right">R ${(m.price*factor).toFixed(2)}</span>
+     </div>`).join('');
+  document.getElementById('bulk-preview').innerHTML = sample
+    + (filtered.length > 30 ? `<div style="padding:6px 0;color:var(--text-dim);text-align:center">… and ${filtered.length-30} more</div>` : '');
+  openModal('modal-bulk');
+}
+
+async function applyBulkPrice() {
+  const pct = parseFloat(document.getElementById('bulk-pct').value);
+  const ids = filtered.map(m => m.id);
+  const summary = _currentFilterSummary() || 'All materials';
+  const btn = document.getElementById('bulk-apply-btn');
+  const restore = showBusy(btn, 'Applying…');
+  try {
+    const res = await api('POST', '/api/materials/bulk-price', { ids, percent: pct, filter_summary: summary });
+    closeModal('modal-bulk');
+    document.getElementById('bulk-pct').value = '';
+    toast(`Updated ${res.updated} item${res.updated===1?'':'s'} ✓`, 'success');
+    await loadMaterials();
+
+    // Show BT override propagation modal if there are bypassed overrides
+    _pendingBomOverrides = res.bypassed_overrides || [];
+    _pendingBulkPct = pct;
+    const protected_ = res.protected_overrides || [];
+
+    if (_pendingBomOverrides.length > 0 || protected_.length > 0) {
+      _openBomOverrideModal(_pendingBomOverrides, protected_, pct);
+    }
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    restore();
+  }
+}
+
+function _openBomOverrideModal(bypassed, protected_, pct) {
+  const sign = pct > 0 ? '+' : '';
+
+  // Protected notice
+  const protDiv = document.getElementById('protected-notice');
+  if (protected_.length > 0) {
+    protDiv.style.display = '';
+    document.getElementById('protected-list').innerHTML =
+      protected_.map(r => `${escHtml(r.trailer_type_name)} — ${escHtml(r.material_name)}`).join('<br>');
+  } else {
+    protDiv.style.display = 'none';
+  }
+
+  // Bypassed list with opt-in unchecked checkboxes
+  const list = document.getElementById('bom-overrides-list');
+  document.getElementById('bom-select-all').checked = false;
+  document.getElementById('bom-selected-count').textContent = '0 selected';
+
+  if (bypassed.length === 0) {
+    list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim)">No unprotected overrides to update.</div>`;
+    document.getElementById('bom-apply-btn').style.display = 'none';
+  } else {
+    document.getElementById('bom-apply-btn').style.display = '';
+    list.innerHTML = bypassed.map(r => {
+      const newOvr = (r.current_override * (1 + pct/100)).toFixed(4);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px" data-bom-id="${r.bom_id}">
+        <input type="checkbox" class="bom-ovr-chk" onchange="updateBomSelectedCount()" style="flex-shrink:0"/>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;color:var(--text)">${escHtml(r.material_name)}</div>
+          <div style="color:var(--text-dim)">${escHtml(r.trailer_type_name)}</div>
+        </div>
+        <div style="text-align:right;font-family:var(--font-mono);white-space:nowrap">
+          <span style="color:var(--text-dim)">R ${r.current_override.toFixed(2)}</span>
+          <span style="color:var(--text-dim)"> → </span>
+          <span style="color:${pct>0?'var(--green)':'var(--red)'}">R ${newOvr}</span>
+          <span style="font-size:10px;color:var(--text-dim);margin-left:4px">(${sign}${pct}%)</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  openModal('modal-bom-overrides');
+}
+
+function toggleSelectAll(chk) {
+  document.querySelectorAll('.bom-ovr-chk').forEach(c => c.checked = chk.checked);
+  updateBomSelectedCount();
+}
+
+function updateBomSelectedCount() {
+  const total    = document.querySelectorAll('.bom-ovr-chk').length;
+  const selected = document.querySelectorAll('.bom-ovr-chk:checked').length;
+  document.getElementById('bom-selected-count').textContent = `${selected} of ${total} selected`;
+  document.getElementById('bom-select-all').checked = selected === total && total > 0;
+  document.getElementById('bom-select-all').indeterminate = selected > 0 && selected < total;
+}
+
+async function applyBomOverrides() {
+  const checked = [...document.querySelectorAll('.bom-ovr-chk:checked')];
+  if (!checked.length) { toast('Select at least one override to update', 'error'); return; }
+  const bom_ids = checked.map(c => +c.closest('[data-bom-id]').dataset.bomId);
+  const btn = document.getElementById('bom-apply-btn');
+  const restore = showBusy(btn, 'Applying…');
+  try {
+    const res = await api('POST', '/api/materials/bulk-price/apply-bom-overrides',
+                          { bom_ids, percent: _pendingBulkPct });
+    closeModal('modal-bom-overrides');
+    toast(`Updated ${res.updated} BT override${res.updated===1?'':'s'} ✓`, 'success');
+    document.getElementById('undo-bom-btn').style.display = '';
+    await loadMaterials();
+    if (document.getElementById('pane-overrides').style.display !== 'none') loadOverrides();
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    restore();
+  }
+}
+
+async function undoLastBulkUpdate() {
+  if (!await confirmModal('Revert the most recent global material price bulk update?',
+        { title: 'Undo material price update', okText: 'Undo', danger: true })) return;
+  try {
+    const res = await api('POST', '/api/materials/bulk-price/undo', {});
+    toast(`Reverted ${res.reverted} item${res.reverted===1?'':'s'} ✓`, 'success');
+    await loadMaterials();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function undoBomOverrideBulk() {
+  if (!await confirmModal('Revert the most recent BT override bulk update?',
+        { title: 'Undo BT overrides', okText: 'Undo', danger: true })) return;
+  try {
+    const res = await api('POST', '/api/materials/bulk-price/undo-bom-overrides', {});
+    toast(`Reverted ${res.reverted} BT override${res.reverted===1?'':'s'} ✓`, 'success');
+    document.getElementById('undo-bom-btn').style.display = 'none';
+    await loadMaterials();
+    if (document.getElementById('pane-overrides').style.display !== 'none') loadOverrides();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── Override drilldown badge click ───────────────────────────────────────────
+async function openOvrDrilldown(matId, matName) {
+  document.getElementById('drill-title').textContent = `Overrides: ${matName}`;
+  document.getElementById('drill-body').innerHTML = '<div style="color:var(--text-dim);padding:10px 0">Loading…</div>';
+  openModal('modal-ovr-drill');
+  try {
+    const rows = await api('GET', `/api/materials/${matId}/bom-overrides`);
+    if (!rows.length) {
+      document.getElementById('drill-body').innerHTML = '<div style="color:var(--text-dim)">No overrides found.</div>';
+      return;
+    }
+    document.getElementById('drill-body').innerHTML = rows.map(r => {
+      const diff = r.override_price - (r.base_price || 0);
+      const pct  = r.base_price ? ((diff / r.base_price) * 100).toFixed(1) : '—';
+      const diffCls = diff > 0 ? 'diff-pos' : diff < 0 ? 'diff-neg' : 'diff-neu';
+      const lock = r.protect_overrides ? ' <span class="protect-badge">🔒 Protected</span>' : '';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
+        <div style="flex:1;min-width:0">
+          <strong>${escHtml(r.trailer_type_name)}</strong>${lock}
+          ${r.section ? `<div style="color:var(--text-dim);font-size:11px">${escHtml(r.section)}</div>` : ''}
+        </div>
+        <div style="text-align:right;font-family:var(--font-mono)">
+          <div>Override: <strong>R ${r.override_price.toFixed(2)}</strong></div>
+          <div style="color:var(--text-dim)">Base: R ${(r.base_price||0).toFixed(2)}</div>
+          <div class="${diffCls}">${diff>=0?'+':''}R ${diff.toFixed(2)} (${diff>=0?'+':''}${pct}%)</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('drill-body').innerHTML = `<div style="color:var(--red)">${escHtml(e.message)}</div>`;
+  }
+}
+
+// Commodity trend sparkline (sub-cat view)
+const _trendCache = {};
+let _trendsEnabled = null;
+
+function _renderSparkline(points, pct) {
+  if (!points || points.length < 2) return '';
+  const w = 80, h = 22;
+  const closes = points.map(p => p.close);
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const range = (max - min) || 1;
+  const step = w / (closes.length - 1);
+  const path = closes.map((c, i) => `${(i * step).toFixed(1)},${(h - ((c - min) / range) * h).toFixed(1)}`).join(' ');
+  const stroke = pct >= 0 ? '#4ade80' : '#ff6b6b';
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle">
+    <polyline fill="none" stroke="${stroke}" stroke-width="1.4" points="${path}"/>
+  </svg>`;
+}
+
+async function _loadCommodityTrends() {
+  const slots = document.querySelectorAll('.trend-slot[data-sub]');
+  if (!slots.length) return;
+  if (_trendsEnabled === false) return;
+  if (_trendsEnabled === null) {
+    try {
+      const r = await api('GET', '/api/commodity/enabled');
+      _trendsEnabled = !!r.enabled;
+    } catch(e) { _trendsEnabled = false; return; }
+    if (!_trendsEnabled) return;
+  }
+  for (const slot of slots) {
+    const sub = slot.dataset.sub;
+    if (!sub || sub === '— Unassigned —') continue;
+    if (slot.dataset.loaded === '1') continue;
+    slot.dataset.loaded = '1';
+    let data = _trendCache[sub];
+    if (!data) {
+      try {
+        data = await api('GET', `/api/commodity/sub-category-trend?sub_category=${encodeURIComponent(sub)}`);
+        _trendCache[sub] = data;
+      } catch(e) { continue; }
+    }
+    if (!data || !data.points || data.points.length < 2) continue;
+    const pct = data.pct_change;
+    const sign = pct > 0 ? '+' : '';
+    const color = pct >= 0 ? '#4ade80' : '#ff6b6b';
+    const tip = `${data.ticker} (${data.currency}) — ${data.description}\n${data.points.length} trading days · ${sign}${pct}%`;
+    slot.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle" title="${escHtml(tip)}">
+      ${_renderSparkline(data.points, pct)}
+      <span style="font-family:var(--font-mono);font-size:10px;color:${color};font-weight:600">${sign}${pct}%</span>
+      <span style="font-size:10px;color:var(--text-dim)">${escHtml(data.ticker)}</span>
+    </span>`;
+  }
+}
+
+function _isBulkRecent(m) {
+  if (!m.last_bulk_update_at) return false;
+  const t = new Date(m.last_bulk_update_at).getTime();
+  return !isNaN(t) && (Date.now() - t) < 30 * 864e5;
+}
+
+function doSort() {
+  const numeric = new Set(['price']);
+  const dir = sortDir === 'asc' ? 1 : -1;
+  filtered.sort((a, b) => {
+    let va = a[sortKey], vb = b[sortKey];
+    if (numeric.has(sortKey)) { va = +va||0; vb = +vb||0; }
+    else { va = (va||'').toString().toLowerCase(); vb = (vb||'').toString().toLowerCase(); }
+    return va < vb ? -dir : va > vb ? dir : 0;
+  });
+}
+
+function setMatView(v) {
+  matView = v;
+  localStorage.setItem('mat-view', v);
+  document.querySelectorAll('.view-toggle').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('#mat-table thead th[data-sort]').forEach(th =>
+    th.style.pointerEvents = v === 'flat' ? '' : 'none');
+  curPage = 1;
+  renderTable();
+  syncCollapseToggleLabel();
+}
+
+function changePageSize() {
+  pgSize = +document.getElementById('page-size').value;
+  localStorage.setItem('mat-page-size', pgSize);
+  curPage = 1;
+  renderTable();
+}
+
+function gotoPage(p) { curPage = p; renderTable(); }
+
+// ── Render ──────────────────────────────────────────────────────────────────
+function renderTable() {
+  const tbody = document.getElementById('mat-body');
+  const pager = document.getElementById('mat-pager');
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-dim)">No materials found</td></tr>';
+    pager.style.display = 'none';
+    return;
+  }
+
+  setTimeout(syncCollapseToggleLabel, 0);
+  setTimeout(_loadCommodityTrends, 0);
+
+  if (matView === 'flat') {
+    const total = filtered.length;
+    const ps = pgSize === 0 ? total : pgSize;
+    const totalPages = Math.max(1, Math.ceil(total / ps));
+    if (curPage > totalPages) curPage = totalPages;
+    const start = (curPage - 1) * ps;
+    const slice = filtered.slice(start, start + ps);
+    tbody.innerHTML = slice.map(m => rowHtml(m)).join('');
+    renderPager(totalPages, start, slice.length, total);
+    return;
+  }
+
+  pager.style.display = 'none';
+  const groups = {};
+  const useSubcat = matView === 'subcat';
+  filtered.forEach(m => {
+    const key = useSubcat ? (m.manufacture_sub_category || '— Unassigned —') : m.category;
+    (groups[key] = groups[key] || []).push(m);
+  });
+  const sortedKeys = Object.keys(groups).sort((a,b) => a.localeCompare(b));
+  let html = '';
+  for (const key of sortedKeys) {
+    const items = groups[key];
+    const gid = 'grp-' + key.replace(/[^a-z0-9]/gi,'_');
+    const collapsed = _collapsedGroups.has(gid);
+    const arrow = collapsed ? '▶' : '▼';
+    const addBtn = useSubcat ? '' :
+      `<button class="btn btn-outline btn-sm no-print" style="float:right;font-size:11px;padding:2px 8px"
+        onclick="event.stopPropagation();openAddModal('${escHtml(key)}')">+ Add to ${escHtml(key)}</button>`;
+    const rowsHtml = items.map(m => {
+      let h = rowHtml(m).replace('<tr ', `<tr data-grp="${gid}" `);
+      if (collapsed) {
+        h = h.match(/style="/) ? h.replace(/style="/, 'style="display:none;') : h.replace('<tr ', '<tr style="display:none" ');
+      }
+      return h;
+    }).join('');
+    const trendSlot = useSubcat ? `<span class="trend-slot" data-sub="${escHtml(key)}" style="margin-left:14px"></span>` : '';
+    html += `<tr class="grp-header" data-gid="${gid}" onclick="toggleCatGroup('${gid}')" style="cursor:pointer;background:var(--bg-panel)">
+      <td colspan="10" style="padding:8px 12px">
+        <span class="grp-arrow" data-gid="${gid}" style="font-family:var(--font-mono);font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--blue-hi)">
+          ${arrow} ${escHtml(key)}
+        </span>
+        <span style="font-size:11px;color:var(--text-dim);margin-left:8px">${items.length} items</span>
+        ${trendSlot}
+        ${addBtn}
+      </td>
+    </tr>${rowsHtml}`;
+  }
+  tbody.innerHTML = html;
+}
+
+function rowHtml(m) {
+  const od = isOutdated(m);
+  const bulk = _isBulkRecent(m);
+  const bulkTip = bulk ? `Items price updated by group: ${m.last_bulk_update_note || ''}` : '';
+  const bulkAttr = bulk ? ` style="background:rgba(255,180,84,.08)" data-tooltip="${escHtml(bulkTip)}" title="${escHtml(bulkTip)}"` : '';
+  const bulkBadge = bulk ? ' <span style="color:#FFB454;font-size:10px" title="Bulk-updated">●</span>' : '';
+  const ovrCount = m.override_count || 0;
+  const ovrBadge = ovrCount > 0
+    ? ` <span class="ovr-badge" data-mat-id="${m.id}" data-mat-name="${escHtml(m.name)}"
+          onclick="event.stopPropagation();openOvrDrilldown(+this.dataset.matId,this.dataset.matName)"
+          title="${ovrCount} body type override${ovrCount>1?'s':''} — click to view">${ovrCount} BT</span>`
+    : '';
+  return `<tr data-id="${m.id}"${bulkAttr}>
+    <td style="font-size:13px">${escHtml(m.name)}${od ? ' <span style="color:#ffb340" title="Not updated in 90+ days">⚠</span>' : ''}${bulkBadge}${ovrBadge}</td>
+    <td><span class="tag tag-${catCls(m.category)}">${escHtml(m.category)}</span></td>
+    <td style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono)">${escHtml(m.manufacture_sub_category)}</td>
+    <td style="font-size:12px;color:var(--text-dim)">${escHtml(m.size)}</td>
+    <td style="font-size:12px;color:var(--text-dim)">${escHtml(m.unit)}</td>
+    <td class="td-num" style="color:var(--blue-hi);font-weight:600">
+      R ${Number(m.price).toLocaleString('en-ZA',{minimumFractionDigits:2,maximumFractionDigits:2})}
+    </td>
+    <td style="font-size:12px;color:var(--text-dim)">${escHtml(m.supplier)}</td>
+    <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${escHtml(m.sap_code)}</td>
+    <td style="font-size:11px;${od ? 'color:#ffb340;font-weight:600' : 'color:var(--text-dim)'}">${escHtml(m.last_updated)}</td>
+    <td class="td-actions">
+      <button class="btn btn-outline btn-sm" onclick="openEditModal(${m.id})">Edit</button>
+      <button class="btn btn-outline btn-sm" onclick="duplicateMaterial(${m.id})" title="Duplicate this material">⧉</button>
+    </td>
+  </tr>`;
+}
+
+function renderPager(totalPages, start, visCount, total) {
+  const pager = document.getElementById('mat-pager');
+  pager.style.display = 'flex';
+  document.getElementById('pager-info').textContent = `${start + 1}–${start + visCount} of ${total}`;
+  const from = Math.max(1, curPage - 2), to = Math.min(totalPages, curPage + 2);
+  let h = `<button class="pg-btn" onclick="gotoPage(1)" ${curPage===1?'disabled':''}>«</button>
+           <button class="pg-btn" onclick="gotoPage(${curPage-1})" ${curPage===1?'disabled':''}>‹</button>`;
+  for (let p = from; p <= to; p++)
+    h += `<button class="pg-btn${p===curPage?' active':''}" onclick="gotoPage(${p})">${p}</button>`;
+  h += `<button class="pg-btn" onclick="gotoPage(${curPage+1})" ${curPage===totalPages?'disabled':''}>›</button>
+        <button class="pg-btn" onclick="gotoPage(${totalPages})" ${curPage===totalPages?'disabled':''}>»</button>`;
+  document.getElementById('pager-btns').innerHTML = h;
+}
+
+const _collapsedGroups = new Set();
+
+function _setGroupCollapsed(gid, collapse) {
+  document.querySelectorAll(`tr[data-grp="${gid}"]`).forEach(tr => {
+    tr.style.display = collapse ? 'none' : '';
+  });
+  if (collapse) _collapsedGroups.add(gid); else _collapsedGroups.delete(gid);
+  const arrow = document.querySelector(`.grp-arrow[data-gid="${gid}"]`);
+  if (arrow) arrow.textContent = arrow.textContent.replace(/[▼▶]/, collapse ? '▶' : '▼');
+}
+
+function toggleCatGroup(gid) {
+  _setGroupCollapsed(gid, !_collapsedGroups.has(gid));
+  syncCollapseToggleLabel();
+}
+
+function toggleAllGroups() {
+  const headers = document.querySelectorAll('.grp-header[data-gid]');
+  if (!headers.length) return;
+  const anyOpen = [...headers].some(h => !_collapsedGroups.has(h.dataset.gid));
+  headers.forEach(h => _setGroupCollapsed(h.dataset.gid, anyOpen));
+  syncCollapseToggleLabel();
+}
+
+function syncCollapseToggleLabel() {
+  const btn = document.getElementById('collapse-toggle');
+  if (!btn) return;
+  const headers = document.querySelectorAll('.grp-header[data-gid]');
+  const anyOpen = [...headers].some(h => !_collapsedGroups.has(h.dataset.gid));
+  btn.textContent = anyOpen ? '▾ Collapse all' : '▸ Expand all';
+  btn.style.display = (matView === 'flat' || !headers.length) ? 'none' : '';
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function catCls(cat) {
+  const map = {'Steel':'steel','Stainless Steel':'steel','Aluminium':'alu',
+    'Resins & Adhesives':'grp','Plywood & Timber':'grp','Rubber':'rubber',
+    'Paint & Consumables':'paint','Electrical':'elec'};
+  return map[cat] || 'default';
+}
+
+// ── Add Material ─────────────────────────────────────────────────────────────
+function openAddModal(preselectedCat) {
+  document.getElementById('add-name').value = '';
+  document.getElementById('add-price').value = '';
+  document.getElementById('add-size').value = '';
+  document.getElementById('add-supplier').value = '';
+  document.getElementById('add-sap').value = '';
+  document.getElementById('add-subcat').value = '';
+  if (preselectedCat) {
+    const sel = document.getElementById('add-cat');
+    for (const opt of sel.options) {
+      if (opt.text === preselectedCat) { sel.value = opt.value; break; }
+    }
+  }
+  openModal('modal-add');
+  setTimeout(() => document.getElementById('add-name').focus(), 100);
+}
+
+async function duplicateMaterial(id) {
+  const m = matMap[id];
+  if (!m) { toast('Material not found', 'error'); return; }
+  try {
+    const res = await api('POST', '/api/materials', {
+      name:            'Copy of ' + m.name,
+      category_id:     m.category_id,
+      unit_of_measure: m.unit,
+      price_per_unit:  m.price,
+      size:            m.size || '',
+      supplier:        m.supplier || '',
+      sap_code:        m.sap_code || '',
+      manufacture_sub_category: m.manufacture_sub_category || null,
+    });
+    await loadMaterials();
+    toast('Duplicated — rename below', 'success');
+    openEditModal(res.id);
+  } catch(e) {
+    toast('Duplicate failed: ' + (e.message || e), 'error');
+  }
+}
+
+// ── Edit Material ─────────────────────────────────────────────────────────────
+async function openEditModal(id) {
+  const m = matMap[id];
+  if (!m) { toast('Material not found', 'error'); return; }
+  document.getElementById('edit-id').value         = m.id;
+  document.getElementById('edit-version-ts').value = m.version_ts || '';
+  document.getElementById('edit-modal-title').textContent = 'Edit: ' + m.name;
+  document.getElementById('edit-name').value     = m.name;
+  document.getElementById('edit-price').value    = m.price;
+  document.getElementById('edit-size').value     = m.size || '';
+  document.getElementById('edit-supplier').value = m.supplier || '';
+  document.getElementById('edit-sap').value      = m.sap_code || '';
+  document.getElementById('edit-subcat').value   = m.manufacture_sub_category || '';
+
+  const usel = document.getElementById('edit-unit');
+  let found = false;
+  for (const opt of usel.options) {
+    if (opt.value === m.unit) { usel.value = m.unit; found = true; break; }
+  }
+  if (!found) {
+    const opt = document.createElement('option');
+    opt.value = m.unit; opt.text = m.unit; usel.appendChild(opt); usel.value = m.unit;
+  }
+  const csel = document.getElementById('edit-cat');
+  for (const opt of csel.options) {
+    if (+opt.value === m.category_id) { csel.value = opt.value; break; }
+  }
+
+  const histSec  = document.getElementById('price-history-section');
+  const histList = document.getElementById('price-history-list');
+  try {
+    const hist = await api('GET', `/api/materials/${id}/history`);
+    if (hist.length) {
+      histSec.style.display = 'block';
+      histList.innerHTML = hist.map(h =>
+        `<div style="display:flex;gap:16px;padding:3px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text-dim)">${h.date}</span>
+          <span style="color:var(--red)">R ${h.old.toFixed(2)}</span>
+          <span style="color:var(--text-dim)">→</span>
+          <span style="color:var(--green)">R ${h.new.toFixed(2)}</span>
+        </div>`).join('');
+    } else { histSec.style.display = 'none'; }
+  } catch(e) { histSec.style.display = 'none'; }
+
+  // ── Body-type usage list ──────────────────────────────────────────────────
+  const editUsageSec  = document.getElementById('edit-usage-section');
+  const editUsageList = document.getElementById('edit-usage-list');
+  const editUsageCnt  = document.getElementById('edit-usage-count');
+  editUsageSec.style.display = 'none';
+  editUsageList.innerHTML = '';
+  (async () => {
+    try {
+      const usage = await api('GET', `/api/materials/${id}/trailer-usage`);
+      if (usage.length) {
+        editUsageCnt.textContent = usage.length;
+        editUsageList.innerHTML = usage.map(u => {
+          const catLabel = u.bom_section ? `<span style="display:block;font-size:10px;color:var(--text-dim);margin-top:1px">${escHtml(u.bom_section)}</span>` : '';
+          const priceBlock = u.has_override
+            ? `<span style="color:var(--blue-hi)">R ${Number(u.effective_price).toFixed(2)}<span style="margin-left:4px;font-size:9px;font-weight:700;letter-spacing:.4px">⊞OVR</span></span><span style="display:block;font-size:10px;color:var(--text-dim);text-decoration:line-through">R ${Number(u.base_price).toFixed(2)}</span>`
+            : `<span style="color:var(--text-dim)">R ${Number(u.effective_price).toFixed(2)}</span>`;
+          return `<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--text)">${escHtml(u.trailer_name)}${catLabel}</span>
+            <span style="font-family:var(--font-mono);text-align:right;white-space:nowrap;padding-left:8px">${priceBlock}</span>
+          </div>`;
+        }).join('');
+        editUsageSec.style.display = 'block';
+      }
+    } catch(_) {}
+  })();
+
+  openModal('modal-edit');
+  setTimeout(() => document.getElementById('edit-name').focus(), 100);
+}
+
+async function saveMaterial(id) {
+  const isNew = !id;
+  const pfx   = isNew ? 'add' : 'edit';
+  const body  = {
+    name:            document.getElementById(`${pfx}-name`).value.trim(),
+    category_id:     +document.getElementById(`${pfx}-cat`).value,
+    unit_of_measure: document.getElementById(`${pfx}-unit`).value,
+    price_per_unit:  +document.getElementById(`${pfx}-price`).value || 0,
+    size:            document.getElementById(`${pfx}-size`).value.trim(),
+    supplier:        document.getElementById(`${pfx}-supplier`).value.trim(),
+    sap_code:        document.getElementById(`${pfx}-sap`).value.trim(),
+    manufacture_sub_category: document.getElementById(`${pfx}-subcat`).value.trim() || null,
+    version_ts: isNew ? undefined : (document.getElementById('edit-version-ts').value || undefined),
+  };
+  if (!body.name) { toast('Name is required', 'error'); return; }
+
+  const btn = document.querySelector(`#modal-${isNew?'add':'edit'} .btn-primary`);
+  const restore = showBusy(btn, isNew ? 'Adding…' : 'Saving…');
+  try {
+    if (isNew) {
+      await api('POST', '/api/materials', body);
+      closeModal('modal-add');
+      toast('Material added ✓', 'success');
+      await loadMaterials();
+    } else {
+      await api('PUT', `/api/materials/${id}`, body);
+      closeModal('modal-edit');
+      if (_returnUrl) {
+        flash(`Price updated for "${body.name}" ✓`, 'success');
+        location.href = _returnUrl;
+        return;
+      }
+      toast('Material updated ✓', 'success');
+      await loadMaterials();
+    }
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    restore();
+  }
+}
+
+async function deleteMaterial() {
+  const id = document.getElementById('edit-id').value;
+  const m  = matMap[id];
+  if (!await confirmModal(`Delete "${m ? m.name : id}"?`, { title: 'Delete material', okText: 'Delete', danger: true })) return;
+  try {
+    await api('DELETE', `/api/materials/${id}`);
+    closeModal('modal-edit');
+    toast('Material deleted', 'success');
+    await loadMaterials();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// TAB 2 — BODY TYPE OVERRIDES
+// ════════════════════════════════════════════════════════════════
+
+let _btList = [];  // all trailer types for the filter dropdown
+let _ovrLoaded = false;
+
+async function _ensureBtList() {
+  if (_btList.length) return;
+  try {
+    // Reuse the trailer types from the snapshots admin endpoint or a simple GET
+    const data = await api('GET', '/api/trailers');
+    _btList = data;
+    const sel = document.getElementById('ovr-bt-filter');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All Body Types</option>'
+      + data.map(tt => `<option value="${tt.id}">${escHtml(tt.name)}</option>`).join('');
+    if (cur) sel.value = cur;
+  } catch(e) { /* non-fatal */ }
+}
+
+async function loadOverrides() {
+  await _ensureBtList();
+  const btId = document.getElementById('ovr-bt-filter').value;
+
+  // Show/hide bulk bar and protect checkbox
+  const bulkBar = document.getElementById('ovr-bulk-bar');
+  if (btId) {
+    bulkBar.style.display = 'flex';
+    // Set protect checkbox state from _btList
+    const tt = _btList.find(t => t.id == btId);
+    if (tt) {
+      document.getElementById('ovr-protect-chk').checked = !!tt.protect_overrides;
+    }
+  } else {
+    bulkBar.style.display = 'none';
+  }
+
+  document.getElementById('ovr-body').innerHTML =
+    `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-dim)">Loading…</td></tr>`;
+  try {
+    const url = btId ? `/api/materials/bom-overrides/all?trailer_type_id=${btId}` : '/api/materials/bom-overrides/all';
+    ovrData = await api('GET', url);
+    renderOverrides();
+    _ovrLoaded = true;
+  } catch(e) {
+    document.getElementById('ovr-body').innerHTML =
+      `<tr><td colspan="8" style="color:var(--red);padding:16px">${escHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderOverrides() {
+  const q = (document.getElementById('ovr-search').value || '').toLowerCase().trim();
+  ovrFiltered = ovrData.filter(r =>
+    !q || r.material_name.toLowerCase().includes(q) || r.trailer_type_name.toLowerCase().includes(q)
+  );
+
+  document.getElementById('ovr-count').textContent =
+    `${ovrFiltered.length} override${ovrFiltered.length===1?'':'s'}`;
+
+  if (!ovrFiltered.length) {
+    document.getElementById('ovr-body').innerHTML =
+      `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-dim)">No overrides found</td></tr>`;
+    return;
+  }
+
+  document.getElementById('ovr-body').innerHTML = ovrFiltered.map(r => {
+    const diff    = r.override_price - (r.base_price || 0);
+    const pct     = r.base_price ? ((diff / r.base_price) * 100).toFixed(1) : '—';
+    const diffCls = diff > 0.005 ? 'diff-pos' : diff < -0.005 ? 'diff-neg' : 'diff-neu';
+    const lock    = r.protect_overrides
+      ? '<span class="protect-badge" style="margin-left:4px">🔒</span>' : '';
+    return `<tr data-bom-id="${r.bom_id}" data-cur-price="${r.override_price}" data-mat-name="${escHtml(r.material_name)}" data-bt-name="${escHtml(r.trailer_type_name)}">
+      <td style="font-size:13px">${escHtml(r.material_name)}</td>
+      <td>${escHtml(r.trailer_type_name)}${lock}</td>
+      <td style="font-size:11px;color:var(--text-dim)">${escHtml(r.section)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--blue-hi)">R ${r.override_price.toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);color:var(--text-dim)">R ${(r.base_price||0).toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--font-mono)" class="${diffCls}">${diff>=0?'+':''}R ${diff.toFixed(2)}</td>
+      <td style="text-align:right;font-family:var(--font-mono)" class="${diffCls}">${diff>=0?'+':''}${pct}%</td>
+      <td class="td-actions" style="white-space:nowrap">
+        <button class="btn btn-outline btn-sm" onclick="syncOvrToBase(${r.bom_id})" title="Set override = current base price">Sync</button>
+        <button class="btn btn-outline btn-sm" onclick="openOvrAdjust(${r.bom_id},${r.override_price},'${escHtml(r.material_name)} — ${escHtml(r.trailer_type_name)}')" title="Adjust price">Adjust</button>
+        <button class="btn btn-outline btn-sm" style="color:var(--red);border-color:rgba(248,81,73,.4)" onclick="clearOvr(${r.bom_id})" title="Remove override — reverts to global base price">Clear</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function syncOvrToBase(bomId) {
+  if (!await confirmModal('Set this override to the current global base price?',
+      { title: 'Sync to base price', okText: 'Sync' })) return;
+  try {
+    await api('PUT', `/api/materials/bom-overrides/${bomId}`, { action: 'sync' });
+    toast('Override synced to base price ✓', 'success');
+    await loadOverrides();
+    await loadMaterials();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function clearOvr(bomId) {
+  if (!await confirmModal('Remove this override? The body type will revert to the global base price.',
+      { title: 'Clear override', okText: 'Clear', danger: true })) return;
+  try {
+    await api('PUT', `/api/materials/bom-overrides/${bomId}`, { action: 'clear' });
+    toast('Override cleared ✓', 'success');
+    await loadOverrides();
+    await loadMaterials();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openOvrAdjust(bomId, curPrice, label) {
+  _adjBomId    = bomId;
+  _adjCurPrice = curPrice;
+  document.getElementById('adj-item-label').textContent = label;
+  document.getElementById('adj-direct').value = curPrice.toFixed(4);
+  document.getElementById('adj-pct').value = '';
+  openModal('modal-ovr-adjust');
+  setTimeout(() => document.getElementById('adj-direct').focus(), 100);
+}
+
+function calcAdjPct() {
+  const pct = parseFloat(document.getElementById('adj-pct').value);
+  if (isNaN(pct)) return;
+  document.getElementById('adj-direct').value = (_adjCurPrice * (1 + pct/100)).toFixed(4);
+}
+
+async function saveOvrAdjust() {
+  const price = parseFloat(document.getElementById('adj-direct').value);
+  if (isNaN(price) || price < 0) { toast('Enter a valid price', 'error'); return; }
+  try {
+    await api('PUT', `/api/materials/bom-overrides/${_adjBomId}`, { action: 'set', price });
+    closeModal('modal-ovr-adjust');
+    toast('Override updated ✓', 'success');
+    await loadOverrides();
+    await loadMaterials();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function toggleProtect() {
+  const btId   = document.getElementById('ovr-bt-filter').value;
+  const protect = document.getElementById('ovr-protect-chk').checked;
+  if (!btId) return;
+  try {
+    await api('PUT', `/api/trailer-types/${btId}/protect-overrides`, { protect });
+    const tt = _btList.find(t => t.id == btId);
+    if (tt) tt.protect_overrides = protect;
+    toast(protect ? '🔒 Body type overrides protected from bulk updates' : 'Protection removed', 'success');
+    await loadOverrides();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openOvrBulkModal() {
+  const pct = parseFloat(document.getElementById('ovr-bulk-pct').value);
+  if (!pct || isNaN(pct)) { toast('Enter a non-zero percentage', 'error'); return; }
+  if (Math.abs(pct) > 50) { toast('Maximum is ±50%', 'error'); return; }
+  if (!ovrFiltered.length) { toast('No overrides in current view', 'error'); return; }
+  const sign = pct > 0 ? '+' : '';
+  const factor = 1 + pct/100;
+  document.getElementById('ovr-bulk-summary').innerHTML =
+    `<strong>${ovrFiltered.length}</strong> overrides will change by <strong style="color:${pct>0?'var(--green)':'var(--red)'}">${sign}${pct}%</strong>`;
+  const sample = ovrFiltered.slice(0, 25).map(r =>
+    `<div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid rgba(48,54,61,.4)">
+       <span style="flex:1;color:var(--text)">${escHtml(r.material_name)}</span>
+       <span style="color:var(--text-dim);font-size:11px">${escHtml(r.trailer_type_name)}</span>
+       <span style="color:var(--text-dim)">R ${r.override_price.toFixed(2)}</span>
+       <span style="color:var(--text-dim)">→</span>
+       <span style="color:${pct>0?'var(--green)':'var(--red)'}">R ${(r.override_price * factor).toFixed(2)}</span>
+     </div>`).join('');
+  document.getElementById('ovr-bulk-preview').innerHTML = sample
+    + (ovrFiltered.length > 25 ? `<div style="padding:6px 0;color:var(--text-dim);text-align:center">… and ${ovrFiltered.length-25} more</div>` : '');
+  openModal('modal-ovr-bulk');
+}
+
+async function applyOvrBulk() {
+  const pct    = parseFloat(document.getElementById('ovr-bulk-pct').value);
+  const bomIds = ovrFiltered.map(r => r.bom_id);
+  const btn    = document.getElementById('ovr-bulk-apply-btn');
+  const restore = showBusy(btn, 'Applying…');
+  try {
+    const res = await api('POST', '/api/materials/bulk-price/apply-bom-overrides',
+                          { bom_ids: bomIds, percent: pct });
+    closeModal('modal-ovr-bulk');
+    document.getElementById('ovr-bulk-pct').value = '';
+    toast(`Updated ${res.updated} override${res.updated===1?'':'s'} ✓`, 'success');
+    document.getElementById('undo-bom-btn').style.display = '';
+    await loadOverrides();
+    await loadMaterials();
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    restore();
+  }
+}
+
+// Enter key in modals
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (!document.getElementById('modal-add').classList.contains('hidden'))
+      saveMaterial(null);
+    else if (!document.getElementById('modal-edit').classList.contains('hidden'))
+      saveMaterial(document.getElementById('edit-id').value);
+    else if (!document.getElementById('modal-ovr-adjust').classList.contains('hidden'))
+      saveOvrAdjust();
+  }
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+(function init() {
+  document.getElementById('page-size').value = String(pgSize || 50);
+  document.querySelectorAll('.view-toggle').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === matView));
+  if (matView !== 'flat') {
+    document.querySelectorAll('#mat-table thead th[data-sort]').forEach(th =>
+      th.style.pointerEvents = 'none');
+  }
+  const activeTh = document.querySelector(`#mat-table thead th[data-sort="${sortKey}"]`);
+  if (activeTh) activeTh.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+  initSortableHeaders(document.getElementById('mat-table'), (key, dir) => {
+    sortKey = key; sortDir = dir;
+    localStorage.setItem('mat-sort-key', key);
+    localStorage.setItem('mat-sort-dir', dir);
+    if (matView !== 'flat') setMatView('flat');
+    else { doSort(); renderTable(); }
+  });
+  if (_urlParams.get('filter') === 'outdated') {
+    document.getElementById('outdated-only').checked = true;
+  }
+  if (_returnUrl) {
+    const banner = document.createElement('div');
+    banner.style.cssText = `display:flex;align-items:center;gap:10px;padding:10px 16px;
+      margin-bottom:14px;background:rgba(56,139,253,.1);border:1px solid rgba(56,139,253,.3);
+      border-radius:var(--radius);font-size:13px;color:var(--blue)`;
+    banner.innerHTML = `<span style="font-size:16px">✎</span>
+      <span>Editing permanently from costing — save the price to return to your costing automatically.</span>
+      <a href="${_returnUrl}" class="btn btn-outline btn-sm" style="margin-left:auto;flex-shrink:0">← Cancel, back to costing</a>`;
+    document.querySelector('.page-content')?.prepend(banner);
+  }
+})();
+
+loadMaterials();
+</script>
+{% endblock %}

@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+{% block title %}Floor Plates{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Floor Plates{% endblock %}
+{% block topbar_actions %}
+  <button class="btn btn-primary btn-sm" onclick="openAddPlate()">+ Add Assembly</button>
+{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">SRD Floor Plate Assemblies</span>
+    <span id="plate-count" style="font-size:11px;color:var(--text-dim)"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table id="plate-table">
+      <thead>
+        <tr>
+          <th style="width:320px">Name</th>
+          <th>Description</th>
+          <th style="text-align:right;width:110px">Total Cost</th>
+          <th style="width:80px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="plate-body">
+        <tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-dim)">
+          <span class="spinner"></span> Loading…
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Add/Edit Plate Modal ─────────────────────────────────────────── -->
+<div class="modal-backdrop hidden" id="modal-plate">
+  <div class="modal" style="max-width:860px;width:95vw">
+    <div class="modal-header">
+      <span class="modal-title" id="pmodal-title">Add Floor Plate Assembly</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-plate')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="p-id"/>
+      <div class="form-row">
+        <div class="form-group" style="flex:3">
+          <label class="form-label">Name *</label>
+          <input class="form-input" id="p-name" placeholder="e.g. 2MM 3CR12"/>
+        </div>
+        <div class="form-group" style="flex:5">
+          <label class="form-label">Description</label>
+          <input class="form-input" id="p-desc" placeholder="Optional description"/>
+        </div>
+      </div>
+
+      <!-- Items table -->
+      <div style="margin-top:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <label class="form-label" style="margin:0">Components</label>
+          <button class="btn btn-sm" type="button" onclick="addItemRow()">+ Add Component</button>
+        </div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:680px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 6px;color:var(--text-dim);font-weight:500">Item Name</th>
+              <th style="text-align:left;padding:4px 6px;color:var(--text-dim);font-weight:500;width:130px">SAP Code</th>
+              <th style="text-align:right;padding:4px 6px;color:var(--text-dim);font-weight:500;width:70px">M²</th>
+              <th style="text-align:right;padding:4px 6px;color:var(--text-dim);font-weight:500;width:80px">Price/m²</th>
+              <th style="text-align:right;padding:4px 6px;color:var(--text-dim);font-weight:500;width:60px">Qty</th>
+              <th style="text-align:right;padding:4px 6px;color:var(--text-dim);font-weight:500;width:80px">Line Cost</th>
+              <th style="width:28px"></th>
+            </tr>
+          </thead>
+          <tbody id="pitems-body"></tbody>
+          <tfoot>
+            <tr id="pitems-totals" style="border-top:2px solid var(--border)">
+              <td colspan="5" style="padding:6px 8px;font-weight:600;font-size:12px">TOTAL per assembly</td>
+              <td id="ptotal-cost" style="text-align:right;padding:6px 8px;font-weight:600">R 0.00</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+        </div>
+      </div>
+
+      <!-- ── Price Formula (optional) ─────────────────────────────── -->
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-dim)">
+            <input type="checkbox" id="p-formula-enabled" onchange="onFormulaToggle()" style="cursor:pointer"/>
+            Apply price formula to total
+          </label>
+          <span style="font-size:11px;color:var(--text-dim)">(optional — divide or multiply the assembly total)</span>
+        </div>
+        <div id="p-formula-section" class="hidden">
+          <div id="p-formula-steps" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:6px;margin-bottom:10px">
+            <button class="btn btn-sm" type="button" onclick="addFormulaStep('/')">+ ÷ Step</button>
+            <button class="btn btn-sm" type="button" onclick="addFormulaStep('*')">+ × Step</button>
+          </div>
+          <div id="p-formula-preview" style="font-size:13px;font-family:var(--font-mono);color:#3d9970;padding:8px 12px;background:var(--bg-input);border-radius:6px;border:1px solid rgba(61,153,112,.3)">
+            —
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-plate')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePlate()">Save Assembly</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let _plates = [];
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _csrf()    { return document.querySelector('meta[name="csrf-token"]')?.content || ''; }
+function _headers() { return { 'Content-Type': 'application/json', 'X-CSRF-Token': _csrf() }; }
+
+async function loadPlates() {
+  const r = await fetch('/api/floor-plates');
+  _plates = await r.json();
+  renderPlates();
+}
+
+function renderPlates() {
+  const tbody = document.getElementById('plate-body');
+  document.getElementById('plate-count').textContent = `${_plates.length} assembl${_plates.length !== 1 ? 'ies' : 'y'}`;
+  if (!_plates.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-dim)">No floor plate assemblies yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _plates.map(p => {
+    const hasFormula = !!p.price_formula;
+    const costCell = hasFormula
+      ? `<span style="font-family:var(--font-mono);font-weight:600">R ${p.cost.toFixed(4)}</span>
+         <span style="font-size:10px;color:var(--text-dim);font-family:var(--font-mono);margin-left:4px">(raw R ${p.raw_cost.toFixed(2)})</span>
+         <span title="Price formula active" style="margin-left:4px;font-size:10px;background:rgba(61,153,112,.15);color:#3d9970;border:1px solid rgba(61,153,112,.4);border-radius:3px;padding:1px 5px">ƒ</span>`
+      : `<span style="font-family:var(--font-mono);font-weight:600">R ${p.cost.toFixed(2)}</span>`;
+    return `
+    <tr data-pid="${p.id}">
+      <td style="font-weight:500">⊞ ${esc(p.name)}</td>
+      <td style="color:var(--text-dim);font-size:12px">${esc(p.description)}</td>
+      <td style="text-align:right">${costCell}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-icon btn-sm" title="Expand" onclick="toggleDetail(${p.id}, this)">▶</button>
+          <button class="btn btn-icon btn-sm" title="Edit" onclick="editPlate(${p.id})">✎</button>
+          <button class="btn btn-icon btn-sm" title="Delete" onclick="deletePlate(${p.id}, '${esc(p.name).replace(/'/g,"\\'")}')">🗑</button>
+        </div>
+      </td>
+    </tr>
+    <tr class="detail-row hidden" id="detail-${p.id}">
+      <td colspan="4" style="padding:0 8px 12px 8px;background:var(--bg-input)">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;margin-top:8px">
+          <thead>
+            <tr style="color:var(--text-dim)">
+              <th style="text-align:left;padding:4px 8px;font-weight:500">Item</th>
+              <th style="text-align:left;padding:4px 8px;font-weight:500;width:140px;font-family:var(--font-mono)">SAP Code</th>
+              <th style="text-align:right;padding:4px 8px;font-weight:500;width:70px">M²</th>
+              <th style="text-align:right;padding:4px 8px;font-weight:500;width:90px">Price/m²</th>
+              <th style="text-align:center;padding:4px 8px;font-weight:500;width:60px">Source</th>
+              <th style="text-align:right;padding:4px 8px;font-weight:500;width:60px">Qty</th>
+              <th style="text-align:right;padding:4px 8px;font-weight:500;width:80px">Line Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${p.items.map(it => `
+              <tr style="border-top:1px solid var(--border)">
+                <td style="padding:4px 8px">${esc(it.item_name)}</td>
+                <td style="padding:4px 8px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">${esc(it.sap_code)}</td>
+                <td style="text-align:right;padding:4px 8px;font-family:var(--font-mono)">${it.m2.toFixed(4)}</td>
+                <td style="text-align:right;padding:4px 8px;font-family:var(--font-mono)">R ${(it.price_source==='sap' && it.price_sap!=null ? it.price_sap : it.price_per_unit).toFixed(3)}</td>
+                <td style="text-align:center;padding:4px 8px">
+                  ${it.sap_item_code_id ? `
+                    <button class="btn btn-sm"
+                          style="font-size:10px;padding:1px 5px;${it.price_source==='sap' ? 'color:var(--blue-hi,#58a6ff);border-color:var(--blue-hi,#58a6ff)' : ''}"
+                          title="${it.price_source==='sap' ? 'Using SAP price — click for STD' : 'Using standard price — click for SAP'}"
+                          onclick="togglePlateItemSource(${it.id}, '${it.price_source==='sap' ? 'standard' : 'sap'}', ${p.id})">
+                      ${it.price_source==='sap' ? 'SAP' : 'STD'}
+                    </button>` : '<span style="color:var(--text-dim);font-size:11px">STD</span>'}
+                </td>
+                <td style="text-align:right;padding:4px 8px;font-family:var(--font-mono)">${it.quantity}</td>
+                <td style="text-align:right;padding:4px 8px;font-family:var(--font-mono);font-weight:600">R ${it.line_cost.toFixed(2)}</td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border)">
+              <td colspan="6" style="padding:4px 8px;font-weight:600;font-size:11px">TOTAL (raw)</td>
+              <td style="text-align:right;padding:4px 8px;font-family:var(--font-mono);font-weight:700">R ${p.raw_cost.toFixed(2)}</td>
+            </tr>
+            ${p.price_formula ? `<tr style="border-top:1px solid rgba(61,153,112,.3)">
+              <td colspan="6" style="padding:4px 8px;font-weight:600;font-size:11px;color:#3d9970">TOTAL (formula applied)</td>
+              <td style="text-align:right;padding:4px 8px;font-family:var(--font-mono);font-weight:700;color:#3d9970">R ${p.cost.toFixed(4)}</td>
+            </tr>` : ''}
+          </tfoot>
+        </table>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleDetail(pid, btn) {
+  const row = document.getElementById(`detail-${pid}`);
+  const open = !row.classList.contains('hidden');
+  row.classList.toggle('hidden', open);
+  btn.textContent = open ? '▶' : '▼';
+}
+
+async function togglePlateItemSource(itemId, newSrc, plateId) {
+  const r = await fetch(`/api/floor-plate-items/${itemId}/price-source`, {
+    method: 'PATCH',
+    headers: _headers(),
+    body: JSON.stringify({ price_source: newSrc }),
+  });
+  if (!r.ok) { await alertModal((await r.json()).detail || 'Error', {title:'Error',danger:true}); return; }
+  await loadPlates();
+  const row = document.getElementById(`detail-${plateId}`);
+  const btn = document.querySelector(`tr[data-pid="${plateId}"] button[title="Expand"]`);
+  if (row && btn) { row.classList.remove('hidden'); btn.textContent = '▼'; }
+}
+
+// ── Item rows in Add/Edit modal ──────────────────────────────────────
+
+function addItemRow(item) {
+  const tbody = document.getElementById('pitems-body');
+  const it = item || { item_name:'', sap_code:'', m2:0, price_per_unit:0, quantity:1 };
+  const tr = document.createElement('tr');
+  tr.style.cssText = 'border-top:1px solid var(--border)';
+  tr.innerHTML = `
+    <td style="padding:3px 4px"><input class="form-input" style="width:100%;font-size:12px" placeholder="Item name"
+        value="${esc(it.item_name)}" oninput="recomputeTotal()"/></td>
+    <td style="padding:3px 4px"><input class="form-input" style="width:100%;font-size:11px;font-family:var(--font-mono)" placeholder="SAP/CODE"
+        value="${esc(it.sap_code)}"/></td>
+    <td style="padding:3px 4px"><input class="form-input" style="width:65px;text-align:right;font-size:12px" type="number" step="any" min="0"
+        value="${it.m2}" oninput="recomputeTotal()"/></td>
+    <td style="padding:3px 4px"><input class="form-input" style="width:75px;text-align:right;font-size:12px" type="number" step="any" min="0"
+        value="${it.price_per_unit}" oninput="recomputeTotal()"/></td>
+    <td style="padding:3px 4px"><input class="form-input" style="width:55px;text-align:right;font-size:12px" type="number" step="any" min="0"
+        value="${it.quantity}" oninput="recomputeTotal()"/></td>
+    <td style="text-align:right;padding:3px 8px;font-family:var(--font-mono);font-size:12px">R 0.00</td>
+    <td style="padding:3px 4px"><button class="btn btn-icon btn-sm" onclick="this.closest('tr').remove();recomputeTotal()">✕</button></td>`;
+  tbody.appendChild(tr);
+  recomputeTotal();
+}
+
+function recomputeTotal() {
+  let total = 0;
+  document.querySelectorAll('#pitems-body tr').forEach(tr => {
+    const inputs = tr.querySelectorAll('input[type=number]');
+    const m2    = parseFloat(inputs[0]?.value || 0);
+    const price = parseFloat(inputs[1]?.value || 0);
+    const qty   = parseFloat(inputs[2]?.value || 0);
+    const line  = m2 * price * qty;
+    total += line;
+    const cell = tr.querySelector('td:nth-child(6)');
+    if (cell) cell.textContent = `R ${line.toFixed(2)}`;
+  });
+  document.getElementById('ptotal-cost').textContent = `R ${total.toFixed(2)}`;
+  updateFormulaPreview(total);
+}
+
+// ── Price formula builder ─────────────────────────────────────────────
+
+let _formulaSteps = []; // [{op:'/', val:12}, {op:'/', val:2.44}]
+
+function onFormulaToggle() {
+  const enabled = document.getElementById('p-formula-enabled').checked;
+  document.getElementById('p-formula-section').classList.toggle('hidden', !enabled);
+  updateFormulaPreview();
+}
+
+function addFormulaStep(op) {
+  const idx = _formulaSteps.length;
+  _formulaSteps.push({ op, val: '' });
+  renderFormulaSteps();
+}
+
+function removeFormulaStep(idx) {
+  _formulaSteps.splice(idx, 1);
+  renderFormulaSteps();
+  updateFormulaPreview();
+}
+
+function onFormulaStepChange(idx, val) {
+  _formulaSteps[idx].val = val;
+  updateFormulaPreview();
+}
+
+function renderFormulaSteps() {
+  const container = document.getElementById('p-formula-steps');
+  container.innerHTML = _formulaSteps.map((s, i) => `
+    <div style="display:flex;align-items:center;gap:4px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:4px 8px">
+      <span style="font-size:13px;font-weight:700;color:#3d9970;font-family:var(--font-mono)">${s.op === '/' ? '÷' : '×'}</span>
+      <input type="number" step="any" min="0" value="${esc(String(s.val))}"
+             style="width:70px;font-size:12px;font-family:var(--font-mono);background:transparent;border:none;color:var(--text);outline:none"
+             placeholder="value"
+             oninput="onFormulaStepChange(${i}, this.value)"/>
+      <button class="btn btn-icon btn-sm" style="padding:0 4px;font-size:10px" onclick="removeFormulaStep(${i})">✕</button>
+    </div>`).join('');
+  updateFormulaPreview();
+}
+
+function updateFormulaPreview(rawOverride) {
+  const preview = document.getElementById('p-formula-preview');
+  if (!preview) return;
+  const enabled = document.getElementById('p-formula-enabled')?.checked;
+  if (!enabled || !_formulaSteps.length) { preview.textContent = '—'; return; }
+
+  const rawText = document.getElementById('ptotal-cost')?.textContent || 'R 0.00';
+  const raw = rawOverride !== undefined ? rawOverride
+              : parseFloat(rawText.replace(/[^0-9.]/g, '')) || 0;
+
+  let result = raw;
+  let expr   = `R ${raw.toFixed(2)}`;
+  for (const s of _formulaSteps) {
+    const v = parseFloat(s.val);
+    if (!v) continue;
+    if (s.op === '/' ) { result /= v; expr += ` ÷ ${v}`; }
+    else               { result *= v; expr += ` × ${v}`; }
+  }
+  preview.textContent = `${expr} = R ${result.toFixed(4)}`;
+}
+
+function getFormulaJson() {
+  const enabled = document.getElementById('p-formula-enabled')?.checked;
+  if (!enabled || !_formulaSteps.length) return null;
+  const steps = _formulaSteps
+    .map(s => ({ op: s.op, val: parseFloat(s.val) }))
+    .filter(s => s.val && isFinite(s.val));
+  return steps.length ? JSON.stringify(steps) : null;
+}
+
+function loadFormula(formulaJson) {
+  _formulaSteps = [];
+  const enabled = !!(formulaJson);
+  document.getElementById('p-formula-enabled').checked = enabled;
+  document.getElementById('p-formula-section').classList.toggle('hidden', !enabled);
+  if (formulaJson) {
+    try {
+      _formulaSteps = JSON.parse(formulaJson).map(s => ({ op: s.op, val: String(s.val) }));
+    } catch(e) {}
+  }
+  renderFormulaSteps();
+}
+
+function collectItems() {
+  const rows = [];
+  document.querySelectorAll('#pitems-body tr').forEach((tr, idx) => {
+    const texts   = tr.querySelectorAll('input:not([type=number])');
+    const numbers = tr.querySelectorAll('input[type=number]');
+    rows.push({
+      side:          'left',
+      item_name:     texts[0]?.value.trim() || '',
+      sap_code:      texts[1]?.value.trim() || null,
+      m2:            parseFloat(numbers[0]?.value || 0),
+      price_per_unit:parseFloat(numbers[1]?.value || 0),
+      quantity:      parseFloat(numbers[2]?.value || 1),
+      sort_order:    idx * 10,
+    });
+  });
+  return rows.filter(r => r.item_name);
+}
+
+// ── Open/Close modals ─────────────────────────────────────────────────
+
+function openAddPlate() {
+  document.getElementById('p-id').value = '';
+  document.getElementById('p-name').value = '';
+  document.getElementById('p-desc').value = '';
+  document.getElementById('pitems-body').innerHTML = '';
+  loadFormula(null);
+  recomputeTotal();
+  document.getElementById('pmodal-title').textContent = 'Add Floor Plate Assembly';
+  openModal('modal-plate');
+}
+
+function editPlate(pid) {
+  const p = _plates.find(x => x.id === pid);
+  if (!p) return;
+  document.getElementById('p-id').value   = p.id;
+  document.getElementById('p-name').value = p.name;
+  document.getElementById('p-desc').value = p.description;
+  document.getElementById('pitems-body').innerHTML = '';
+  p.items.forEach(it => addItemRow(it));
+  loadFormula(p.price_formula || null);
+  document.getElementById('pmodal-title').textContent = 'Edit Floor Plate Assembly';
+  openModal('modal-plate');
+}
+
+async function savePlate() {
+  const pid = document.getElementById('p-id').value;
+  const payload = {
+    name:          document.getElementById('p-name').value.trim(),
+    description:   document.getElementById('p-desc').value.trim(),
+    items:         collectItems(),
+    price_formula: getFormulaJson(),
+  };
+  if (!payload.name) { await alertModal('Name is required'); return; }
+  const url    = pid ? `/api/floor-plates/${pid}` : '/api/floor-plates';
+  const method = pid ? 'PUT' : 'POST';
+  const r = await fetch(url, { method, headers: _headers(), body: JSON.stringify(payload) });
+  if (!r.ok) { await alertModal('Save failed', {title:'Save Failed',danger:true}); return; }
+  closeModal('modal-plate');
+  await loadPlates();
+}
+
+async function deletePlate(pid, name) {
+  if (!await confirmModal(`Delete floor plate assembly "${name}"?\nBOM rows linked to it will lose the floor plate price.`, {title:'Delete Assembly',okText:'Delete',danger:true})) return;
+  await fetch(`/api/floor-plates/${pid}`, { method: 'DELETE', headers: _headers() });
+  await loadPlates();
+}
+
+// Kick off
+loadPlates();
+</script>
+{% endblock %}

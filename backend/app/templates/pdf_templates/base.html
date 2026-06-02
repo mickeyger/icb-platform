@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>{{ trailer_name }} Costing Report</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0.5in;
+            @bottom-center {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 9pt;
+                color: #666;
+            }
+        }
+
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-size: 10pt;
+            line-height: 1.3;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Page breaks */
+        .page-break {
+            page-break-before: always;
+        }
+
+        .no-break {
+            page-break-inside: avoid;
+        }
+
+        /* Header styles */
+        .header {
+            background: linear-gradient(135deg, #1C2333 0%, #2A3B5A 100%);
+            color: white;
+            padding: 15pt;
+            margin: -0.5in -0.5in 20pt -0.5in;
+            border-bottom: 3pt solid #388BFD;
+        }
+
+        .header h1 {
+            margin: 0 0 8pt 0;
+            font-size: 18pt;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .header .subtitle {
+            text-align: center;
+            font-size: 11pt;
+            opacity: 0.9;
+        }
+
+        /* Precise positioning containers */
+        .position-absolute {
+            position: absolute;
+        }
+
+        .position-relative {
+            position: relative;
+        }
+
+        /* Data overlay positions - adjust these coordinates for your template */
+        .data-overlay {
+            position: absolute;
+            font-weight: bold;
+            color: #000;
+            z-index: 10;
+        }
+
+        /* EXPLOSIVE specific positions - measured from your PDF template */
+        .explosive-trailer-type {
+            top: 180pt;    /* Adjust based on template */
+            left: 50pt;
+            font-size: 12pt;
+            color: #000;
+        }
+
+        .explosive-length {
+            top: 220pt;
+            left: 80pt;
+            font-size: 10pt;
+        }
+
+        .explosive-width {
+            top: 240pt;
+            left: 80pt;
+            font-size: 10pt;
+        }
+
+        .explosive-height {
+            top: 260pt;
+            left: 80pt;
+            font-size: 10pt;
+        }
+
+        .explosive-price {
+            top: 300pt;
+            left: 50pt;
+            font-size: 14pt;
+            color: #388BFD;
+        }
+
+        /* Table styles */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15pt 0;
+            font-size: 9pt;
+        }
+
+        .data-table th {
+            background: #1C2333;
+            color: white;
+            padding: 8pt;
+            text-align: left;
+            font-weight: bold;
+        }
+
+        .data-table td {
+            padding: 6pt 8pt;
+            border-bottom: 1pt solid #ddd;
+        }
+
+        .data-table tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        /* Summary box */
+        .summary-box {
+            background: #f0f8ff;
+            border: 2pt solid #388BFD;
+            border-radius: 5pt;
+            padding: 15pt;
+            margin: 20pt 0;
+            text-align: center;
+        }
+
+        .summary-box .total-price {
+            font-size: 24pt;
+            font-weight: bold;
+            color: #388BFD;
+            margin: 10pt 0;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 30pt;
+            padding-top: 15pt;
+            border-top: 1pt solid #ccc;
+            font-size: 8pt;
+            color: #666;
+            text-align: center;
+        }
+
+        /* Utility classes */
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-bold { font-weight: bold; }
+        .color-primary { color: #388BFD; }
+        .mt-10 { margin-top: 10pt; }
+        .mb-10 { margin-bottom: 10pt; }
+    </style>
+</head>
+<body>
+    <!-- Include the specific template content -->
+    {% block content %}{% endblock %}
+</body>
+</html>

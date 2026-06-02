@@ -1,0 +1,81 @@
+/* Compact theme for tighter spacing and improved contrast */
+:root {
+  --bg: #0a0e14;
+  --bg-panel: #1a1f2e;
+  --bg-card: #202738;
+  --bg-input: #0a0e14;
+  --border: #3a4151;
+  --border-hi: #5a9cff;
+  --blue: #5a9cff;
+  --blue-hi: #7ab8ff;
+  --blue-dim: #2a4a7a;
+  --orange: #e6a547;
+  --green: #5ac85a;
+  --red: #ff6b6b;
+  --text: #e8f0ff;
+  --text-dim: #a8b4c8;
+  --text-head: #ffffff;
+  --grid-line: rgba(90, 156, 255, 0.08);
+  --disabled: #6b7682;
+  --radius: 4px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+/* Improve select/dropdown visibility */
+select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+select option {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+select option:hover,
+select option:focus {
+  background: var(--blue-dim);
+  color: var(--text-head);
+}
+
+/* Improve form control focus states */
+.form-control:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(90, 156, 255, 0.2);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+/* Ensure table text is visible */
+tbody td {
+  color: var(--text);
+}
+tbody tr:hover td {
+  background: rgba(90, 156, 255, 0.06);
+}
+
+/* Improve cost value visibility */
+.s-val {
+  color: var(--text-head) !important;
+}
+.geo-value {
+  color: var(--blue-hi) !important;
+}
+.highlight-green .s-val {
+  color: var(--green) !important;
+}
+.highlight-orange .s-val {
+  color: var(--orange) !important;
+}
+
+/* Compact spacing */
+body { font-size: 13px; }
+.card { padding: 10px; }
+.panel-header { padding: 6px 10px; }
+.sidebar, .main { gap: 8px; }
+.btn { padding: 4px 8px; }
+input, select, textarea { font-size: 13px; }
+table { font-size: 13px; }
+thead th { padding: 8px 10px; }
+tbody td { padding: 8px 10px; }

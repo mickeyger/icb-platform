@@ -1,0 +1,187 @@
+/* Light theme — clean Windows-style interface with coloured section headings */
+
+:root {
+  /* ── Backgrounds ────────────────────────────────────── */
+  --bg-dark:   #f0f2f5;   /* body (style.css reads --bg-dark) */
+  --bg-panel:  #ffffff;
+  --bg-card:   #ffffff;
+  --bg-input:  #ffffff;
+
+  /* ── Borders & dividers ─────────────────────────────── */
+  --border:    #dde1e7;
+  --border-hi: #2563eb;
+
+  /* ── Brand / accent blue ────────────────────────────── */
+  --blue:      #2563eb;
+  --blue-hi:   #3b82f6;
+  --blue-dim:  #dbeafe;
+
+  /* ── Status ─────────────────────────────────────────── */
+  --orange:    #d97706;
+  --green:     #15803d;
+  --red:       #dc2626;
+
+  /* ── Typography ─────────────────────────────────────── */
+  --text:      #374151;
+  --text-head: #111827;
+  --text-dim:  #6b7280;
+
+  /* ── Misc ───────────────────────────────────────────── */
+  --grid-line: transparent;
+  --shadow:    0 2px 8px rgba(0, 0, 0, 0.08);
+  --radius:    6px;
+  --disabled:  #9ca3af;
+}
+
+/* ── Body — remove blueprint grid, set plain bg ───────── */
+body {
+  background: var(--bg-dark);
+  background-image: none;
+  color: var(--text);
+}
+
+/* ── Sidebar ─────────────────────────────────────────── */
+.sidebar {
+  background: #ffffff;
+  border-right: 1px solid var(--border);
+}
+.sidebar-brand .logo { color: #2563eb; }
+.sidebar-brand h1    { color: #111827; }
+
+/* ── Nav group labels — each gets its own accent colour ── */
+.nav-label { color: #374151; font-weight: 700; }
+
+.nav-group:nth-child(1) .nav-label { color: #1d4ed8; border-left: 3px solid #1d4ed8; padding-left: 13px; }
+.nav-group:nth-child(2) .nav-label { color: #0369a1; border-left: 3px solid #0369a1; padding-left: 13px; }
+.nav-group:nth-child(3) .nav-label { color: #0f766e; border-left: 3px solid #0f766e; padding-left: 13px; }
+.nav-group:nth-child(4) .nav-label { color: #7c3aed; border-left: 3px solid #7c3aed; padding-left: 13px; }
+.nav-group:nth-child(5) .nav-label { color: #b45309; border-left: 3px solid #b45309; padding-left: 13px; }
+
+.nav-item { color: #4b5563; border-left-color: transparent; }
+.nav-item:hover {
+  background: #f0f7ff;
+  color: #1d4ed8;
+}
+.nav-item.active {
+  background: #eff6ff;
+  color: #2563eb;
+  border-left-color: #2563eb;
+}
+.nav-icon { opacity: 0.75; }
+
+/* ── Sidebar footer ──────────────────────────────────── */
+.sidebar-footer { border-top-color: var(--border); color: var(--text-dim); }
+.user-avatar    { background: #dbeafe; color: #1d4ed8; }
+.badge-admin    { background: rgba(217,119,6,.12); color: #92400e; }
+.badge-user     { background: rgba(21,128,61,.12);  color: #14532d; }
+
+/* ── Topbar ──────────────────────────────────────────── */
+.topbar { background: #ffffff; border-bottom-color: var(--border); }
+.topbar-title        { color: var(--text-dim); }
+.topbar-title strong { color: #2563eb; }
+
+/* ── Cards ───────────────────────────────────────────── */
+.card {
+  background: #ffffff;
+  border-color: var(--border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+.card-header {
+  background: #f8faff;
+  border-bottom-color: var(--border);
+}
+
+/* Card title colour cycles: blue → sky → teal → violet */
+.card-title { color: #2563eb; }
+.card:nth-child(4n+2) .card-title { color: #0369a1; }
+.card:nth-child(4n+3) .card-title { color: #0f766e; }
+.card:nth-child(4n+4) .card-title { color: #6d28d9; }
+
+.card-body { color: var(--text); }
+
+/* ── Stat cards ──────────────────────────────────────── */
+.stat-card {
+  background: #ffffff;
+  border-color: var(--border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+.stat-card:nth-child(4n+1)::before { background: #2563eb; }
+.stat-card:nth-child(4n+2)::before { background: #0369a1; }
+.stat-card:nth-child(4n+3)::before { background: #0f766e; }
+.stat-card:nth-child(4n+4)::before { background: #7c3aed; }
+.stat-label { color: var(--text-dim); }
+.stat-value { color: var(--text-head); }
+.stat-sub   { color: var(--text-dim); }
+
+/* ── Calculator panels ───────────────────────────────── */
+.calc-panel { background: #ffffff; border-color: var(--border); }
+
+.calc-panel--summary {
+  border-color: #93c5fd;
+  border-left-color: #2563eb;
+  background: #f8fbff;
+}
+.calc-panel--summary .panel-header {
+  background: #dbeafe;
+  border-bottom-color: #bfdbfe;
+}
+.calc-panel--summary .panel-footer { background: #dbeafe; }
+
+/* Panel headers */
+.panel-header { background: #f8faff; border-bottom-color: var(--border); }
+.panel-title  { color: #2563eb; }
+
+/* ── Tables ──────────────────────────────────────────── */
+thead th {
+  background: #f1f5f9;
+  color: #374151;
+  border-bottom: 2px solid #dde1e7;
+}
+thead th a { color: #374151; }
+tbody td { color: var(--text); }
+tbody tr:hover td { background: #f0f7ff; }
+tbody tr:nth-child(even) { background: #fafbfc; }
+
+/* ── Form controls ───────────────────────────────────── */
+input, select, textarea {
+  background: #ffffff;
+  color: #111827;
+  border-color: #d1d5db;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+select option         { background: #ffffff; color: #111827; }
+select option:hover   { background: #eff6ff; }
+.form-control:focus   { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.12); }
+
+/* ── Buttons ─────────────────────────────────────────── */
+.btn { border-color: #d1d5db; color: #374151; }
+.btn:hover { background: #f3f4f6; }
+.btn-primary          { background: #2563eb; color: #ffffff; border-color: #2563eb; }
+.btn-primary:hover    { background: #1d4ed8; border-color: #1d4ed8; }
+.btn-danger           { background: #dc2626; color: #ffffff; border-color: #dc2626; }
+.btn-success          { background: #15803d; color: #ffffff; border-color: #15803d; }
+
+/* ── Headings ────────────────────────────────────────── */
+h1, h2, h3, h4, h5 { color: var(--text-head); }
+.section-title, .group-title, .page-title { color: #1d4ed8; }
+
+/* ── Misc value colouring ────────────────────────────── */
+.s-val         { color: var(--text-head) !important; }
+.geo-value     { color: #0369a1 !important; }
+.highlight-green .s-val  { color: #15803d !important; }
+.highlight-orange .s-val { color: #d97706 !important; }
+.highlight-red .s-val    { color: #dc2626 !important; }
+
+/* ── Modals ──────────────────────────────────────────── */
+.cfg-modal { background: #ffffff; border-color: var(--border); box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+.cfg-modal-bd { background: rgba(0, 0, 0, 0.35); }
+
+/* ── Scrollbars (subtle) ─────────────────────────────── */
+::-webkit-scrollbar            { width: 6px; height: 6px; }
+::-webkit-scrollbar-track      { background: #f1f5f9; }
+::-webkit-scrollbar-thumb      { background: #c7cdd6; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover{ background: #9ba3ae; }

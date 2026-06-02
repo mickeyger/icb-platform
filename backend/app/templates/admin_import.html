@@ -1,0 +1,840 @@
+{% extends "base.html" %}
+{% block title %}Import from Excel{% endblock %}
+{% block breadcrumb %}<strong>Admin</strong> / Import from Excel{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:1200px">
+  <div class="card-header">
+    <span class="card-title">Import Body Type from Excel</span>
+  </div>
+  <div class="card-body">
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px">
+      Source: <span id="active-source" style="font-family:var(--font-mono);color:var(--blue-hi)">GRP Costings 2018.xlsx</span>
+      &nbsp;·&nbsp; <span id="sheet-count">{{ sheets|length }}</span> sheets available
+    </div>
+
+    <!-- Workbook upload (per-import, files stay on user's PC) -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel);
+                padding:12px 16px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-weight:600;font-size:13px;color:var(--text)">📤 Upload workbooks for this import</div>
+        <span id="up-status" style="font-size:11px;color:var(--text-dim)"></span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">
+        Pick the workbooks from your PC. They are uploaded once for this session and discarded after.
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:10px">
+        <div class="up-row">
+          <div class="up-label">Costing workbook <span style="color:var(--red)">*</span></div>
+          <input type="file" id="up-costing" accept=".xlsx,.xlsm,.xls" class="form-control"/>
+          <div class="up-info" id="up-costing-info"></div>
+        </div>
+        <div class="up-row">
+          <div class="up-label">Formulae workbook <span style="color:var(--text-dim)">(optional)</span></div>
+          <input type="file" id="up-formulas" accept=".xls,.xlsx,.xlsm" class="form-control"/>
+          <div class="up-info" id="up-formulas-info"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" id="up-btn" onclick="uploadWorkbooks()">Upload &amp; load sheets</button>
+        <button class="btn btn-outline btn-sm" id="up-reuse" onclick="reuseLastUpload()" style="display:none"></button>
+        <button class="btn btn-outline btn-sm" id="up-clear" onclick="clearUpload()" style="display:none">Clear</button>
+        <span id="up-msg" style="font-size:12px;color:var(--text-dim)"></span>
+      </div>
+    </div>
+
+    <style>
+      .up-row     { display:flex;flex-direction:column;gap:4px; }
+      .up-label   { font-size:12px;color:var(--text);font-weight:600; }
+      .up-info    { font-size:11px;color:var(--text-dim);font-family:var(--font-mono);min-height:14px; }
+    </style>
+
+    <style>
+      .sheet-row { display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:4px;
+                   border-bottom:1px solid var(--border);font-size:13px; }
+      .sheet-row:hover { background:var(--bg-raise); }
+      .sheet-row:last-child { border-bottom:none; }
+      .sheet-row label { flex:1;cursor:pointer;user-select:none;overflow:hidden;
+                          text-overflow:ellipsis;white-space:nowrap; }
+      .batch-row { display:flex;align-items:center;gap:10px;padding:6px 0;
+                   font-size:12px;font-family:var(--font-mono); }
+      .batch-icon { width:18px;text-align:center;flex-shrink:0; }
+    </style>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start">
+    <div>
+
+    <!-- Sheet picker -->
+    <div class="form-group">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <label class="form-label" style="margin:0">Select Sheets to Import</label>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="selectAllSheets()">All</button>
+          <button class="btn btn-outline btn-sm" onclick="deselectAllSheets()">None</button>
+        </div>
+      </div>
+      <div id="sheet-list" style="border:1px solid var(--border);border-radius:var(--radius);
+           background:var(--bg-panel);max-height:280px;overflow-y:auto">
+        {% if sheets %}
+          {% for s in sheets %}
+          <div class="sheet-row">
+            <input type="checkbox" id="sheet-chk-{{ loop.index0 }}" value="{{ loop.index0 }}"
+                   style="width:15px;height:15px;accent-color:var(--blue);flex-shrink:0;cursor:pointer"
+                   onchange="onSheetCheckChange()"/>
+            <label for="sheet-chk-{{ loop.index0 }}" title="{{ s }}">{{ s }}</label>
+            <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:11px;flex-shrink:0"
+                    onclick="runPreview({{ loop.index0 }})">Preview</button>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div style="padding:14px;color:var(--text-dim);font-size:12px;text-align:center">
+            Upload a workbook above to see available sheets.
+          </div>
+        {% endif %}
+      </div>
+      <div id="sheet-sel-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px"></div>
+    </div>
+
+    <div class="form-group" style="display:flex;align-items:center;gap:10px">
+      <input type="checkbox" id="overwrite" style="width:16px;height:16px"/>
+      <label for="overwrite" style="font-size:13px;color:var(--text);cursor:pointer">
+        Overwrite BOM if trailer type already exists
+      </label>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-primary" id="import-btn" onclick="runBatchImport()" disabled>
+        <span id="import-spin" class="spinner" style="display:none"></span>
+        <span id="import-btn-label">Import Selected</span>
+      </button>
+    </div>
+
+    <!-- Batch import progress -->
+    <div id="batch-results" style="display:none;margin-bottom:12px;border:1px solid var(--border);
+         border-radius:var(--radius);padding:12px 16px;background:var(--bg-panel)">
+      <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:8px"
+           id="batch-heading">Import progress</div>
+      <div id="batch-list"></div>
+    </div>
+
+    <!-- Preview panel -->
+    <div id="preview-panel" style="display:none;margin-top:8px;border:1px solid var(--border);
+         border-radius:var(--radius);padding:14px 18px;background:var(--bg-panel)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <div style="font-weight:600;font-size:14px;color:var(--text)" id="pv-title">Preview</div>
+        <div id="pv-recon-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></div>
+        <button class="btn btn-outline btn-sm" style="margin-left:auto;font-size:11px"
+                onclick="document.getElementById('preview-panel').style.display='none'">✕ Close</button>
+      </div>
+
+      <!-- Summary grid -->
+      <div id="pv-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+           gap:10px 20px;font-size:12px;margin-bottom:14px"></div>
+
+      <!-- Reconciliation -->
+      <div id="pv-recon" style="font-size:12px;font-family:var(--font-mono);
+           padding:8px 12px;border-radius:4px;margin-bottom:14px"></div>
+
+      <!-- Warnings -->
+      <div id="pv-warnings" style="display:none;margin-bottom:14px"></div>
+
+      <!-- Skipped sections -->
+      <div id="pv-skipped" style="display:none;margin-bottom:14px;font-size:12px;color:var(--text-dim)"></div>
+
+      <!-- Sections table -->
+      <div style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px">Sections</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);color:var(--text-dim);text-align:left">
+              <th style="padding:6px 8px">Section</th>
+              <th style="padding:6px 8px;text-align:center">×</th>
+              <th style="padding:6px 8px;text-align:right">Excel Total</th>
+              <th style="padding:6px 8px;text-align:center">Items</th>
+              <th style="padding:6px 8px;text-align:center">Skins</th>
+              <th style="padding:6px 8px;text-align:center">Disabled</th>
+              <th style="padding:6px 8px;text-align:center">Rows</th>
+            </tr>
+          </thead>
+          <tbody id="pv-sections"></tbody>
+        </table>
+      </div>
+    </div>
+
+    </div><!-- /left column -->
+
+    <aside style="border:1px solid var(--border);border-radius:var(--radius);
+                  background:var(--bg-panel);padding:14px 16px;font-size:12px;
+                  position:sticky;top:12px">
+      <div style="font-weight:600;font-size:13px;color:var(--text);margin-bottom:8px">
+        📋 Sheet format guide
+      </div>
+      <div style="color:var(--text-dim);margin-bottom:10px">
+        The importer reads each sheet using fixed column positions.
+        Lay your data out as below for a clean import.
+      </div>
+
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px">Item rows</div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
+        <tbody>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi);width:48px">B</td>
+              <td style="padding:3px 6px;color:var(--text-dim)">Section header (FLOOR, ROOF, …)</td></tr>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi)">C</td>
+              <td style="padding:3px 6px;color:var(--text-dim)">Item name</td></tr>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi)">D</td>
+              <td style="padding:3px 6px;color:var(--text-dim)">Quantity</td></tr>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi)">E</td>
+              <td style="padding:3px 6px;color:var(--text-dim)">Unit (EA, L, SHT, …)</td></tr>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi)">F</td>
+              <td style="padding:3px 6px;color:var(--text-dim)">Unit price (formulas OK)</td></tr>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi)">G</td>
+              <td style="padding:3px 6px;color:var(--text-dim)">Excel total (for reconciliation)</td></tr>
+          <tr><td style="padding:3px 6px;font-family:var(--font-mono);color:var(--blue-hi)">I</td>
+              <td style="padding:3px 6px;color:var(--text-dim)"><code>1</code> = import, <code>0</code> = skip</td></tr>
+        </tbody>
+      </table>
+
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px">Default ratios</div>
+      <div style="color:var(--text-dim);margin-bottom:10px">
+        Cells <span style="font-family:var(--font-mono);color:var(--blue-hi)">G8 – G18</span>
+        become the trailer template's default ratio chips.
+      </div>
+
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px">Skipped automatically</div>
+      <ul style="margin:0 0 12px 16px;padding:0;color:var(--text-dim)">
+        <li>Rows with <code>I = 0</code></li>
+        <li>Rows with blank price AND blank total</li>
+        <li>Rows above the first section header</li>
+      </ul>
+
+      <a href="/admin/import/sample-template.xlsx" class="btn btn-secondary"
+         style="display:block;text-align:center;text-decoration:none;margin-bottom:8px">
+        ⬇ Download sample template
+      </a>
+      <button type="button" class="btn btn-secondary"
+              onclick="showExampleScreenshot()"
+              style="display:block;width:100%;text-align:center;margin-bottom:8px">
+        🖼 View example screenshot
+      </button>
+      <div style="color:var(--text-dim);font-size:11px;text-align:center">
+        Open in Excel and use as a starting point.
+      </div>
+    </aside>
+
+    <div id="screenshot-modal" class="modal-backdrop hidden"
+         style="position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9999;
+                display:flex;align-items:center;justify-content:center;padding:20px"
+         onclick="hideExampleScreenshot(event)">
+      <div style="position:relative;max-width:95vw;max-height:95vh;background:var(--bg-panel);
+                  border-radius:var(--radius);padding:8px;box-shadow:0 10px 40px rgba(0,0,0,0.5)">
+        <button onclick="hideExampleScreenshot()"
+                style="position:absolute;top:-12px;right:-12px;width:32px;height:32px;
+                       border-radius:50%;border:none;background:var(--red);color:#fff;
+                       font-size:18px;cursor:pointer;font-weight:bold">×</button>
+        <img src="/admin/import/example-screenshot.png"
+             alt="Trailer import example"
+             style="display:block;max-width:100%;max-height:90vh;border-radius:4px"/>
+      </div>
+    </div>
+
+    </div><!-- /grid -->
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Workbook upload (Option C) ──────────────────────────────────────────────
+let _uploadId = null;
+window.addEventListener('DOMContentLoaded', () => { try { refreshReuseButton(); } catch(_) {} });
+
+function fmtBytes(n) {
+  if (!n) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(1) + ' MB';
+}
+
+async function uploadWorkbooks() {
+  const costing  = document.getElementById('up-costing').files[0];
+  const formulas = document.getElementById('up-formulas').files[0];
+  if (!costing) { toast('Select the costing workbook first', 'error'); return; }
+
+  const btn = document.getElementById('up-btn');
+  const msg = document.getElementById('up-msg');
+  btn.disabled = true;
+  btn.textContent = 'Uploading…';
+  msg.textContent = '';
+
+  const fd = new FormData();
+  fd.append('costing', costing);
+  if (formulas) fd.append('formulas', formulas);
+
+  try {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const r = await fetch('/api/import/upload', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrf },
+      body: fd
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Upload failed');
+
+    _uploadId = d.upload_id;
+    document.getElementById('up-costing-info').textContent =
+      `${d.costing_name}  (${fmtBytes(d.costing_size)})`;
+    document.getElementById('up-formulas-info').textContent =
+      d.formulas_name ? `${d.formulas_name}  (${fmtBytes(d.formulas_size)})` : '(none — using server default)';
+    document.getElementById('up-status').textContent = `✓ Loaded — ${d.sheets.length} sheets available`;
+    document.getElementById('up-status').style.color = 'var(--green)';
+
+    sheetNames = d.sheets;
+    window.sheetNames = d.sheets;
+    document.getElementById('sheet-count').textContent = d.sheets.length;
+    document.getElementById('active-source').textContent = d.costing_name;
+    renderSheetList(d.sheets);
+
+    document.getElementById('up-clear').style.display = '';
+    msg.textContent = 'Select the sheets you want to import below.';
+
+    try {
+      localStorage.setItem('burtcost.lastUpload', JSON.stringify({
+        upload_id: d.upload_id,
+        costing_name: d.costing_name,
+        formulas_name: d.formulas_name || null,
+        ts: Date.now(),
+      }));
+    } catch(_) {}
+    refreshReuseButton();
+  } catch(e) {
+    toast(e.message, 'error');
+    msg.textContent = e.message;
+    msg.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Upload & load sheets';
+  }
+}
+
+function getLastUpload() {
+  try {
+    const raw = localStorage.getItem('burtcost.lastUpload');
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    // Server-side TTL is 2hrs; expire client cache at 2hrs as well.
+    if (!o.ts || (Date.now() - o.ts) > 2 * 60 * 60 * 1000) return null;
+    return o;
+  } catch(_) { return null; }
+}
+
+function refreshReuseButton() {
+  const last = getLastUpload();
+  const btn = document.getElementById('up-reuse');
+  if (!btn) return;
+  if (last && last.upload_id !== _uploadId) {
+    btn.textContent = `Reuse last: ${last.costing_name}`;
+    btn.title = last.costing_name + (last.formulas_name ? ` + ${last.formulas_name}` : '');
+    btn.style.display = '';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+async function reuseLastUpload() {
+  const last = getLastUpload();
+  if (!last) { refreshReuseButton(); return; }
+  const btn = document.getElementById('up-reuse');
+  const msg = document.getElementById('up-msg');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Loading…';
+  msg.textContent = '';
+  try {
+    const d = await api('POST', '/api/import/reuse', { upload_id: last.upload_id });
+    _uploadId = d.upload_id;
+    document.getElementById('up-costing-info').textContent =
+      `${d.costing_name}  (${fmtBytes(d.costing_size)})`;
+    document.getElementById('up-formulas-info').textContent =
+      d.formulas_name ? `${d.formulas_name}  (${fmtBytes(d.formulas_size)})` : '(none — using server default)';
+    document.getElementById('up-status').textContent = `✓ Reused — ${d.sheets.length} sheets available`;
+    document.getElementById('up-status').style.color = 'var(--green)';
+
+    sheetNames = d.sheets;
+    window.sheetNames = d.sheets;
+    document.getElementById('sheet-count').textContent = d.sheets.length;
+    document.getElementById('active-source').textContent = d.costing_name;
+    renderSheetList(d.sheets);
+    document.getElementById('up-clear').style.display = '';
+    msg.textContent = 'Select the sheets you want to import below.';
+    refreshReuseButton();
+  } catch(e) {
+    // Cached session expired — clear localStorage and prompt the user to re-pick.
+    if ((e.message || '').match(/expired|not found|no longer/i)) {
+      localStorage.removeItem('burtcost.lastUpload');
+      refreshReuseButton();
+    }
+    toast(e.message, 'error');
+    msg.textContent = e.message;
+    msg.style.color = 'var(--red)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+function clearUpload() {
+  _uploadId = null;
+  try { localStorage.removeItem('burtcost.lastUpload'); } catch(_) {}
+  refreshReuseButton();
+  document.getElementById('up-costing').value = '';
+  document.getElementById('up-formulas').value = '';
+  document.getElementById('up-costing-info').textContent = '';
+  document.getElementById('up-formulas-info').textContent = '';
+  document.getElementById('up-status').textContent = '';
+  document.getElementById('up-msg').textContent = '';
+  document.getElementById('up-clear').style.display = 'none';
+  sheetNames = [];
+  renderSheetList([]);
+  document.getElementById('sheet-count').textContent = '0';
+  document.getElementById('import-btn').disabled = true;
+}
+
+async function loadFolderStatus_DISABLED() {
+  try {
+    const d = await api('GET', '/api/admin/excel-folder');
+    renderFolder(d);
+  } catch(e) { /* ignore */ }
+}
+function renderFolder(d) {
+  document.getElementById('folder-display').textContent = d.folder || '(not set)';
+  document.getElementById('folder-input').value = d.folder || '';
+  ['costing','pricing','formulas'].forEach(role => {
+    const row = document.querySelector(`.ff-row[data-role="${role}"]`);
+    const f = d.files[role];
+    row.classList.toggle('found',   !!f.found);
+    row.classList.toggle('missing', !f.found && !!d.folder);
+    row.querySelector('.ff-status').textContent = f.found ? '✓' : (d.folder ? '✕' : '○');
+    row.querySelector('.ff-file').textContent   = f.found ? f.filename : (d.folder ? 'not found' : '—');
+    row.title = f.found ? f.path : f.label;
+  });
+}
+function toggleFolderEdit() {
+  const v = document.getElementById('folder-view');
+  const e = document.getElementById('folder-edit');
+  const btn = document.getElementById('folder-edit-btn');
+  const editing = e.style.display === 'none';
+  v.style.display = editing ? 'none' : '';
+  e.style.display = editing ? '' : 'none';
+  btn.textContent = editing ? 'Close' : 'Edit';
+}
+async function saveFolder() {
+  const folder = document.getElementById('folder-input').value.trim();
+  try {
+    const d = await api('POST', '/api/admin/excel-folder', { folder });
+    renderFolder(d);
+    toggleFolderEdit();
+    if (d.all_found) {
+      toast('Folder saved — all 3 workbooks detected', 'success');
+    } else {
+      const missing = ['costing','pricing','formulas'].filter(r => !d.files[r].found);
+      alertModal(
+        `Folder saved, but the following workbook(s) were not found:\n\n` +
+        missing.map(r => '• ' + d.files[r].label).join('\n') +
+        `\n\nThe importer will fall back to whichever paths are still configured.`,
+        { title: '⚠ Missing workbooks', okText: 'OK', danger: true }
+      );
+    }
+  } catch(e) { toast(e.message, 'error'); }
+}
+let _brCurrent = '';
+async function openBrowse() {
+  document.getElementById('browse-modal').classList.remove('hidden');
+  const start = document.getElementById('folder-input').value.trim();
+  await brGo(start);
+}
+function closeBrowse() {
+  document.getElementById('browse-modal').classList.add('hidden');
+}
+async function brGo(path) {
+  try {
+    const url = '/api/admin/browse-folders' + (path ? ('?path=' + encodeURIComponent(path)) : '');
+    const d = await api('GET', url);
+    _brCurrent = d.path || '';
+    document.getElementById('br-path').value = _brCurrent;
+    document.getElementById('br-up').disabled = (d.parent === null);
+
+    const list = document.getElementById('br-list');
+    list.innerHTML = '';
+    if (!d.dirs.length) {
+      list.innerHTML = '<div style="padding:14px;color:var(--text-dim);font-size:12px">(no subfolders)</div>';
+    }
+    d.dirs.forEach(item => {
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:6px 10px;cursor:pointer;border-radius:4px;'
+        + 'font-size:13px;color:var(--text);display:flex;align-items:center;gap:8px';
+      row.innerHTML = '<span>📁</span><span>' + escHtml(item.name) + '</span>';
+      row.onmouseenter = () => row.style.background = 'var(--bg-card)';
+      row.onmouseleave = () => row.style.background  = '';
+      row.onclick = () => brGo(item.path);
+      list.appendChild(row);
+    });
+
+    const scan = d.scan || {};
+    const parts = ['costing','pricing','formulas'].map(role => {
+      const r = scan[role];
+      const icon = r && r.found ? '✓' : '✕';
+      const color = r && r.found ? 'var(--green)' : 'var(--red)';
+      return `<span style="color:${color};margin-right:14px">${icon} ${r.label}</span>`;
+    });
+    document.getElementById('br-scan').innerHTML = _brCurrent
+      ? 'In this folder:&nbsp; ' + parts.join('')
+      : 'Pick a drive or folder above.';
+
+    const allFound = scan.costing?.found && scan.pricing?.found && scan.formulas?.found;
+    document.getElementById('br-use').disabled = !_brCurrent;
+    document.getElementById('br-use').classList.toggle('btn-primary', !!allFound);
+  } catch(e) { toast(e.message, 'error'); }
+}
+async function brUp() {
+  try {
+    const url = '/api/admin/browse-folders' + (_brCurrent ? ('?path=' + encodeURIComponent(_brCurrent + '/..')) : '');
+    const d = await api('GET', url.replace('/..', ''));
+    if (d.parent !== null) brGo(d.parent || '');
+  } catch(e) {
+    const idx = Math.max(_brCurrent.lastIndexOf('\\'), _brCurrent.lastIndexOf('/'));
+    brGo(idx > 0 ? _brCurrent.slice(0, idx) : '');
+  }
+}
+function brUseCurrent() {
+  if (!_brCurrent) return;
+  document.getElementById('folder-input').value = _brCurrent;
+  closeBrowse();
+}
+
+// (folder-status auto-load removed — replaced by upload flow)
+
+function showExampleScreenshot() {
+  document.getElementById('screenshot-modal').classList.remove('hidden');
+}
+function hideExampleScreenshot(e) {
+  if (e && e.target.tagName === 'IMG') return;
+  document.getElementById('screenshot-modal').classList.add('hidden');
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') hideExampleScreenshot();
+});
+</script>
+<script>
+let sheetNames = [{% for s in sheets %}"{{ s }}",{% endfor %}];
+
+// ── Sheet checklist helpers ───────────────────────────────────────────────────
+function renderSheetList(names) {
+  const list = document.getElementById('sheet-list');
+  if (!names || !names.length) {
+    list.innerHTML = '<div style="padding:14px;color:var(--text-dim);font-size:12px;text-align:center">' +
+      'Upload a workbook above to see available sheets.</div>';
+    onSheetCheckChange();
+    return;
+  }
+  list.innerHTML = names.map((n, i) => `
+    <div class="sheet-row">
+      <input type="checkbox" id="sheet-chk-${i}" value="${i}"
+             style="width:15px;height:15px;accent-color:var(--blue);flex-shrink:0;cursor:pointer"
+             onchange="onSheetCheckChange()"/>
+      <label for="sheet-chk-${i}" title="${escHtml(n)}">${escHtml(n)}</label>
+      <button class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:11px;flex-shrink:0"
+              onclick="runPreview(${i})">Preview</button>
+    </div>`).join('');
+  onSheetCheckChange();
+}
+
+function getCheckedIndices() {
+  return [...document.querySelectorAll('#sheet-list input[type=checkbox]:checked')]
+    .map(el => +el.value);
+}
+
+function onSheetCheckChange() {
+  const checked = getCheckedIndices();
+  const n = checked.length;
+  document.getElementById('import-btn').disabled = (n === 0);
+  document.getElementById('import-btn-label').textContent =
+    n === 0 ? 'Import Selected' : `Import Selected (${n})`;
+  document.getElementById('sheet-sel-hint').textContent =
+    n === 0 ? '' : `${n} sheet${n === 1 ? '' : 's'} selected`;
+}
+
+function selectAllSheets() {
+  document.querySelectorAll('#sheet-list input[type=checkbox]')
+    .forEach(el => el.checked = true);
+  onSheetCheckChange();
+}
+
+function deselectAllSheets() {
+  document.querySelectorAll('#sheet-list input[type=checkbox]')
+    .forEach(el => el.checked = false);
+  onSheetCheckChange();
+}
+
+function fmtMoney(v) {
+  if (v == null) return '—';
+  return 'R' + Number(v).toLocaleString('en-ZA', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function fmtNum(v, d) {
+  if (v == null) return '—';
+  return Number(v).toFixed(d != null ? d : 2);
+}
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function runPreview(idx) {
+  if (idx === undefined || idx === null) {
+    const checked = getCheckedIndices();
+    if (!checked.length) { toast('Select at least one sheet first', 'error'); return; }
+    idx = checked[0];
+  }
+  const panel = document.getElementById('preview-panel');
+  // Find the preview button for this row and show a spinner temporarily
+  const rowBtn = document.querySelector(`#sheet-chk-${idx}`)?.closest('.sheet-row')
+                   ?.querySelector('button');
+  const origText = rowBtn?.textContent;
+  if (rowBtn) { rowBtn.disabled = true; rowBtn.textContent = '…'; }
+  try {
+    const data = await api('POST', '/api/import/sheet_preview', { sheet_index: idx, upload_id: _uploadId });
+    renderPreview(data);
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    toast(e.message, 'error');
+    panel.style.display = 'none';
+  } finally {
+    if (rowBtn) { rowBtn.disabled = false; rowBtn.textContent = origText; }
+  }
+}
+
+function renderPreview(d) {
+  document.getElementById('pv-title').textContent = `Preview: ${d.sheet_name}`;
+
+  // Reconciliation badge
+  const badge = document.getElementById('pv-recon-badge');
+  if (d.reconciled) {
+    badge.textContent = '✓ Reconciled';
+    badge.style.background = 'rgba(34,197,94,0.15)';
+    badge.style.color = 'var(--green)';
+  } else if (d.grand_total_excel == null) {
+    badge.textContent = '— No grand total';
+    badge.style.background = 'var(--bg-raise)';
+    badge.style.color = 'var(--text-dim)';
+  } else {
+    badge.textContent = '✕ Mismatch';
+    badge.style.background = 'rgba(239,68,68,0.15)';
+    badge.style.color = 'var(--red)';
+  }
+
+  // Summary grid
+  const markup = d.markup != null ? (d.markup * 100).toFixed(1) + '%' : '—';
+  const dims = `L=${fmtNum(d.length)}  W=${fmtNum(d.width)}  H=${fmtNum(d.height)}`;
+  document.getElementById('pv-summary').innerHTML = `
+    <div><div style="color:var(--text-dim)">Body Type</div>
+         <div style="font-weight:600">${escHtml(d.trailer_type_hint || '—')}</div></div>
+    <div><div style="color:var(--text-dim)">Dimensions</div>
+         <div style="font-family:var(--font-mono)">${dims}</div></div>
+    <div><div style="color:var(--text-dim)">Markup</div>
+         <div style="font-weight:600">${markup}</div></div>
+    <div><div style="color:var(--text-dim)">Sections</div>
+         <div style="font-weight:600">${d.section_count}</div></div>
+    <div><div style="color:var(--text-dim)">Items</div>
+         <div style="font-weight:600">${d.item_count}</div></div>
+    <div><div style="color:var(--text-dim)">Formula Skins</div>
+         <div style="font-weight:600">${d.skin_count}</div></div>
+  `;
+
+  // Reconciliation line
+  const recon = document.getElementById('pv-recon');
+  if (d.grand_total_excel != null) {
+    const ok = d.reconciled;
+    recon.style.background = ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)';
+    recon.style.border = '1px solid ' + (ok ? 'var(--green)' : 'var(--red)');
+    recon.style.color = 'var(--text)';
+    const diffStr = d.diff != null ? fmtMoney(d.diff) : '—';
+    const pctStr  = d.diff_pct != null ? d.diff_pct.toFixed(3) + '%' : '';
+    recon.innerHTML = `Excel GRAND TOTAL (${escHtml(d.grand_total_cell || '')}): <strong>${fmtMoney(d.grand_total_excel)}</strong>
+      &nbsp;·&nbsp; Computed: <strong>${fmtMoney(d.computed_total)}</strong>
+      &nbsp;·&nbsp; Δ ${diffStr} ${pctStr}`;
+  } else {
+    recon.style.background = 'var(--bg-raise)';
+    recon.style.border = '1px solid var(--border)';
+    recon.style.color = 'var(--text-dim)';
+    recon.innerHTML = `No GRAND TOTAL cell detected. Computed: <strong>${fmtMoney(d.computed_total)}</strong>`;
+  }
+
+  // Warnings
+  const wDiv = document.getElementById('pv-warnings');
+  if (d.warnings && d.warnings.length) {
+    wDiv.style.display = 'block';
+    wDiv.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--yellow);margin-bottom:4px">
+        ⚠ ${d.warnings.length} warning${d.warnings.length === 1 ? '' : 's'}</div>
+      <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--text)">
+        ${d.warnings.map(w => `<li>${escHtml(w)}</li>`).join('')}
+      </ul>`;
+  } else {
+    wDiv.style.display = 'none';
+  }
+
+  // Skipped sections
+  const sDiv = document.getElementById('pv-skipped');
+  if (d.skipped_sections && d.skipped_sections.length) {
+    sDiv.style.display = 'block';
+    sDiv.innerHTML = `Skipped (zero total): ${d.skipped_sections.map(escHtml).join(', ')}`;
+  } else {
+    sDiv.style.display = 'none';
+  }
+
+  // Sections rows (expandable)
+  const tbody = document.getElementById('pv-sections');
+  tbody.innerHTML = (d.sections || []).map((s, i) => {
+    const mult = s.multiplier && s.multiplier !== 1 ? `×${s.multiplier}` : '';
+    const skinCell = s.skin_count
+      ? `<span style="color:var(--red);font-weight:600">${s.skin_count}</span>` : '0';
+    const offCell = s.disabled_count
+      ? `<span style="color:var(--yellow)">${s.disabled_count}</span>` : '0';
+    const itemsRows = (s.items || []).map(it => {
+      const flags = [];
+      if (it.is_formula_skin) flags.push('<span style="color:var(--red);font-size:10px">SKIN</span>');
+      if (!it.is_enabled)     flags.push('<span style="color:var(--yellow);font-size:10px">OFF</span>');
+      const flagStr = flags.length ? ` &nbsp;${flags.join(' ')}` : '';
+      const formula = escHtml(it.symbolic_formula || '');
+      return `<tr style="background:var(--bg-card)">
+        <td style="padding:4px 8px 4px 24px;font-size:11px">
+          ${escHtml(it.name)}${flagStr}
+          ${formula ? `<div style="font-family:var(--font-mono);color:var(--text-dim);font-size:10px">qty = ${formula}</div>` : ''}
+        </td>
+        <td style="padding:4px 8px;text-align:center;font-size:11px;color:var(--text-dim);font-family:var(--font-mono)">${escHtml(it.source_cell || '')}</td>
+        <td style="padding:4px 8px;text-align:right;font-size:11px;font-family:var(--font-mono)">${fmtMoney(it.excel_total)}</td>
+        <td style="padding:4px 8px;text-align:right;font-size:11px;font-family:var(--font-mono);color:var(--text-dim)">${fmtNum(it.qty, 3)}</td>
+        <td style="padding:4px 8px;text-align:right;font-size:11px;font-family:var(--font-mono);color:var(--text-dim)">${fmtMoney(it.unit_price)}</td>
+        <td colspan="2"></td>
+      </tr>`;
+    }).join('');
+    return `<tr class="pv-sec-row" data-idx="${i}" style="border-bottom:1px solid var(--border);cursor:pointer"
+              onclick="togglePvSection(${i})">
+      <td style="padding:6px 8px">
+        <span class="pv-chevron" id="pv-chev-${i}" style="display:inline-block;width:12px;color:var(--text-dim)">▶</span>
+        ${escHtml(s.name)}
+      </td>
+      <td style="padding:6px 8px;text-align:center;color:var(--text-dim)">${mult}</td>
+      <td style="padding:6px 8px;text-align:right;font-family:var(--font-mono)">${fmtMoney(s.excel_total)}</td>
+      <td style="padding:6px 8px;text-align:center">${s.item_count}</td>
+      <td style="padding:6px 8px;text-align:center">${skinCell}</td>
+      <td style="padding:6px 8px;text-align:center">${offCell}</td>
+      <td style="padding:6px 8px;text-align:center;color:var(--text-dim);font-family:var(--font-mono)">${s.start_row}–${s.end_row}</td>
+    </tr>
+    <tr class="pv-sec-items" id="pv-items-${i}" style="display:none">
+      <td colspan="7" style="padding:0;background:var(--bg-card)">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="color:var(--text-dim);font-size:10px;text-transform:uppercase;letter-spacing:1px">
+              <th style="padding:4px 8px 4px 24px;text-align:left">Item</th>
+              <th style="padding:4px 8px;text-align:center">Cell</th>
+              <th style="padding:4px 8px;text-align:right">Excel Total</th>
+              <th style="padding:4px 8px;text-align:right">Qty</th>
+              <th style="padding:4px 8px;text-align:right">Unit Price</th>
+              <th colspan="2"></th>
+            </tr>
+          </thead>
+          <tbody>${itemsRows || `<tr><td colspan="7" style="padding:8px 24px;color:var(--text-dim);font-size:11px">No items captured for this section.</td></tr>`}</tbody>
+        </table>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function togglePvSection(i) {
+  const tr = document.getElementById('pv-items-' + i);
+  const ch = document.getElementById('pv-chev-' + i);
+  if (!tr) return;
+  const open = tr.style.display !== 'none';
+  tr.style.display = open ? 'none' : 'table-row';
+  if (ch) ch.textContent = open ? '▶' : '▼';
+}
+
+async function runBatchImport() {
+  const indices = getCheckedIndices();
+  if (!indices.length) { toast('Select at least one sheet', 'error'); return; }
+
+  const overwrite = document.getElementById('overwrite').checked;
+  const btn       = document.getElementById('import-btn');
+  const spin      = document.getElementById('import-spin');
+  const batchDiv  = document.getElementById('batch-results');
+  const batchList = document.getElementById('batch-list');
+  const heading   = document.getElementById('batch-heading');
+
+  btn.disabled = true;
+  spin.style.display = 'inline-block';
+  document.getElementById('preview-panel').style.display = 'none';
+
+  // Build initial progress rows
+  batchList.innerHTML = indices.map(i => `
+    <div class="batch-row" id="batch-row-${i}">
+      <span class="batch-icon" id="batch-icon-${i}" style="color:var(--text-dim)">○</span>
+      <span style="color:var(--text-dim)">${escHtml(sheetNames[i] || 'Sheet ' + i)}</span>
+    </div>`).join('');
+  heading.textContent = `Importing ${indices.length} sheet${indices.length === 1 ? '' : 's'}…`;
+  batchDiv.style.display = 'block';
+  batchDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  let succeeded = 0, failed = 0;
+
+  for (const idx of indices) {
+    const icon = document.getElementById(`batch-icon-${idx}`);
+    const row  = document.getElementById(`batch-row-${idx}`);
+    const name = sheetNames[idx] || ('Sheet ' + idx);
+
+    // Mark as in-progress
+    icon.innerHTML = '<span class="spinner" style="width:13px;height:13px;border-width:2px"></span>';
+    row.querySelector('span:last-child').style.color = 'var(--text)';
+
+    try {
+      const data = await api('POST', '/api/import/sheet', {
+        sheet_index:  idx,
+        trailer_name: name.trim(),
+        overwrite:    overwrite,
+        upload_id:    _uploadId,
+      });
+      succeeded++;
+      icon.textContent = '✓';
+      icon.style.color = 'var(--green)';
+      row.innerHTML = `
+        <span class="batch-icon" style="color:var(--green)">✓</span>
+        <span style="color:var(--text)">${escHtml(data.trailer_name)}</span>
+        <span style="color:var(--text-dim);margin-left:auto">
+          ${data.bom_items} items · ${data.new_materials} new materials
+        </span>`;
+    } catch(e) {
+      failed++;
+      row.innerHTML = `
+        <span class="batch-icon" style="color:var(--red)">✕</span>
+        <span style="color:var(--red)">${escHtml(name)}</span>
+        <span style="color:var(--red);margin-left:auto;font-size:11px">${escHtml(e.message)}</span>`;
+    }
+  }
+
+  // Final summary
+  spin.style.display = 'none';
+  btn.disabled = false;
+  const allOk = failed === 0;
+  heading.innerHTML = allOk
+    ? `<span style="color:var(--green)">✓ All ${succeeded} sheet${succeeded===1?'':'s'} imported successfully</span>`
+    : `<span style="color:var(--yellow)">⚠ ${succeeded} succeeded · ${failed} failed</span>`;
+
+  if (allOk) {
+    toast(`${succeeded} sheet${succeeded===1?'':'s'} imported`, 'success');
+  } else {
+    toast(`${succeeded} imported, ${failed} failed`, 'warn');
+  }
+}
+</script>
+{% endblock %}
