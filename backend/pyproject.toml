@@ -1,0 +1,17 @@
+[project]
+name = "icb-platform-backend"
+version = "0.1.0"
+description = "ICB Platform backend — FastAPI Cost Calculator + MES API (unified codebase)"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+# Only collect the curated smoke suite; the legacy tools/*test*.py helpers are
+# dev utilities, not part of the CI gate.
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+# Lenient for Phase 1: the imported Cost Calculator predates this lint config.
+line-length = 120
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]  # syntax/undefined-name errors only
