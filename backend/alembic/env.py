@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings          # noqa: E402
 import app.database                       # noqa: E402,F401  (registers all models on Base)
+import app.models.mes                     # noqa: E402,F401  (registers icb_mes models on Base)
 from app.database import Base             # noqa: E402
 
 config = context.config
@@ -40,6 +41,27 @@ target_metadata = Base.metadata
 # set version_table_schema — pinning it confuses autogenerate's self-exclusion
 # (it would otherwise flag alembic_version for removal on every `alembic check`).
 
+# Multi-schema autogenerate (WO v4.13): reflect only the relevant schemas, and
+# exclude cross-schema FKs (icb_mes -> icb_costings) which are created in
+# migrations rather than declared on the schema-less costing models.
+_RELEVANT_SCHEMAS = {None, "icb_costings", "icb_mes"}
+
+
+def _include_name(name, type_, parent_names):
+    if type_ == "schema":
+        return name in _RELEVANT_SCHEMAS
+    return True
+
+
+def _include_object(obj, name, type_, reflected, compare_to):
+    if type_ == "foreign_key_constraint":
+        try:
+            if obj.table.schema != obj.referred_table.schema:
+                return False
+        except Exception:
+            pass
+    return True
+
 
 def run_migrations_offline() -> None:
     context.configure(
@@ -48,6 +70,9 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_schemas=True,
+        include_name=_include_name,
+        include_object=_include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -64,6 +89,9 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_schemas=True,
+            include_name=_include_name,
+            include_object=_include_object,
         )
         with context.begin_transaction():
             context.run_migrations()
