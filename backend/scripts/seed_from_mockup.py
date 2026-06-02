@@ -1,0 +1,305 @@
+"""Seed the icb_mes schema (and its icb_costings anchors) from the mockup JSON.
+
+WO v4.13 (Phase 2A). Run from the repo root:
+
+    python -m backend.scripts.seed_from_mockup [--reset]
+
+Behaviour:
+  * First run (icb_mes empty): seeds the anchors (customers + calculations in
+    icb_costings, only if those tables are empty) then all the icb_mes tables.
+  * Re-run with data present: prompts "Re-seed? [Y/N]" (interactive). --reset
+    skips the prompt (for CI) and TRUNCATEs the icb_mes tables first.
+  * Never TRUNCATEs icb_costings. The anchors are inserted only when empty, so a
+    re-seed re-links production_jobs to the existing calculations by quote_number.
+  * Preserves the mockup integer IDs for stock_counts (1-10), discrepancies
+    (1-3) and po_suggestions (1-8); assigns surrogate IDs elsewhere and keeps the
+    business key (quote_number, job_number, sap_code) in its own column.
+
+Sources (frontend/src/data): icb_costings_data.json (costings -> calculations +
+production_jobs), icb_materials_data.json (stock/PO/demand/discrepancy),
+icb_mock_data.json (planning_board -> planning_slots, rework_tickets).
+"""
+import argparse
+import json
+import sys
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+_BACKEND = Path(__file__).resolve().parents[1]
+_REPO = Path(__file__).resolve().parents[2]
+_DATA = _REPO / "frontend" / "src" / "data"
+if str(_BACKEND) not in sys.path:
+    sys.path.insert(0, str(_BACKEND))
+
+from sqlalchemy import text as sa_text  # noqa: E402
+
+from app.database import Branch, CalculationRecord, Customer, SessionLocal  # noqa: E402
+from app.models.mes import (  # noqa: E402
+    Discrepancy, DemandLine, PlanningSlot, POSuggestion, ProductionJob,
+    ReworkTicket, StockCount,
+)
+
+_MES_TABLES = [
+    "production_jobs", "work_orders", "tasks", "sign_offs", "photos", "rework_tickets",
+    "planning_slots", "planning_acks", "stock_counts", "discrepancies", "po_suggestions",
+    "demand_lines",
+]
+_SITE_TO_BRANCH = {"JHB": "JHB", "CT": "CPT", "CENT": "CEN", "CPT": "CPT", "CEN": "CEN"}
+_CALC_STATUS = {
+    "Pending": "pending", "Accepted": "accepted", "Pre-Job Sent": "pre_job_sent",
+    "Pre-Job Confirmed": "pre_job_confirmed", "Rejected": "declined",
+    "Repair": "accepted", "Planning": "pre_job_confirmed",
+}
+_PJ_STATUS = {
+    "Accepted": "accepted", "Pre-Job Sent": "pre_job_sent",
+    "Pre-Job Confirmed": "pre_job_confirmed", "Planning": "planning", "Repair": "accepted",
+}
+_LANE = {"V": "vacuum", "P": "panelshop", "D": "doors", "G": "grp", "A": "assy"}
+
+
+def _load(name):
+    return json.loads((_DATA / name).read_text(encoding="utf-8"))
+
+
+def _dt(s):
+    """Parse an ISO timestamp or date string to an aware UTC datetime, or None."""
+    if not s:
+        return None
+    s = str(s).replace("Z", "+00:00")
+    try:
+        d = datetime.fromisoformat(s)
+    except ValueError:
+        d = datetime.fromisoformat(s[:10] + "T00:00:00+00:00")
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+def _date(s):
+    return date.fromisoformat(str(s)[:10]) if s else None
+
+
+def _job_num(quote):
+    return quote.split("-")[-1] if quote else None
+
+
+def _setval(db, schema_table):
+    db.execute(sa_text(
+        f"SELECT setval('{schema_table}_id_seq', "
+        f"(SELECT COALESCE(MAX(id), 1) FROM {schema_table}))"
+    ))
+
+
+def _truncate_mes(db):
+    db.execute(sa_text(
+        "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
+        + " RESTART IDENTITY CASCADE"
+    ))
+    db.commit()
+
+
+def seed(reset: bool = False) -> None:
+    costings = _load("icb_costings_data.json")["costings"]
+    materials = _load("icb_materials_data.json")
+    mock = _load("icb_mock_data.json")
+
+    db = SessionLocal()
+    try:
+        mes_has_data = db.query(ProductionJob).first() or db.query(POSuggestion).first()
+        if mes_has_data:
+            if not reset:
+                ans = input("icb_mes already contains data. Re-seed? [Y/N] ").strip().lower()
+                if ans != "y":
+                    print("[seed] Aborted — no changes made.")
+                    return
+            print("[seed] Clearing icb_mes tables (TRUNCATE ... RESTART IDENTITY CASCADE)")
+            _truncate_mes(db)
+
+        branch_by_code = {b.code: b.id for b in db.query(Branch).all()}
+
+        def branch_for(site):
+            return branch_by_code.get(_SITE_TO_BRANCH.get(site or "JHB", "JHB"))
+
+        counts = {}
+
+        # ── 1. customers (icb_costings anchor) — only when empty ──────────────
+        if db.query(Customer).count() == 0:
+            seen = {}
+            for c in costings:
+                cid = c.get("customer_id")
+                if cid and cid not in seen:
+                    seen[cid] = True
+                    db.add(Customer(id=cid, name=c.get("customer_name") or f"Customer {cid}",
+                                    branch_id=branch_for(c.get("site"))))
+            db.flush()
+            _setval(db, "icb_costings.customers")
+            counts["customers (icb_costings)"] = len(seen)
+        else:
+            counts["customers (icb_costings)"] = "skipped (not empty)"
+
+        # ── 2. calculations (icb_costings anchor) — only when empty ───────────
+        if db.query(CalculationRecord).count() == 0:
+            for c in costings:
+                db.add(CalculationRecord(
+                    quote_number=c["quote_number"],
+                    customer_id=c.get("customer_id"),
+                    branch_id=branch_for(c.get("site")),
+                    status=_CALC_STATUS.get(c.get("status"), "pending"),
+                    is_repair=(c.get("quote_type") == "Repair"),
+                    created_at=_dt(c.get("created_at")),
+                    approved_at=_dt(c.get("accepted_at")),
+                    decline_reason=c.get("rejection_reason"),
+                    dimensions_json=json.dumps({
+                        "body_type": c.get("body_type"), "body_category": c.get("body_category"),
+                        "requires_chassis": c.get("requires_chassis"),
+                        "chassis_supplied_by": c.get("chassis_supplied_by"),
+                    }),
+                    result_json=json.dumps({k: c.get(k) for k in (
+                        "cost_zar", "selling_zar", "gross_profit_zar", "markup_pct",
+                        "extras_count", "extras_list")}),
+                ))
+            db.flush()
+            _setval(db, "icb_costings.calculations")
+            counts["calculations (icb_costings)"] = len(costings)
+        else:
+            counts["calculations (icb_costings)"] = "skipped (not empty)"
+
+        calc_by_quote = {c.quote_number: c.id for c in db.query(CalculationRecord).all()}
+
+        # ── 3. production_jobs — one per progressed (accepted) costing ────────
+        pj = 0
+        for c in costings:
+            if not c.get("accepted_at"):
+                continue
+            calc_id = calc_by_quote.get(c["quote_number"])
+            if not calc_id:
+                continue
+            db.add(ProductionJob(
+                calculation_record_id=calc_id,
+                branch_id=branch_for(c.get("site")),
+                job_number=c.get("job_number_assigned") or _job_num(c["quote_number"]),
+                status=_PJ_STATUS.get(c.get("status"), "accepted"),
+                accepted_at=_dt(c.get("accepted_at")),
+                pre_job_sent_at=_dt(c.get("pre_job_sent_at")),
+                pre_job_confirmed_at=_dt(c.get("pre_job_confirmed_at")),
+                job_number_assigned=c.get("job_number_assigned"),
+                repair_phases_json=(json.dumps({"scope": c.get("repair_scope"),
+                                                "phase_entry": c.get("repair_phase_entry")})
+                                    if c.get("quote_type") == "Repair" else None),
+                pre_job_signoff_sales_at=_dt(c.get("pre_job_signoff_sales_at")),
+                pre_job_signoff_sales_by=c.get("pre_job_signoff_sales_by"),
+                pre_job_signoff_production_at=_dt(c.get("pre_job_signoff_production_at")),
+                pre_job_signoff_production_by=c.get("pre_job_signoff_production_by"),
+                planning_acknowledged_at=_dt(c.get("planning_acknowledged_at")),
+                planning_acknowledged_by=c.get("planning_acknowledged_by"),
+                chassis_eta=_dt(c.get("chassis_eta")),
+                chassis_eta_captured_at=_dt(c.get("chassis_eta_captured_at")),
+                chassis_eta_captured_by=c.get("chassis_eta_captured_by"),
+                chassis_data_json=(json.dumps(c["chassis_data"]) if c.get("chassis_data") else None),
+                chassis_received_at=_dt(c.get("chassis_received_at")),
+                chassis_received_by=c.get("chassis_received_by"),
+            ))
+            pj += 1
+        db.flush()
+        counts["production_jobs"] = pj
+        pj_by_num = {p.job_number: p.id for p in db.query(ProductionJob).all()}
+
+        # ── 4. planning_slots — from the planning board ───────────────────────
+        pb = mock.get("planning_board", {})
+        week_start = {w["week"]: _date(w.get("start")) for w in pb.get("weeks", [])}
+        ps = 0
+        for s in pb.get("slot_assignments", []):
+            slot = s.get("slot", "")
+            prefix, _, pos = slot.partition("-")
+            db.add(PlanningSlot(
+                production_job_id=pj_by_num.get(s.get("job_number")),
+                week=week_start.get(s.get("week")),
+                bay=slot, lane=_LANE.get(prefix.upper(), prefix.lower() or None),
+                slot_position=int(pos) if pos.isdigit() else None,
+                status="scheduled",
+            ))
+            ps += 1
+        counts["planning_slots"] = ps
+
+        # ── 5. rework_tickets ─────────────────────────────────────────────────
+        rt = 0
+        for t in mock.get("rework_tickets", []):
+            db.add(ReworkTicket(
+                ticket_code=t.get("ticket"), routed_to_bay=t.get("to_bay"),
+                status=t.get("status"), notes=t.get("reason"),
+                created_at=_dt(t.get("opened_at")),
+            ))
+            rt += 1
+        counts["rework_tickets"] = rt
+
+        # ── 6. stock_counts (preserve ids 1-10) ───────────────────────────────
+        scs = materials.get("stock_counts", [])
+        for s in scs:
+            db.add(StockCount(
+                id=s["id"], sap_code=s.get("sap_code"), bin=s.get("bin"),
+                sap_stock_at_count=s.get("sap_stock_at_count"),
+                physical_count=s.get("physical_count"),
+                counted_by_name=s.get("counted_by"), counted_at=_dt(s.get("counted_at")),
+                status=s.get("status"),
+            ))
+        db.flush()
+        _setval(db, "icb_mes.stock_counts")
+        counts["stock_counts"] = len(scs)
+
+        # ── 7. discrepancies (preserve ids; FK -> stock_counts) ───────────────
+        ds = materials.get("discrepancies", [])
+        for d in ds:
+            db.add(Discrepancy(
+                id=d["id"], stock_count_id=d.get("stock_count_id"),
+                raised_at=_dt(d.get("raised_at")), raised_to_buyer_name=d.get("raised_to_buyer"),
+                notes=d.get("notes"), resolved_at=_dt(d.get("resolved_at")),
+            ))
+        db.flush()
+        _setval(db, "icb_mes.discrepancies")
+        counts["discrepancies"] = len(ds)
+
+        # ── 8. po_suggestions (preserve ids 1-8) ──────────────────────────────
+        pos_rows = materials.get("po_suggestions", [])
+        for p in pos_rows:
+            db.add(POSuggestion(
+                id=p["id"], sap_code=p.get("sap_code"), qty=p.get("qty"),
+                suggested_supplier=p.get("suggested_supplier"), last_price=p.get("last_price"),
+                total=p.get("total"), need_by=_date(p.get("need_by")),
+                urgency=p.get("urgency"), status=p.get("status"),
+                created_at=_dt(p.get("created_at")),
+            ))
+        db.flush()
+        _setval(db, "icb_mes.po_suggestions")
+        counts["po_suggestions"] = len(pos_rows)
+
+        # ── 9. demand_lines (new ids; preserve job_id in job_ref) ─────────────
+        dls = materials.get("demand_lines", [])
+        for dl in dls:
+            db.add(DemandLine(
+                sap_code=dl.get("sap_code"), qty=dl.get("qty"), need_by=_date(dl.get("need_by")),
+                job_ref=dl.get("job_id"), week_bucket=dl.get("week_bucket"),
+            ))
+        counts["demand_lines"] = len(dls)
+
+        db.commit()
+
+        print("\n[seed] Complete. Row counts:")
+        for k, v in counts.items():
+            print(f"  {k:<28} {v}")
+        print("  work_orders/tasks/sign_offs/photos/planning_acks  0 (no JSON source; "
+              "populated via UI/API in later phases)")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Seed icb_mes from the mockup JSON.")
+    ap.add_argument("--reset", action="store_true",
+                    help="Non-interactive re-seed (TRUNCATE icb_mes first). For CI.")
+    args = ap.parse_args()
+    seed(reset=args.reset)
+
+
+if __name__ == "__main__":
+    main()
