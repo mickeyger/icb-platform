@@ -210,7 +210,7 @@ function sdMaybeExpand(ev) {
   const inp = ev.target;
   if (inp.value.trim().toLowerCase() === 'local') {
     ev.preventDefault();
-    inp.value = 'postgresql+psycopg://icb_app:icb_app_dev@localhost:5433/icb';
+    inp.value = 'postgresql+psycopg://icb_app:icb_app_dev@localhost:5432/icb';
   }
 }
 

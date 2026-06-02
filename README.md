@@ -34,17 +34,17 @@ icb-platform/
 |------|-------------------|
 | Python | 3.12+ (3.14 supported) |
 | Node.js | 20+ (24 used) |
-| PostgreSQL | 16 |
+| PostgreSQL | 18 |
 | Git | 2.40+ |
 
-> On this dev machine PostgreSQL **16 listens on port `5433`** (a separate PG18 instance holds 5432).
+> On this dev machine PostgreSQL **18 listens on port `5432`**.
 > The port is set by `DATABASE_URL` in `.env` — change it freely.
 
 ## First-time setup (Windows)
 
 ```bat
 :: 1. Create the database (run once, as the postgres superuser)
-"C:\Program Files\PostgreSQL\16\bin\psql.exe" -p 5433 -U postgres -f deploy\postgres\init.sql
+"C:\Program Files\PostgreSQL\18\bin\psql.exe" -p 5432 -U postgres -f deploy\postgres\init.sql
 
 :: 2. Copy and edit your local env file
 copy .env.example backend\.env

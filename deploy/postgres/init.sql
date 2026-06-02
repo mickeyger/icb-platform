@@ -4,10 +4,10 @@
 --
 -- Run ONCE as a superuser (the default `postgres` account):
 --
---   "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -p 5433 -f deploy\postgres\init.sql
+--   "C:\Program Files\PostgreSQL\18\bin\psql.exe" -U postgres -p 5432 -f deploy\postgres\init.sql
 --
--- NOTE: PostgreSQL 16 on the dev machine listens on port 5433 (a separate PG18
--- instance holds 5432). The password below is a LOCAL-DEV placeholder; the app
+-- NOTE: this dev machine uses PostgreSQL 18 on port 5432. The password below is a
+-- LOCAL-DEV placeholder; the app
 -- reads its real connection string from DATABASE_URL in backend/.env. Never use
 -- this password outside local development.
 
