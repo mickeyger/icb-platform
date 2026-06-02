@@ -32,24 +32,15 @@ async def login_page(request: Request, error: str = ""):
 @router.post("/login")
 async def login_post(request: Request, username: str = Form(...),
                      password: str = Form(...),
-                     db_choice: str = Form(default=""),
                      db: Session = Depends(get_db)):
-    from fastapi import Request as _Req
     client_ip = _get_client_ip(request)
-    is_local  = _is_localhost(request)
+    is_local  = _is_localhost(request)  # used below for the session-cookie Secure flag
 
     if _is_rate_limited(client_ip):
         logger.warning(f"Login rate-limited for IP {client_ip}")
         remaining = int(_LOCKOUT_SECONDS - (time.time() - _login_attempts[client_ip][0]))
         return templates.TemplateResponse("login.html",
             _login_ctx(request, f"Too many failed attempts — try again in {remaining // 60 + 1} minutes"))
-
-    if db_choice in ("dev", "prod") and is_local:
-        from .. import database as _dbmod
-        target_url = os.environ.get("SQLITE_URL" if db_choice == "dev" else "MYSQL_URL", "")
-        if target_url:
-            _dbmod.switch_db(target_url)
-            db = next(_dbmod.get_db())
 
     try:
         # WO v4.12: authentication runs through the pluggable AuthProvider
@@ -58,11 +49,6 @@ async def login_post(request: Request, username: str = Form(...),
         user = get_auth_provider().authenticate(db, username, password)
     except Exception as e:
         logger.error(f"Login DB error from {client_ip}: {e}")
-        if db_choice in ("dev", "prod"):
-            from .. import database as _dbmod2
-            fallback = os.environ.get("DATABASE_URL", "")
-            if fallback:
-                _dbmod2.switch_db(fallback)
         return templates.TemplateResponse("login.html",
             _login_ctx(request, "Database unavailable — please try again shortly"))
 
@@ -71,12 +57,6 @@ async def login_post(request: Request, username: str = Form(...),
         logger.warning(f"Failed login attempt for '{username}' from {client_ip}")
         return templates.TemplateResponse("login.html",
             _login_ctx(request, "Invalid credentials"))
-
-    if db_choice in ("dev", "prod") and is_local and user.role != "admin":
-        from .. import database as _dbmod3
-        fallback = os.environ.get("DATABASE_URL", "")
-        if fallback:
-            _dbmod3.switch_db(fallback)
 
     _clear_attempts(client_ip)
     logger.info(f"Successful login: '{username}' from {client_ip}")
