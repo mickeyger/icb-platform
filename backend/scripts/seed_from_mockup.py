@@ -35,14 +35,14 @@ from sqlalchemy import text as sa_text  # noqa: E402
 
 from app.database import Branch, CalculationRecord, Customer, SessionLocal  # noqa: E402
 from app.models.mes import (  # noqa: E402
-    Discrepancy, DemandLine, PlanningSlot, POSuggestion, ProductionJob,
-    ReworkTicket, StockCount,
+    Discrepancy, DemandLine, MesMaterial, PlanningSlot, POSuggestion, ProductionJob,
+    ReworkTicket, StockCount, StockPosition, Supplier,
 )
 
 _MES_TABLES = [
     "production_jobs", "work_orders", "tasks", "sign_offs", "photos", "rework_tickets",
     "planning_slots", "planning_acks", "stock_counts", "discrepancies", "po_suggestions",
-    "demand_lines",
+    "demand_lines", "mes_materials", "stock_positions", "suppliers",
 ]
 _SITE_TO_BRANCH = {"JHB": "JHB", "CT": "CPT", "CENT": "CEN", "CPT": "CPT", "CEN": "CEN"}
 _CALC_STATUS = {
@@ -265,7 +265,7 @@ def seed(reset: bool = False) -> None:
                 suggested_supplier=p.get("suggested_supplier"), last_price=p.get("last_price"),
                 total=p.get("total"), need_by=_date(p.get("need_by")),
                 urgency=p.get("urgency"), status=p.get("status"),
-                created_at=_dt(p.get("created_at")),
+                created_at=_dt(p.get("created_at")), jobs_impacted=p.get("jobs_impacted"),
             ))
         db.flush()
         _setval(db, "icb_mes.po_suggestions")
@@ -279,6 +279,37 @@ def seed(reset: bool = False) -> None:
                 job_ref=dl.get("job_id"), week_bucket=dl.get("week_bucket"),
             ))
         counts["demand_lines"] = len(dls)
+
+        # ── 10. materials — MES catalogue master data (WO v4.15, Q1) ──────────
+        mats = materials.get("materials", [])
+        for m in mats:
+            db.add(MesMaterial(
+                sap_code=m.get("sap_code"), description=m.get("description"),
+                supplier=m.get("supplier"), lead_days=m.get("lead_days"),
+                last_price=m.get("last_price"), abc_class=m.get("abc_class"),
+                dept=m.get("dept"),
+            ))
+        counts["materials"] = len(mats)
+
+        # ── 11. stock_positions — current SAP stock per material (WO v4.15) ───
+        sps = materials.get("stock_positions", [])
+        for s in sps:
+            db.add(StockPosition(
+                sap_code=s.get("sap_code"), sap_stock=s.get("sap_stock"),
+                allocated=s.get("allocated"), free=s.get("free"),
+                open_po_qty=s.get("open_po_qty"), open_po_eta=_date(s.get("open_po_eta")),
+                last_refreshed=_dt(s.get("last_refreshed")),
+            ))
+        counts["stock_positions"] = len(sps)
+
+        # ── 12. suppliers — supplier master (WO v4.15; no icb_costings.suppliers) ─
+        sups = materials.get("suppliers", [])
+        for sup in sups:
+            db.add(Supplier(
+                name=sup.get("name"), contact_person=sup.get("contact_person"),
+                payment_terms=sup.get("payment_terms"), phone=sup.get("phone"),
+            ))
+        counts["suppliers"] = len(sups)
 
         db.commit()
 

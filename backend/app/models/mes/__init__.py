@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.database import Base
 
@@ -301,6 +302,7 @@ class POSuggestion(Base):
     raised_by_user_id = Column(Integer)            # cross-schema -> icb_costings.users.id (FK in 0003)
     raised_by_name = Column(String(64))
     deferred_until = Column(Date)
+    jobs_impacted = Column(JSONB)                  # list[str] of job refs (WO v4.15 Q3); seeded from mockup
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -326,8 +328,71 @@ class DemandLine(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. mes_materials — MES materials catalogue (master data). WO v4.15 (Q1).
+#     Self-contained in icb_mes: the costing catalogue (icb_costings.materials)
+#     lacks abc_class/dept/lead_days and uses different codes, so the catalogue
+#     the Materials/Buying/Stores screens need lives here, seeded from the mockup.
+#     Reads MAY LEFT JOIN icb_costings.materials ON sap_code for reconciliation.
+#     Table is "mes_materials" (NOT "materials"): the connection search_path is
+#     `icb_mes, icb_costings, public`, so a bare `materials` would SHADOW the
+#     schema-less costing Material model and break /calculator. Class stays MesMaterial.
+# ─────────────────────────────────────────────────────────────────────────────
+class MesMaterial(Base):
+    __tablename__ = "mes_materials"
+    __table_args__ = (
+        Index("ix_mes_materials_dept_abc", "dept", "abc_class"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(100), nullable=False, unique=True)
+    description = Column(String(255))
+    supplier = Column(String(128))                 # supplier NAME (joins icb_mes.suppliers.name)
+    lead_days = Column(Integer)
+    last_price = Column(Float)
+    abc_class = Column(String(1))                  # A | B | C
+    dept = Column(String(16))                      # vacuum | panelshop | assy | paint
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. stock_positions — current SAP stock per material (one row per sap_code).
+#     Refreshed from SAP in production (mocked here). WO v4.15 (Q1).
+# ─────────────────────────────────────────────────────────────────────────────
+class StockPosition(Base):
+    __tablename__ = "stock_positions"
+    __table_args__ = ({"schema": "icb_mes"},)
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(100), nullable=False, unique=True)
+    sap_stock = Column(Float)
+    allocated = Column(Float)
+    free = Column(Float)
+    open_po_qty = Column(Float)
+    open_po_eta = Column(Date)
+    last_refreshed = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. suppliers — supplier master. No icb_costings.suppliers exists (verified
+#     against information_schema), so this is the system of record. WO v4.15 (§0.1/Q1).
+# ─────────────────────────────────────────────────────────────────────────────
+class Supplier(Base):
+    __tablename__ = "suppliers"
+    __table_args__ = ({"schema": "icb_mes"},)
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False, unique=True)
+    contact_person = Column(String(128))
+    payment_terms = Column(String(32))
+    phone = Column(String(32))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
+    "MesMaterial", "StockPosition", "Supplier",
     "CROSS_SCHEMA_FKS",
 ]

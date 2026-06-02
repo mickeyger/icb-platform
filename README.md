@@ -86,6 +86,28 @@ handlers, which retire in Phase 4). All endpoints require an authenticated sessi
 | POST | `/api/production-jobs/{id}/chassis-received` | Confirm chassis arrival |
 | GET | `/api/production-jobs/{id}/timeline` | Derived lifecycle timeline |
 
+## MES API — materials / buying / stores (Phase 2B-2, WO v4.15)
+
+Surfaces for the Materials, Buying, and Stores screens (ADR 0008/0009). All require
+an authenticated session. The catalogue lives in `icb_mes.mes_materials` (migration
+`0004`); the MES materials API is at `/api/mes-materials` because the costing admin
+already owns `/api/materials`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/mes-materials` | Catalogue + stock (filters: `dept`, `abc_class`, `low_stock`, `branch_id`) |
+| GET | `/api/mes-materials/{sap_code}` | Material detail + current stock + recent (5) counts |
+| GET | `/api/stock-counts` | Cycle counts (filters: `status`, `branch_id`, `counted_since`) |
+| POST | `/api/stock-counts` | Record a count (auto confirmed/discrepancy) |
+| POST | `/api/stock-counts/{id}/raise-discrepancy` | Raise a discrepancy (422 unless count is a discrepancy) |
+| GET | `/api/discrepancies` | Buyer queue (filter: `resolved`) |
+| POST | `/api/discrepancies/{id}/resolve` | Resolve (422 if already resolved) |
+| GET | `/api/po-suggestions` | PO queue (filters: `status`, `urgency`) |
+| POST | `/api/po-suggestions/{id}/raise` | Raise PR — mock SAP `PR-{seq}` (422 if already raised) |
+| POST | `/api/po-suggestions/{id}/defer` | Defer until a date (422 if already raised) |
+| GET | `/api/demand-lines` | Forecast read-model (`group_by=week\|sap` rollup) |
+| GET | `/api/suppliers` | Supplier master |
+
 ## Database & migrations
 
 All schema changes go through **Alembic** (`backend/alembic/`). There is no runtime
