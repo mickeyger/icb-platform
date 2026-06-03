@@ -13,6 +13,11 @@ import { useAppData } from '../../store/AppDataContext'
 import { PlanningAckPanel } from './PlanningAckPanel'
 import type { Costing } from '../../data/costingsData'
 import type { SlotAssignment, UnscheduledJob } from '../../data/types'
+import { usePlanning } from '../../store/PlanningContext'
+import { useToast } from '../../components/ui/toast'
+import { Spinner, Skeleton, EmptyState, LastUpdated } from '../../components/ui/feedback'
+import { ApiError } from '../../lib/api'
+import { getChassisState, type ChassisState, type PlanningJob, type PlanningSlot, type PlanningWeekCol } from '../../lib/types'
 
 // v4.5 — local extension of SlotAssignment that may carry a per-cell override
 // of chassis_received_at when the planner ticks the Planning-Board tick box
@@ -30,6 +35,15 @@ type LocalSlot = SlotAssignment & {
 const SLOTS = ['V-1', 'V-2', 'V-3', 'V-4', 'V-5', 'P-1', 'P-2', 'P-3']
 
 export function PlanningBoard() {
+  const { mode } = usePlanning()
+  if (mode === 'loading') return <BoardSkeleton />
+  return mode === 'live' ? <LivePlanningBoard /> : <MockPlanningBoard />
+}
+
+// ── Offline demo (mock mode) — the original local-state board, driven by the
+// bundled seed + the legacy CostingsContext Planning pool (§0.5). Behaviour is
+// unchanged from v4.x; renders only when the API is unreachable. ───────────────
+function MockPlanningBoard() {
   const nav = useNavigate()
   const { costings, ackPlanning, markChassisReceived } = useCostings()
   const { profile, hasPermission } = useAppData()
@@ -306,7 +320,8 @@ export function PlanningBoard() {
                 const unack = !c.planning_acknowledged_at
                 // v4.4 — acknowledged cards are draggable into the week grid;
                 // pulsing un-ack'd cards stay click-only (open ack panel).
-                const draggable = !unack
+                // v4.18 — also require the planning.schedule permission to drag.
+                const draggable = !unack && hasPermission('planning.schedule')
                 const tooltipKey = unack
                   ? 'planning_board.unack_pulsing_card'
                   : 'planning_board.planning_card_draggable'
@@ -436,15 +451,15 @@ export function PlanningBoard() {
                         {cell ? (
                           <button
                             onClick={() => setOpenSlot(cell)}
-                            draggable={hasPermission('planning.acknowledge')}
+                            draggable={hasPermission('planning.schedule')}
                             onDragStart={(e) => {
-                              if (!hasPermission('planning.acknowledge')) { e.preventDefault(); return }
+                              if (!hasPermission('planning.schedule')) { e.preventDefault(); return }
                               setDragCell(cell)
                             }}
                             onDragEnd={() => setDragCell(null)}
                             title={job?.description ?? cell.customer_name}
                             className={`flex w-full items-center gap-1 rounded border-l-4 px-1.5 py-1 text-left hover:border-primary ${
-                              hasPermission('planning.acknowledge') ? 'cursor-grab active:cursor-grabbing' : ''
+                              hasPermission('planning.schedule') ? 'cursor-grab active:cursor-grabbing' : ''
                             } ${
                               repairJobNumbers.has(cell.job_number)
                                 ? 'border-[#7E22CE] bg-[#7E22CE]/5'
@@ -673,6 +688,337 @@ function SlotDetail({
       </Tooltip>
 
       <button onClick={onOpenJob} className="w-full rounded-md border border-line py-2 font-semibold text-primary hover:bg-surface-alt">Open full job</button>
+      <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>
+    </div>
+  )
+}
+
+// ── Initial-load skeleton (first real use of the Skeleton primitive — §3.1) ─────
+function BoardSkeleton() {
+  return (
+    <div className="p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-xl font-bold text-body">Planning Board</h1>
+        <span className="text-xs text-muted">Loading…</span>
+      </div>
+      <div className="grid grid-cols-[250px_1fr] gap-4">
+        <Card className="self-start"><Skeleton rows={4} /></Card>
+        <Card className="p-0"><Skeleton rows={8} /></Card>
+      </div>
+    </div>
+  )
+}
+
+// ── Live board (mode === 'live') — grid + pool + capacity from PlanningContext;
+// drag-drop schedule / move / unschedule via the live API (pessimistic). The
+// legacy ack pool + chassis tick are NOT here (dead in live per §0.5; 2C-3). ────
+function LivePlanningBoard() {
+  const nav = useNavigate()
+  const { board, schedule, move, unschedule, lastUpdated, refresh } = usePlanning()
+  const { hasPermission } = useAppData()
+  const toast = useToast()
+  const canSchedule = hasPermission('planning.schedule')
+  const canUnschedule = hasPermission('planning.unschedule')
+  const target = data.kpis.weekly_target_zar
+
+  const [dragPoolJob, setDragPoolJob] = useState<PlanningJob | null>(null)
+  const [dragSlot, setDragSlot] = useState<PlanningSlot | null>(null)
+  const [spinnerKey, setSpinnerKey] = useState<string | null>(null)
+  const [rejectKey, setRejectKey] = useState<string | null>(null)
+  const [poolHot, setPoolHot] = useState(false)
+  const [openSlot, setOpenSlot] = useState<PlanningSlot | null>(null)
+
+  // Grid rows = the canonical bays plus any extra bays the server returned.
+  const bays = useMemo(() => {
+    const extra = board.bays.filter((b) => !SLOTS.includes(b))
+    return [...SLOTS, ...extra]
+  }, [board.bays])
+
+  const cellFor = (weekKey: string, bay: string): PlanningSlot | undefined =>
+    board.slots.find((s) => s.week_key === weekKey && s.bay === bay)
+  const capFor = (weekKey: string) => board.capacity.find((c) => c.week_key === weekKey)
+  const laneForBay = (bay: string): string => (bay.startsWith('P') ? 'panelshop' : 'vacuum')
+  function flashReject(key: string) {
+    setRejectKey(key)
+    setTimeout(() => setRejectKey(null), 1800)
+  }
+
+  async function dropOnCell(week: PlanningWeekCol, bay: string) {
+    const key = `${week.key}:${bay}`
+    // Move a scheduled slot to this cell.
+    if (dragSlot) {
+      const src = dragSlot
+      setDragSlot(null)
+      if (src.week_key === week.key && src.bay === bay) return
+      try {
+        setSpinnerKey(key)
+        await move(src.id, { week: week.start, bay, lane: laneForBay(bay) })
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) {
+          flashReject(key)
+          toast.push({ kind: 'warn', message: 'That cell is already occupied.' })
+        }
+      } finally {
+        setSpinnerKey(null)
+      }
+      return
+    }
+    // Schedule a pool job into this cell.
+    if (dragPoolJob) {
+      const job = dragPoolJob
+      setDragPoolJob(null)
+      // Case-(a) client guard (WO §3.2, BA-locked): no ETA committed + not
+      // received → block client-side (the v4.16 gate would otherwise allow it).
+      if (getChassisState(job) === 'none') {
+        toast.push({
+          kind: 'warn',
+          message:
+            'No chassis ETA committed yet — rep should confirm an ETA with the customer/dealer before this job can be scheduled.',
+        })
+        return
+      }
+      try {
+        setSpinnerKey(key)
+        await schedule({ production_job_id: job.id, week: week.start, bay, lane: laneForBay(bay) })
+      } catch (e) {
+        // 422 (chassis ETA after the target week — case (b)) and other statuses are
+        // toasted by the context's handleApiError. 409 (occupied) re-throws here →
+        // inline cell-reject + amber toast.
+        if (e instanceof ApiError && e.status === 409) {
+          flashReject(key)
+          toast.push({ kind: 'warn', message: 'That cell is already occupied.' })
+        }
+      } finally {
+        setSpinnerKey(null)
+      }
+    }
+  }
+
+  async function dropOnPool() {
+    setPoolHot(false)
+    if (!dragSlot) return
+    const src = dragSlot
+    setDragSlot(null)
+    if (!canUnschedule) {
+      toast.push({ kind: 'warn', message: "You don't have permission to unschedule jobs." })
+      return
+    }
+    try {
+      await unschedule(src.id)
+    } catch {
+      /* surfaced by the context */
+    }
+  }
+
+  return (
+    <div className="p-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="mb-0.5 text-[11px] text-muted">MES › Planning › Board</div>
+          <h1 className="text-xl font-bold text-body">Planning Board</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-semibold">Week {data.kpis.current_week}</span>
+          <span className="rounded-md border border-line bg-white px-3 py-1.5">{board.weeks.length} weeks</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[250px_1fr] gap-4">
+        {/* Unscheduled pool — also the unschedule drop zone (drag a slot here). */}
+        <Card className="self-start">
+          <div
+            onDragOver={(e) => { if (dragSlot) { e.preventDefault(); setPoolHot(true) } }}
+            onDragLeave={() => setPoolHot(false)}
+            onDrop={() => dropOnPool()}
+            className={`rounded-md transition ${poolHot ? 'ring-2 ring-status-amber' : ''}`}
+          >
+            <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
+              Unscheduled ({board.pool.length})
+            </div>
+            <div className="space-y-2">
+              {board.pool.map((job) => (
+                <div
+                  key={job.id}
+                  draggable={canSchedule}
+                  onDragStart={() => { if (canSchedule) setDragPoolJob(job) }}
+                  onDragEnd={() => setDragPoolJob(null)}
+                  className={`flex items-start gap-2 rounded-md border border-line bg-white p-2 ${
+                    canSchedule ? 'cursor-grab active:cursor-grabbing' : ''
+                  }`}
+                >
+                  {canSchedule && <GripVertical size={14} className="mt-0.5 text-muted" />}
+                  <div className="flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-1">
+                      <span className="font-mono text-sm font-semibold">#{job.job_number}</span>
+                      <ChassisBadge state={getChassisState(job)} eta={job.chassis_eta} />
+                    </div>
+                    <div className="text-xs text-body">{job.customer}</div>
+                    {job.body_type && <div className="text-[11px] text-muted">{job.body_type}</div>}
+                  </div>
+                </div>
+              ))}
+              {board.pool.length === 0 && <div className="text-sm text-muted">All scheduled.</div>}
+            </div>
+            <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
+              Drag a card onto a slot →{canUnschedule ? ' · drop a scheduled job here to unschedule' : ''}
+            </div>
+          </div>
+        </Card>
+
+        {/* Week grid */}
+        <Card className="overflow-x-auto p-0">
+          {board.weeks.length === 0 ? (
+            <EmptyState
+              title="No scheduled weeks yet"
+              hint="Schedule a job from the unscheduled pool to populate the board."
+            />
+          ) : (
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-primary text-white">
+                  <th className="px-2 py-2 text-left font-semibold">Slot</th>
+                  {board.weeks.map((w) => (
+                    <th key={w.key} className="px-2 py-2 text-left font-semibold">
+                      {w.key}
+                      <div className="text-[10px] font-normal opacity-80">{dmy(w.start)}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {bays.map((bay) => (
+                  <tr key={bay} className="border-b border-line">
+                    <td className="bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold">{bay}</td>
+                    {board.weeks.map((w) => {
+                      const cell = cellFor(w.key, bay)
+                      const key = `${w.key}:${bay}`
+                      const rejected = rejectKey === key
+                      const busy = spinnerKey === key
+                      return (
+                        <td
+                          key={key}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => dropOnCell(w, bay)}
+                          className={`relative h-12 px-1 py-1 align-top transition ${
+                            rejected ? 'bg-status-red/30 ring-2 ring-status-red' : cell ? '' : 'bg-surface-alt/40'
+                          }`}
+                        >
+                          {busy && (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60">
+                              <Spinner size={16} className="text-primary" />
+                            </div>
+                          )}
+                          {cell && cell.job ? (
+                            <button
+                              onClick={() => setOpenSlot(cell)}
+                              draggable={canSchedule}
+                              onDragStart={(e) => {
+                                if (!canSchedule) { e.preventDefault(); return }
+                                setDragSlot(cell)
+                              }}
+                              onDragEnd={() => setDragSlot(null)}
+                              title={cell.job.customer}
+                              className={`flex w-full items-center gap-1 rounded border-l-4 border-status-green bg-white px-1.5 py-1 text-left hover:border-primary ${
+                                canSchedule ? 'cursor-grab active:cursor-grabbing' : ''
+                              }`}
+                            >
+                              <span className="flex-1">
+                                <span className="font-mono text-xs font-semibold">{cell.job.job_number}</span>
+                                <span className="block truncate text-[11px] text-muted">{cell.job.customer}</span>
+                              </span>
+                              <ChassisBadge state={getChassisState(cell.job)} eta={cell.job.chassis_eta} />
+                            </button>
+                          ) : null}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+                <FooterRow
+                  label="Filled"
+                  cells={board.weeks.map((w) => `${capFor(w.key)?.filled ?? 0}`)}
+                  tooltipKey="planning_board.weekly_capacity_footer"
+                />
+                <FooterRow label="Empty" cells={board.weeks.map((w) => `${capFor(w.key)?.empty ?? 0}`)} />
+                <FooterRow label="Value" cells={board.weeks.map((w) => zarShort(capFor(w.key)?.value_zar ?? 0))} strong />
+                <FooterRow
+                  label="Gap vs target"
+                  cells={board.weeks.map((w) => zarShort((capFor(w.key)?.value_zar ?? 0) - target))}
+                  tone={board.weeks.map((w) => ((capFor(w.key)?.value_zar ?? 0) >= target ? 'green' : 'red'))}
+                />
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <LastUpdated at={lastUpdated} onRefresh={refresh} />
+        {!canSchedule && (
+          <span className="mt-2 text-[11px] text-muted">Read-only — your role can’t schedule on the board.</span>
+        )}
+      </div>
+
+      <SidePanel title={openSlot?.job ? `Job #${openSlot.job.job_number}` : ''} open={!!openSlot} onClose={() => setOpenSlot(null)}>
+        {openSlot?.job && (
+          <LiveSlotDetail slot={openSlot} onViewProduction={() => { setOpenSlot(null); nav('/production') }} />
+        )}
+      </SidePanel>
+    </div>
+  )
+}
+
+// §3.3 — amber "ETA committed" pill on slots/pool cards whose chassis is in
+// transit (chassis_received_at IS NULL, chassis_eta set). Received = no badge.
+function ChassisBadge({ state, eta }: { state: ChassisState; eta: string | null }) {
+  if (state !== 'eta_committed') return null
+  return (
+    <span
+      title={eta ? `Chassis ETA ${dmy(eta)} (Path B) — not yet received` : 'Chassis ETA committed (Path B)'}
+      className="whitespace-nowrap rounded bg-status-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-status-amber"
+    >
+      ETA committed
+    </span>
+  )
+}
+
+// Live slot detail — read-only chassis state in v4.18; the receipt tick rewires
+// with the Costings/production-jobs migration in 2C-3 (§0.1, §8).
+function LiveSlotDetail({ slot, onViewProduction }: { slot: PlanningSlot; onViewProduction: () => void }) {
+  const job = slot.job!
+  const cs = getChassisState(job)
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="text-lg font-semibold text-body">{job.customer}</div>
+      {job.body_type && <div className="text-muted">{job.body_type}</div>}
+      <div className="flex items-center gap-2">
+        <StatusPill status="GREEN" label={(job.status ?? 'scheduled').replace(/_/g, ' ')} />
+      </div>
+      <div className="grid grid-cols-2 gap-2 rounded-md bg-surface-alt p-3">
+        <div><div className="text-xs text-muted">Slot</div>{slot.bay} · {slot.week_key}</div>
+        <div><div className="text-xs text-muted">Selling</div>{job.selling_zar != null ? zar(job.selling_zar) : '—'}</div>
+      </div>
+
+      <div className="rounded-md border border-line p-3">
+        {cs === 'received' ? (
+          <div className="flex items-center gap-2 text-status-green">
+            <CheckCircle2 size={18} />
+            <span className="font-semibold">Chassis received{job.chassis_received_at ? ` ${dmy(job.chassis_received_at)}` : ''}</span>
+          </div>
+        ) : cs === 'eta_committed' ? (
+          <div className="flex items-center gap-2 text-status-amber">
+            <Truck size={18} />
+            <span className="font-semibold">Chassis ETA {job.chassis_eta ? dmy(job.chassis_eta) : ''} — not yet received (Path B)</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-status-amber">
+            <AlertTriangle size={18} />
+            <span className="font-semibold">No chassis ETA committed yet</span>
+          </div>
+        )}
+        <div className="mt-1 text-xs text-muted">Recording chassis receipt moves with the job card in a later update.</div>
+      </div>
+
       <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>
     </div>
   )

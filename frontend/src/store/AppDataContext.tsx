@@ -1,8 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { data, unitsInProduction } from '../data/mockData'
 import type { MockData, ReworkTicket } from '../data/types'
 import { costingsMock, ROLE_PERMISSIONS, type DemoUserProfile, type PermissionKey } from '../data/costingsData'
-import { apiGet, mesAutoLogin } from '../lib/api'
+import { apiGet, apiPost, handleApiError, mesAutoLogin, setCsrfToken } from '../lib/api'
+import { useToast } from '../components/ui/toast'
 
 // ── Live session (WO v4.17) ───────────────────────────────────────────────────
 export type ApiMode = 'live' | 'mock' | 'loading'
@@ -18,6 +19,7 @@ interface SessionInfo {
   active_branch: BranchRef | null
   accessible_branches: BranchRef[]
   permissions: string[]
+  csrf_token?: string | null
 }
 
 // The 15 server-tracked mutation permission keys (ADR 0010). Read/nav keys are NOT
@@ -64,6 +66,9 @@ interface AppDataValue {
   // Live session (WO v4.17).
   apiMode: ApiMode
   activeBranch: BranchRef | null
+  // Branch picker (WO v4.18).
+  accessibleBranches: BranchRef[]
+  switchBranch: (branchId: number) => Promise<void>
 }
 
 const AppDataContext = createContext<AppDataValue | null>(null)
@@ -80,9 +85,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   // Live session bootstrap: mint a session, then read GET /api/session. On failure,
   // fall back to mock mode + the demo profile-switcher.
+  const toast = useToast()
   const [apiMode, setApiMode] = useState<ApiMode>('loading')
   const [sessionPerms, setSessionPerms] = useState<Set<string>>(new Set())
   const [activeBranch, setActiveBranch] = useState<BranchRef | null>(null)
+  const [accessibleBranches, setAccessibleBranches] = useState<BranchRef[]>([])
 
   useEffect(() => {
     let alive = true
@@ -93,6 +100,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         if (!alive) return
         setSessionPerms(new Set(s.permissions))
         setActiveBranch(s.active_branch)
+        setAccessibleBranches(s.accessible_branches)
+        setCsrfToken(s.csrf_token ?? null)
         setApiMode('live')
       } catch {
         if (alive) setApiMode('mock')
@@ -102,6 +111,25 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       alive = false
     }
   }, [])
+
+  // Branch switch (WO v4.18 §4.4): POST the new branch, then update session
+  // state. The activeBranch change is the "branch-changed" signal that the
+  // branch-scoped contexts (Planning, Materials) watch via useEffect to refetch.
+  const switchBranch = useCallback(
+    async (branchId: number) => {
+      if (branchId === activeBranch?.id) return
+      try {
+        const s = await apiPost<SessionInfo>('/api/session/branch', { branch_id: branchId })
+        setSessionPerms(new Set(s.permissions))
+        setActiveBranch(s.active_branch)
+        setAccessibleBranches(s.accessible_branches)
+        setCsrfToken(s.csrf_token ?? null)
+      } catch (e) {
+        handleApiError(e, toast.push)
+      }
+    },
+    [activeBranch?.id, toast],
+  )
 
   const mockPermissions = useMemo<PermissionKey[]>(() => ROLE_PERMISSIONS[profile.id] ?? [], [profile])
 
@@ -134,8 +162,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       permissions: mockPermissions,
       apiMode,
       activeBranch,
+      accessibleBranches,
+      switchBranch,
     }
-  }, [acceptedJobs, reworkTickets, tooltipsEnabled, profile, mockPermissions, apiMode, sessionPerms, activeBranch])
+  }, [acceptedJobs, reworkTickets, tooltipsEnabled, profile, mockPermissions, apiMode, sessionPerms, activeBranch, accessibleBranches, switchBranch])
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>
 }

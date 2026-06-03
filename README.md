@@ -115,8 +115,8 @@ permission tables via `require_permission`; the active branch is session-held.
 
 | Method | Path | Purpose (permission) |
 |--------|------|---------|
-| GET | `/api/session` | Current user + active branch (JHB default) + accessible branches + `permissions[]` (WO v4.17 — drives SPA UI gating) |
-| POST | `/api/session/branch` | Switch the active branch (404 if unknown) |
+| GET | `/api/session` | Current user + active branch (JHB default) + accessible branches + `permissions[]` (WO v4.17) + `csrf_token` (WO v4.18 — lets the SPA send `X-CSRF-Token` on mutations) |
+| POST | `/api/session/branch` | Switch the active branch (404 if unknown); drives the TopNav branch picker (WO v4.18) |
 | GET | `/api/planning-board` | Board: weeks × slots, unscheduled pool, capacity |
 | GET | `/api/planning-slots` | List slots (filters: week / lane / status / branch) |
 | POST | `/api/planning-slots` | Schedule — `planning.schedule` (422 chassis-ETA gate, 409 occupied) |

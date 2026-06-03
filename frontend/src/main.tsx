@@ -6,6 +6,7 @@ import { ToastProvider } from './components/ui/toast'
 import { AppDataProvider } from './store/AppDataContext'
 import { CostingsProvider } from './store/CostingsContext'
 import { MaterialsProvider } from './store/MaterialsContext'
+import { PlanningProvider } from './store/PlanningContext'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -15,7 +16,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <AppDataProvider>
           <CostingsProvider>
             <MaterialsProvider>
-              <App />
+              <PlanningProvider>
+                <App />
+              </PlanningProvider>
             </MaterialsProvider>
           </CostingsProvider>
         </AppDataProvider>

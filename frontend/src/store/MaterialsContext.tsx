@@ -10,12 +10,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import seed from '../data/icb_materials_data.json'
 import { apiGet, apiPost, handleApiError, mesAutoLogin } from '../lib/api'
 import { useToast } from '../components/ui/toast'
+import { useAppData } from './AppDataContext'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 export type Urgency = 'critical' | 'order_now' | 'advisory' | 'comfortable'
@@ -199,8 +201,10 @@ export function MaterialsProvider({ children }: { children: ReactNode }) {
     setDiscrepancies((await apiGet<ApiDiscrepancy[]>('/api/discrepancies')).map(toDiscrepancy))
   }, [])
 
-  const load = useCallback(async () => {
-    await mesAutoLogin()
+  // refetch() = reads only (no autologin). Used by the Refresh button AND the
+  // branch-switch signal (WO v4.18 §3.5/§4.6). bootstrap() adds the one-shot
+  // autologin and runs once on mount.
+  const refetch = useCallback(async () => {
     try {
       const [mats, counts, discs, pos, demand, sups] = await Promise.all([
         apiGet<ApiMaterial[]>('/api/mes-materials'),
@@ -225,9 +229,27 @@ export function MaterialsProvider({ children }: { children: ReactNode }) {
     setLastUpdated(new Date())
   }, [])
 
+  // Bootstrap once on mount: mint the session (deduped), then read.
   useEffect(() => {
-    void load()
-  }, [load])
+    void (async () => {
+      await mesAutoLogin()
+      await refetch()
+    })()
+  }, [refetch])
+
+  // Branch-changed signal (§4.4): re-scope on an actual active-branch switch.
+  // Skip the initial null→branch resolution — bootstrap already loaded.
+  const { activeBranch } = useAppData()
+  const prevBranchId = useRef<number | null | undefined>(undefined)
+  useEffect(() => {
+    const id = activeBranch?.id ?? null
+    const prev = prevBranchId.current
+    prevBranchId.current = id
+    // Refetch only on a real branch switch — skip mount + the initial
+    // null→default-branch resolution (bootstrap already loaded that branch).
+    if (prev === undefined || prev === null || id === null) return
+    if (prev !== id) void refetch()
+  }, [activeBranch?.id, refetch])
 
   // ── Mutators ────────────────────────────────────────────────────────────────
   const raisePR = useCallback(
@@ -380,12 +402,12 @@ export function MaterialsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<MaterialsValue>(
     () => ({
-      mode, lastUpdated, refresh: load,
+      mode, lastUpdated, refresh: refetch,
       materials, stockPositions, demandLines, poSuggestions, stockCounts, discrepancies, suppliers,
       raisePR, deferSuggestion, overrideSupplier, recordCount, notifyBuyerOfDiscrepancy, resolveDiscrepancy,
     }),
     [
-      mode, lastUpdated, load, materials, stockPositions, demandLines, poSuggestions, stockCounts, discrepancies, suppliers,
+      mode, lastUpdated, refetch, materials, stockPositions, demandLines, poSuggestions, stockCounts, discrepancies, suppliers,
       raisePR, deferSuggestion, overrideSupplier, recordCount, notifyBuyerOfDiscrepancy, resolveDiscrepancy,
     ],
   )

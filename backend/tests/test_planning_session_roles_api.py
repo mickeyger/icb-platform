@@ -331,3 +331,30 @@ def test_reads_ungated_for_any_user(make_user, api_as):
     assert c.get("/api/planning-board").status_code == 200
     assert c.get("/api/po-suggestions").status_code == 200
     assert c.get("/api/session").status_code == 200
+
+
+def test_session_returns_csrf_token(app_mod, admin):
+    """GET /api/session exposes the session's CSRF token so the SPA can send
+    X-CSRF-Token on mutations (WO v4.18 csrf_middleware enabler)."""
+    from app.database import SessionLocal, UserSession
+    from app.deps import current_session_id, require_user
+    from starlette.testclient import TestClient
+    sid = "test-csrf-sess-v418"
+    app_mod.app.dependency_overrides[require_user] = lambda: admin
+    app_mod.app.dependency_overrides[current_session_id] = lambda: sid
+    try:
+        with SessionLocal() as db:
+            db.merge(UserSession(id=sid, user_id=admin.id, role=admin.role, csrf_token="tok_v418_csrf"))
+            db.commit()
+        with TestClient(app_mod.app) as c:
+            body = c.get("/api/session").json()
+            assert "csrf_token" in body
+            assert body["csrf_token"] == "tok_v418_csrf"
+    finally:
+        app_mod.app.dependency_overrides.pop(require_user, None)
+        app_mod.app.dependency_overrides.pop(current_session_id, None)
+        with SessionLocal() as db:
+            row = db.get(UserSession, sid)
+            if row:
+                db.delete(row)
+                db.commit()

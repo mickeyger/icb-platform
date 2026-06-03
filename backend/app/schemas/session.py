@@ -23,6 +23,7 @@ class SessionInfo(BaseModel):
     active_branch: Optional[BranchInfo] = None       # default JHB for display (ADR 0010)
     accessible_branches: List[BranchInfo] = []
     permissions: List[str] = []                      # effective permission keys (WO v4.17; admin = all)
+    csrf_token: Optional[str] = None                 # session CSRF token so the SPA can send X-CSRF-Token (WO v4.18)
 
 
 class BranchSwitchRequest(BaseModel):

@@ -75,6 +75,17 @@ def effective_permissions(db: Session, user) -> List[str]:
     return sorted(_user_permission_set(user, db))
 
 
+def _session_csrf_token(db: Session, session_id: Optional[str]) -> Optional[str]:
+    """The CSRF token stored on the session row, exposed to the SPA so its
+    apiPost/apiDelete can send X-CSRF-Token (WO v4.18 — csrf_middleware enabler;
+    same token the Jinja templates already embed via request.state.csrf_token)."""
+    if not session_id:
+        return None
+    from app.database import UserSession
+    row = db.get(UserSession, session_id)
+    return row.csrf_token if row is not None else None
+
+
 def build_session_info(db: Session, user, session_id: Optional[str]) -> SessionInfo:
     active = get_active_or_default(db, session_id)
     return SessionInfo(
@@ -82,4 +93,5 @@ def build_session_info(db: Session, user, session_id: Optional[str]) -> SessionI
         active_branch=(BranchInfo.model_validate(active) if active is not None else None),
         accessible_branches=[BranchInfo.model_validate(b) for b in accessible_branches(db)],
         permissions=effective_permissions(db, user),
+        csrf_token=_session_csrf_token(db, session_id),
     )

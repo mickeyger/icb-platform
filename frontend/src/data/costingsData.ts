@@ -23,6 +23,8 @@ export type PermissionKey =
   | 'costings.admin'
   | 'planning.view'
   | 'planning.acknowledge'         // v4
+  | 'planning.schedule'            // v4.18 — drag-drop schedule / move
+  | 'planning.unschedule'          // v4.18 — return a slot to the pool
   | 'production.view'
   | 'management.view'
   | 'tablet.signoff'
@@ -174,6 +176,8 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'costings.signoff_production',
     'planning.view',
     'planning.acknowledge',
+    'planning.schedule',
+    'planning.unschedule',
     'production.view',
     'tablet.signoff',
   ],
@@ -184,6 +188,8 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'costings.signoff_production',
     'planning.view',
     'planning.acknowledge',
+    'planning.schedule',
+    'planning.unschedule',
     'production.view',
     'tablet.signoff',
     'kanban.team_lead',
@@ -197,6 +203,8 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'costings.view_all',
     'planning.view',
     'planning.acknowledge',
+    'planning.schedule',
+    'planning.unschedule',
     'production.view',
     // v4.11 — read-only Materials Dashboard + Weekly Forecast (planner shares the forecast).
     'materials.view',
@@ -212,6 +220,8 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'costings.admin',
     'planning.view',
     'planning.acknowledge',
+    'planning.schedule',
+    'planning.unschedule',
     'production.view',
     'management.view',
     'tablet.signoff',
