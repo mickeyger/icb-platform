@@ -22,6 +22,7 @@ class SessionInfo(BaseModel):
     user: UserInfo
     active_branch: Optional[BranchInfo] = None       # default JHB for display (ADR 0010)
     accessible_branches: List[BranchInfo] = []
+    permissions: List[str] = []                      # effective permission keys (WO v4.17; admin = all)
 
 
 class BranchSwitchRequest(BaseModel):

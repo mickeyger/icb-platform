@@ -18,6 +18,7 @@ export function DiscrepancyDetailDrawer({ sapCode, onClose }: Props) {
   const { materials, stockCounts, discrepancies, resolveDiscrepancy } = useMaterials()
   const { hasPermission } = useAppData()
   const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const mat = materials.find((m) => m.sap_code === sapCode)
 
@@ -37,11 +38,16 @@ export function DiscrepancyDetailDrawer({ sapCode, onClose }: Props) {
   const open = rows.find((r) => r.disc && !r.disc.resolved_at)
   const canResolve = hasPermission('materials.raise_pr') // buyers resolve discrepancies
 
-  function handleResolve() {
-    if (!open?.disc || !notes.trim()) return
-    resolveDiscrepancy(open.disc.id, notes.trim())
-    setNotes('')
-    onClose()
+  async function handleResolve() {
+    if (!open?.disc || !notes.trim() || busy) return
+    setBusy(true)
+    try {
+      await resolveDiscrepancy(open.disc.id, notes.trim())
+      setNotes('')
+      onClose()
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -123,10 +129,10 @@ export function DiscrepancyDetailDrawer({ sapCode, onClose }: Props) {
           />
           <button
             onClick={handleResolve}
-            disabled={!notes.trim()}
+            disabled={!notes.trim() || busy}
             className="mt-2 w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-40"
           >
-            Mark resolved
+            {busy ? 'Resolving…' : 'Mark resolved'}
           </button>
         </div>
       )}

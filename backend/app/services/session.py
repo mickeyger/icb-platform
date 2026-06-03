@@ -64,10 +64,22 @@ def set_active_branch(db: Session, session_id: Optional[str], branch_id: int, us
     return branch
 
 
+def effective_permissions(db: Session, user) -> List[str]:
+    """The logged-in user's permission keys for the SPA to gate UI (WO v4.17).
+    Admin = all seeded keys (mirrors the code-level wildcard); else the role grants
+    + user overrides via deps._user_permission_set."""
+    from app.database import Permission
+    from app.deps import _user_permission_set
+    if getattr(user, "role", None) == "admin":
+        return sorted(r[0] for r in db.execute(select(Permission.name)).all())
+    return sorted(_user_permission_set(user, db))
+
+
 def build_session_info(db: Session, user, session_id: Optional[str]) -> SessionInfo:
     active = get_active_or_default(db, session_id)
     return SessionInfo(
         user=UserInfo.model_validate(user),
         active_branch=(BranchInfo.model_validate(active) if active is not None else None),
         accessible_branches=[BranchInfo.model_validate(b) for b in accessible_branches(db)],
+        permissions=effective_permissions(db, user),
     )
