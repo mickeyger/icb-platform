@@ -19,6 +19,7 @@ import {
   ListChecks,
   CalendarClock,
   ClipboardCheck,
+  Building2,
   type LucideIcon,
 } from 'lucide-react'
 import { useAppData } from '../../store/AppDataContext'
@@ -74,7 +75,7 @@ function entryVisible(entry: NavEntry, has: (k: PermissionKey) => boolean): bool
 }
 
 export function TopNav({ dark = false }: { dark?: boolean }) {
-  const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission } = useAppData()
+  const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission, activeBranch } = useAppData()
   const visibleLinks = NAV_LINKS.filter((l) => entryVisible(l, hasPermission))
 
   return (
@@ -105,6 +106,14 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
         ))}
       </nav>
       <div className="flex items-center gap-2 py-2 pl-4">
+        {activeBranch && (
+          <span
+            title={`Active branch: ${activeBranch.name}`}
+            className="hidden items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-semibold sm:flex"
+          >
+            <Building2 size={13} /> {activeBranch.code}
+          </span>
+        )}
         <button
           onClick={() => setTooltipsEnabled(!tooltipsEnabled)}
           title={tooltipsEnabled ? 'Hide demo tooltips' : 'Show demo tooltips'}

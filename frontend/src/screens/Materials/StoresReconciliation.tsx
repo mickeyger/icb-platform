@@ -47,11 +47,15 @@ export function StoresReconciliation() {
     setTimeout(() => setToast(null), 4500)
   }
 
-  function handleNotifyBuyer(c: StockCount) {
-    const rec = notifyBuyerOfDiscrepancy(c.id, ASSIGNED_BUYER)
-    flash(
-      `Buyer notified — discrepancy #${rec.id} for ${c.sap_code} (bin ${c.bin}). ${ASSIGNED_BUYER} will investigate.`,
-    )
+  async function handleNotifyBuyer(c: StockCount) {
+    try {
+      const rec = await notifyBuyerOfDiscrepancy(c.id, ASSIGNED_BUYER)
+      flash(
+        `Buyer notified — discrepancy #${rec.id} for ${c.sap_code} (bin ${c.bin}). ${ASSIGNED_BUYER} will investigate.`,
+      )
+    } catch {
+      /* error toast surfaced by the context */
+    }
   }
 
   const FILTERS: { key: Filter; label: string; count: number }[] = [

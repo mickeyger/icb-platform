@@ -12,11 +12,12 @@ import { zar, zarShort, dmy } from '../../lib/format'
 import { UrgencyPill } from './components/UrgencyPill'
 import { MaterialsKpiStrip } from './components/MaterialsKpiStrip'
 import { RaisePRModal } from './RaisePRModal'
+import { LastUpdated } from '../../components/ui/feedback'
 
 type UrgencyFilter = 'all' | Urgency
 
 export function POSuggestionQueue() {
-  const { poSuggestions, materials, suppliers, raisePR, deferSuggestion, overrideSupplier } =
+  const { poSuggestions, materials, suppliers, raisePR, deferSuggestion, overrideSupplier, lastUpdated, refresh } =
     useMaterials()
   const { profile, hasPermission } = useAppData()
   const [filter, setFilter] = useState<UrgencyFilter>('all')
@@ -325,6 +326,7 @@ export function POSuggestionQueue() {
         </span>
         {selected.size > 0 && <strong className="tabular-nums">Selected total: {zar(selectedTotal)}</strong>}
       </div>
+      <LastUpdated at={lastUpdated} onRefresh={refresh} />
 
       {modalIds && (
         <RaisePRModal

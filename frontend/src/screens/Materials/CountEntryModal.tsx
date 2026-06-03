@@ -21,16 +21,22 @@ export function CountEntryModal({ sapCode, bin, onClose, onCounted }: Props) {
   const mat = materials.find((m) => m.sap_code === sapCode)
   const stock = stockPositions.find((s) => s.sap_code === sapCode)
   const [physical, setPhysical] = useState<string>('')
+  const [busy, setBusy] = useState(false)
 
-  function handleConfirm() {
+  async function handleConfirm() {
     const n = Number(physical)
-    if (!Number.isFinite(n) || n < 0) return
-    const result = recordCount(sapCode, bin, n, profile.name)
-    onCounted(result)
+    if (!Number.isFinite(n) || n < 0 || busy) return
+    setBusy(true)
+    try {
+      const result = await recordCount(sapCode, bin, n, profile.name)
+      onCounted(result)
+    } catch {
+      setBusy(false) // error toast already surfaced by the context
+    }
   }
 
   return (
-    <Modal open onClose={onClose} className="max-w-md">
+    <Modal open onClose={busy ? undefined : onClose} className="max-w-md">
       <h2 className="text-lg font-bold text-body">Cycle Count</h2>
       <p className="mt-1 text-xs text-muted">
         Scan or enter the physical count for this item. The system flags it if it differs from SAP.
@@ -69,10 +75,10 @@ export function CountEntryModal({ sapCode, bin, onClose, onCounted }: Props) {
         </button>
         <button
           onClick={handleConfirm}
-          disabled={!physical}
+          disabled={!physical || busy}
           className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-40"
         >
-          Record count
+          {busy ? 'Recording…' : 'Record count'}
         </button>
       </div>
     </Modal>

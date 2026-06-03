@@ -221,6 +221,16 @@ def test_session_get_defaults(api):
     assert {b["code"] for b in s["accessible_branches"]} == {"JHB", "CPT", "CEN"}
 
 
+def test_session_returns_permissions(api, api_as, make_user):
+    # admin (the `api` fixture) gets all seeded permission keys (wildcard).
+    admin_perms = api.get("/api/session").json()["permissions"]
+    assert {"buying.bulk_raise", "planning.schedule", "stores.count"} <= set(admin_perms)
+    # a buyer has raise_pr / defer_pr but not the senior-only bulk_raise / override.
+    buyer_perms = api_as(make_user("buyer")).get("/api/session").json()["permissions"]
+    assert "buying.raise_pr" in buyer_perms
+    assert "buying.bulk_raise" not in buyer_perms and "buying.override_supplier" not in buyer_perms
+
+
 def test_planning_board_seeded(api):
     bd = api.get("/api/planning-board?weeks=8").json()
     assert len(bd["slots"]) >= 1 and "unscheduled_pool" in bd and "capacity" in bd

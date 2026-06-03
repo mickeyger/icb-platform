@@ -18,6 +18,7 @@ import { UrgencyPill } from './components/UrgencyPill'
 import { MaterialsKpiStrip } from './components/MaterialsKpiStrip'
 import { DiscrepancyDetailDrawer } from './DiscrepancyDetailDrawer'
 import { WeeklyMaterialForecast } from './WeeklyMaterialForecast'
+import { LastUpdated } from '../../components/ui/feedback'
 
 type UrgencyFilter = 'all' | Urgency
 
@@ -80,7 +81,7 @@ function TabButton({
 }
 
 function DashboardTab() {
-  const { materials, stockPositions, demandLines, poSuggestions, discrepancies, stockCounts } =
+  const { materials, stockPositions, demandLines, poSuggestions, discrepancies, stockCounts, lastUpdated, refresh } =
     useMaterials()
   const navigate = useNavigate()
   const [urgency, setUrgency] = useState<UrgencyFilter>('all')
@@ -343,6 +344,7 @@ function DashboardTab() {
       <div className="mt-2 text-[11px] text-muted">
         Showing {filteredRows.length} of {rows.length} items · sorted by urgency
       </div>
+      <LastUpdated at={lastUpdated} onRefresh={refresh} />
 
       <div className="mt-4 rounded-md border border-status-amber/40 bg-status-amber/5 p-3 text-[11px] text-body">
         <div className="mb-1 text-xs font-bold text-status-amber">How this dashboard works</div>
