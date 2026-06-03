@@ -185,3 +185,24 @@ def test_requires_auth(app_mod):
     app_mod.app.dependency_overrides.pop(require_user, None)
     with TestClient(app_mod.app) as c:
         assert c.get("/api/production-jobs").status_code == 401
+
+
+# ── WO v4.19 (Phase 2C-3) additions ───────────────────────────────────────────
+def test_list_item_has_calculation_record_id(api, fresh_calc):
+    """The list item exposes calculation_record_id so the Costings dashboard can
+    join /api/calculations (spine) with /api/production-jobs (WO v4.19 §0.1)."""
+    cid = fresh_calc()
+    jid = api.post(f"/api/production-jobs/from-calculation/{cid}").json()["id"]
+    row = next(r for r in api.get("/api/production-jobs?limit=200").json() if r["id"] == jid)
+    assert row["calculation_record_id"] == cid
+
+
+def test_accepted_mes_status_label_is_neutral(api, fresh_calc):
+    """Flag B: the 'accepted' status keeps the neutral 'Accepted' label — the
+    dispatch event is 'Pre-Job Sent', so the orderbook clarification is a frontend
+    tooltip, NOT a relabel. Guards against a dispatch-implying label creeping in."""
+    cid = fresh_calc()
+    jid = api.post(f"/api/production-jobs/from-calculation/{cid}").json()["id"]
+    assert api.get(f"/api/production-jobs/{jid}").json()["mes_status"] == "Accepted"
+    row = next(r for r in api.get("/api/production-jobs?limit=200").json() if r["id"] == jid)
+    assert row["mes_status"] == "Accepted"

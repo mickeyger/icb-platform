@@ -12,6 +12,7 @@ import {
   RadioTower,
   Database,
   ThumbsUp,
+  RotateCw,
 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
 import { useAppData } from '../../store/AppDataContext'
@@ -24,10 +25,11 @@ import { RepairPhasePanel } from './RepairPhasePanel'
 import { AcceptModal } from './AcceptModal'
 import { BottleneckIndicator } from './BottleneckIndicator'
 import { zarShort, dmy } from '../../lib/format'
+import { Spinner } from '../../components/ui/feedback'
 
 export function CostingsDashboard() {
   const nav = useNavigate()
-  const { mode, costings, statusCounts, firePreJobCard, scheduleRepairPhases, acceptCosting } = useCostings()
+  const { mode, costings, statusCounts, acceptStage, firePreJobCard, scheduleRepairPhases, acceptCosting } = useCostings()
   const { profile, hasPermission } = useAppData()
   const [filter, setFilter] = useState<Set<StatusName>>(new Set())
   const [q, setQ] = useState('')
@@ -281,6 +283,14 @@ export function CostingsDashboard() {
                       status={c.status}
                       pulsing={c.status === 'Planning' && !c.planning_acknowledged_at}
                     />
+                    {mode === 'live' && c.status === 'Accepted' && !c.production_job_id && (
+                      <span
+                        title="Accepted in the orderbook, but the production job hasn't been created yet."
+                        className="ml-1 inline-flex items-center rounded bg-status-amber/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-status-amber"
+                      >
+                        job pending
+                      </span>
+                    )}
                     {c.status === 'Pre-Job Sent' && (
                       <BottleneckIndicator
                         salesAt={c.pre_job_signoff_sales_at ?? null}
@@ -308,7 +318,18 @@ export function CostingsDashboard() {
                           </button>
                         </Tooltip>
                       )}
-                      {canPreJob && c.status === 'Accepted' && (
+                      {mode === 'live' && c.status === 'Accepted' && !c.production_job_id ? (
+                        <button
+                          onClick={() => acceptCosting(c.quote_number)}
+                          disabled={acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'}
+                          title="The costing was accepted but its production job wasn't created — retry (safe, idempotent)."
+                          className="flex items-center gap-1 rounded-md bg-status-amber px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                        >
+                          {acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'
+                            ? <Spinner size={12} />
+                            : <RotateCw size={12} />} Retry job creation
+                        </button>
+                      ) : canPreJob && c.status === 'Accepted' && (mode !== 'live' || c.production_job_id) ? (
                         <Tooltip k="costings_dashboard.pre_job_card_button">
                           <button
                             onClick={() => setPreJobTarget(c)}
@@ -317,7 +338,7 @@ export function CostingsDashboard() {
                             <Send size={12} /> Pre-Job Card
                           </button>
                         </Tooltip>
-                      )}
+                      ) : null}
                       {c.status === 'Pending' && c.created_by === profile.id.replace('rep_', '').toUpperCase() && (
                         <button className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt">
                           <Pencil size={12} /> Edit

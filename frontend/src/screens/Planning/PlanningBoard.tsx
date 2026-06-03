@@ -715,11 +715,22 @@ function BoardSkeleton() {
 function LivePlanningBoard() {
   const nav = useNavigate()
   const { board, schedule, move, unschedule, lastUpdated, refresh } = usePlanning()
-  const { hasPermission } = useAppData()
+  const { profile, hasPermission } = useAppData()
+  // WO v4.19: planning-ack + chassis-received route through the rewired
+  // CostingsContext (→ /api/production-jobs/*); PlanningContext stays board-only.
+  // Pre-Job-Confirmed costings are the ack candidates (awaiting planning-ack).
+  const { costings, ackPlanning, markChassisReceived } = useCostings()
   const toast = useToast()
   const canSchedule = hasPermission('planning.schedule')
   const canUnschedule = hasPermission('planning.unschedule')
+  const canTickChassis = hasPermission('production.chassis_received')
   const target = data.kpis.weekly_target_zar
+  const byActor = profile.id === 'rep_burt' ? 'BURT' : profile.id
+
+  const ackCandidates = useMemo(
+    () => costings.filter((c) => c.status === 'Pre-Job Confirmed' && c.production_job_id != null),
+    [costings],
+  )
 
   const [dragPoolJob, setDragPoolJob] = useState<PlanningJob | null>(null)
   const [dragSlot, setDragSlot] = useState<PlanningSlot | null>(null)
@@ -727,6 +738,21 @@ function LivePlanningBoard() {
   const [rejectKey, setRejectKey] = useState<string | null>(null)
   const [poolHot, setPoolHot] = useState(false)
   const [openSlot, setOpenSlot] = useState<PlanningSlot | null>(null)
+  const [ackTarget, setAckTarget] = useState<Costing | null>(null)
+
+  // Mark chassis received for a scheduled slot → CostingsContext (quote-keyed) →
+  // POST /api/production-jobs/{id}/chassis-received, then refetch the board badge.
+  async function markSlotChassisReceived(slot: PlanningSlot) {
+    if (!slot.job) return
+    const costing = costings.find((c) => c.production_job_id === slot.job!.id)
+    if (!costing) {
+      toast.push({ kind: 'warn', message: 'Could not match this slot to a costing.' })
+      return
+    }
+    await markChassisReceived(costing.quote_number, todayIso(), byActor)
+    await refresh()
+    setOpenSlot(null)
+  }
 
   // Grid rows = the canonical bays plus any extra bays the server returned.
   const bays = useMemo(() => {
@@ -833,8 +859,26 @@ function LivePlanningBoard() {
             className={`rounded-md transition ${poolHot ? 'ring-2 ring-status-amber' : ''}`}
           >
             <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
-              Unscheduled ({board.pool.length})
+              Unscheduled ({board.pool.length + ackCandidates.length})
             </div>
+            {ackCandidates.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {ackCandidates.map((c) => (
+                  <button
+                    key={c.quote_number}
+                    onClick={() => setAckTarget(c)}
+                    className="flex w-full items-start gap-2 rounded-md border-l-4 border-[#06B6D4] bg-[#06B6D4]/5 p-2 text-left hover:bg-[#06B6D4]/10 animate-pulseRing"
+                  >
+                    <CalendarDays size={14} className="mt-0.5 text-[#06B6D4]" />
+                    <div className="flex-1">
+                      <div className="font-mono text-sm font-semibold">#{c.job_number_assigned ?? c.quote_number}</div>
+                      <div className="text-xs text-body">{c.customer_name}</div>
+                      <div className="mt-1 text-[10px] font-medium text-[#0E7490]">Awaiting Planning ack · click to acknowledge</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="space-y-2">
               {board.pool.map((job) => (
                 <div
@@ -961,9 +1005,24 @@ function LivePlanningBoard() {
 
       <SidePanel title={openSlot?.job ? `Job #${openSlot.job.job_number}` : ''} open={!!openSlot} onClose={() => setOpenSlot(null)}>
         {openSlot?.job && (
-          <LiveSlotDetail slot={openSlot} onViewProduction={() => { setOpenSlot(null); nav('/production') }} />
+          <LiveSlotDetail
+            slot={openSlot}
+            canTick={canTickChassis}
+            onMarkReceived={() => markSlotChassisReceived(openSlot)}
+            onViewProduction={() => { setOpenSlot(null); nav('/production') }}
+          />
         )}
       </SidePanel>
+
+      <PlanningAckPanel
+        costing={ackTarget}
+        onClose={() => setAckTarget(null)}
+        onAcknowledge={async (c, chassisEta) => {
+          await ackPlanning(c.quote_number, byActor, chassisEta || null)
+          await refresh()
+          setAckTarget(null)
+        }}
+      />
     </div>
   )
 }
@@ -984,9 +1043,24 @@ function ChassisBadge({ state, eta }: { state: ChassisState; eta: string | null 
 
 // Live slot detail — read-only chassis state in v4.18; the receipt tick rewires
 // with the Costings/production-jobs migration in 2C-3 (§0.1, §8).
-function LiveSlotDetail({ slot, onViewProduction }: { slot: PlanningSlot; onViewProduction: () => void }) {
+function LiveSlotDetail({
+  slot,
+  canTick,
+  onMarkReceived,
+  onViewProduction,
+}: {
+  slot: PlanningSlot
+  canTick: boolean
+  onMarkReceived: () => void | Promise<void>
+  onViewProduction: () => void
+}) {
   const job = slot.job!
   const cs = getChassisState(job)
+  const [busy, setBusy] = useState(false)
+  async function tick() {
+    setBusy(true)
+    try { await onMarkReceived() } finally { setBusy(false) }
+  }
   return (
     <div className="space-y-3 text-sm">
       <div className="text-lg font-semibold text-body">{job.customer}</div>
@@ -999,24 +1073,36 @@ function LiveSlotDetail({ slot, onViewProduction }: { slot: PlanningSlot; onView
         <div><div className="text-xs text-muted">Selling</div>{job.selling_zar != null ? zar(job.selling_zar) : '—'}</div>
       </div>
 
+      {/* WO v4.19 — chassis-received is now writable live (→ /api/production-jobs/{id}/chassis-received). */}
       <div className="rounded-md border border-line p-3">
         {cs === 'received' ? (
           <div className="flex items-center gap-2 text-status-green">
             <CheckCircle2 size={18} />
             <span className="font-semibold">Chassis received{job.chassis_received_at ? ` ${dmy(job.chassis_received_at)}` : ''}</span>
           </div>
-        ) : cs === 'eta_committed' ? (
-          <div className="flex items-center gap-2 text-status-amber">
-            <Truck size={18} />
-            <span className="font-semibold">Chassis ETA {job.chassis_eta ? dmy(job.chassis_eta) : ''} — not yet received (Path B)</span>
-          </div>
         ) : (
-          <div className="flex items-center gap-2 text-status-amber">
-            <AlertTriangle size={18} />
-            <span className="font-semibold">No chassis ETA committed yet</span>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-status-amber">
+              {cs === 'eta_committed' ? <Truck size={18} /> : <AlertTriangle size={18} />}
+              <span className="font-semibold">
+                {cs === 'eta_committed'
+                  ? `Chassis ETA ${job.chassis_eta ? dmy(job.chassis_eta) : ''} — not yet received (Path B)`
+                  : 'No chassis ETA committed yet'}
+              </span>
+            </div>
+            {canTick ? (
+              <button
+                onClick={tick}
+                disabled={busy}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark disabled:opacity-60"
+              >
+                {busy ? <Spinner size={14} /> : <CheckCircle2 size={14} />} Mark chassis received
+              </button>
+            ) : (
+              <div className="text-xs text-muted">Only the Production role can mark a chassis received.</div>
+            )}
           </div>
         )}
-        <div className="mt-1 text-xs text-muted">Recording chassis receipt moves with the job card in a later update.</div>
       </div>
 
       <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>

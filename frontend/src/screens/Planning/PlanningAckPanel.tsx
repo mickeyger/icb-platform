@@ -23,7 +23,7 @@ export function PlanningAckPanel({
 }: {
   costing: Costing | null
   onClose: () => void
-  onAcknowledge: (c: Costing) => void | Promise<void>
+  onAcknowledge: (c: Costing, chassisEta: string) => void | Promise<void>
 }) {
   const { profile, hasPermission } = useAppData()
   const { captureChassisEta, loadChassisCatalogue } = useCostings()
@@ -53,9 +53,10 @@ export function PlanningAckPanel({
   async function handleAcknowledge() {
     if (!costing) return
     const by = profile.id === 'rep_burt' ? 'BURT' : profile.id
-    // Step 1: capture chassis ETA + data. Step 2: planning-ack.
+    // Step 1: capture chassis ETA + rich data (legacy calc route, CSRF-safe via lib/api).
+    // Step 2: planning-ack — the parent passes form.chassis_eta through to /planning-ack (§0.3).
     await captureChassisEta(costing.quote_number, form, by)
-    await onAcknowledge(costing)
+    await onAcknowledge(costing, form.chassis_eta)
   }
 
   return (

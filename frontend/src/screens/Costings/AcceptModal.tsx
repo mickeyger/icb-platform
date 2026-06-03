@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Check, ThumbsUp } from 'lucide-react'
 import { Modal } from '../../components/ui/overlays'
+import { Spinner } from '../../components/ui/feedback'
 import { zar, dmy } from '../../lib/format'
 import { StatusPillCosting } from './statusPalette'
 import type { Costing } from '../../data/costingsData'
@@ -17,6 +19,9 @@ export function AcceptModal({
   onClose: () => void
   onConfirm: (c: Costing) => void | Promise<void>
 }) {
+  // Spans both legs of the accept chicken-and-egg (legacy /accept → from-calculation).
+  const [busy, setBusy] = useState(false)
+  useEffect(() => setBusy(false), [costing])
   return (
     <Modal open={!!costing} onClose={onClose} className="max-w-lg">
       {costing && (
@@ -50,12 +55,13 @@ export function AcceptModal({
           </p>
 
           <div className="flex justify-end gap-2">
-            <button onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm">Cancel</button>
+            <button onClick={onClose} disabled={busy} className="rounded-md border border-line px-4 py-2 text-sm disabled:opacity-50">Cancel</button>
             <button
-              onClick={() => onConfirm(costing)}
-              className="flex items-center gap-1 rounded-md bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+              onClick={async () => { setBusy(true); await onConfirm(costing) }}
+              disabled={busy}
+              className="flex items-center gap-1 rounded-md bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-70"
             >
-              <Check size={14} /> Confirm acceptance
+              {busy ? <Spinner size={14} /> : <Check size={14} />} {busy ? 'Accepting…' : 'Confirm acceptance'}
             </button>
           </div>
         </div>

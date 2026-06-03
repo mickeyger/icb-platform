@@ -81,7 +81,7 @@ export function POSuggestionQueue() {
   async function handleConfirmRaise(ids: number[]) {
     const result = await raisePR(ids, profile.name)
     setToast(
-      `PR ${result.prNumber} raised against ${result.suppliersAffected.join(', ')} · ${ids.length} item(s), ${zar(result.total)}.`,
+      `${result.prNumber} raised against ${result.suppliersAffected.join(', ')} · ${ids.length} item(s), ${zar(result.total)}.`,
     )
     setSelected(new Set())
     setModalIds(null)

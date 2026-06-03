@@ -73,6 +73,7 @@ class ProductionJobListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    calculation_record_id: int                       # join key for the Costings dashboard (WO v4.19 §0.1)
     job_number: Optional[str] = None
     status: ProductionJobStatus
     mes_status: str
@@ -146,6 +147,7 @@ def to_list_item(job, calc, customer, branch_code=None) -> ProductionJobListItem
     dims = _loads(calc.dimensions_json) or {}
     return ProductionJobListItem(
         id=job.id,
+        calculation_record_id=job.calculation_record_id,
         job_number=job.job_number,
         status=job.status,
         mes_status=_mes_status(job.status, bool(calc.is_repair)),

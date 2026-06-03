@@ -77,7 +77,7 @@ handlers, which retire in Phase 4). All endpoints require an authenticated sessi
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/production-jobs` | List jobs (filters: `status`, `branch_id`, `accepted_since`, `limit`, `offset`) |
+| GET | `/api/production-jobs` | List jobs (filters: `status`, `branch_id`, `accepted_since`, `limit`, `offset`); items carry `calculation_record_id` for the Costings dashboard join (WO v4.19) |
 | GET | `/api/production-jobs/{id}` | Job detail with joined costing data |
 | POST | `/api/production-jobs/from-calculation/{calculation_id}` | Accept a costing into production (idempotent: 201 new / 200 existing) |
 | POST | `/api/production-jobs/{id}/pre-job-card` | Send pre-job card (422 for repair quotes) |
@@ -85,6 +85,11 @@ handlers, which retire in Phase 4). All endpoints require an authenticated sessi
 | POST | `/api/production-jobs/{id}/planning-ack` | Planning acknowledgement (requires `pre_job_confirmed`) |
 | POST | `/api/production-jobs/{id}/chassis-received` | Confirm chassis arrival |
 | GET | `/api/production-jobs/{id}/timeline` | Derived lifecycle timeline |
+
+The React Costings screens read + write through this surface as of **WO v4.19 (Phase 2C-3)** — the dashboard
+joins `/api/calculations` (spine) with this list by `calculation_record_id`, and the accept flow is a sequential
+two-call (`/api/calculations/{id}/accept` → `from-calculation/{id}`). With v4.19 **all** MES React contexts
+(Costings, Materials, Planning) ride `lib/api` (CSRF + branch-aware + pessimistic refetch). **Phase 2C complete.**
 
 ## MES API — materials / buying / stores (Phase 2B-2, WO v4.15)
 

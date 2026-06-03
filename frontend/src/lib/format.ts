@@ -36,3 +36,12 @@ export function hoursToHm(hours: number): string {
   const m = Math.round((hours - h) * 60)
   return `${h}h ${String(m).padStart(2, '0')}m`
 }
+
+// Display a purchase-requisition number consistently as PR-{seq} (WO v4.19 §0.6).
+// The backend bulk-raise returns SAP-style numerics (e.g. "4500123456"); the
+// mockup renders PR-{seq}. Idempotent — leaves an already-prefixed value alone.
+export function formatPrNumber(raw: string | number | null | undefined): string {
+  if (raw == null || raw === '') return '—'
+  const s = String(raw).trim()
+  return /^pr[-\s]/i.test(s) ? s : `PR-${s}`
+}

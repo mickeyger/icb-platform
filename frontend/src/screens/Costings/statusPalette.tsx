@@ -44,8 +44,16 @@ export function StatusPillCosting({
   pulsing?: boolean
 }) {
   const s = STATUS_STYLES[status]
+  // Flag B (WO v4.19 §0.4): "Accepted" = recorded in the orderbook, NOT dispatched
+  // to departments (that's "Pre-Job Sent"). Clarify the record-event semantics on
+  // hover rather than relabel the pill.
+  const title =
+    status === 'Accepted'
+      ? 'Job is in the orderbook. The Pre-Job Card has not been sent to departments yet.'
+      : undefined
   return (
     <span
+      title={title}
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${s.pillBg} ${s.pillText} ${
         pulsing ? 'animate-pulseRing' : ''
       }`}
