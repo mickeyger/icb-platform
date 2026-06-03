@@ -7,6 +7,15 @@
 export const API_BASE: string = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 const TIMEOUT_MS = 10_000
 
+// Session CSRF token (WO v4.18). The backend's csrf_middleware requires an
+// X-CSRF-Token header on unsafe methods once a session exists. AppDataContext
+// reads the token from GET /api/session and caches it here so apiPost/apiDelete
+// send it. Left null in mock mode (mutations never reach the network there).
+let _csrfToken: string | null = null
+export function setCsrfToken(token: string | null): void {
+  _csrfToken = token
+}
+
 /** Typed transport error. `status === 0` means network/timeout (→ mock fallback). */
 export class ApiError extends Error {
   status: number
@@ -23,12 +32,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
   let res: Response
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const csrfHeader: Record<string, string> =
+    _csrfToken && method !== 'GET' && method !== 'HEAD' ? { 'X-CSRF-Token': _csrfToken } : {}
   try {
     res = await fetch(`${API_BASE}${path}`, {
       credentials: 'include',
       signal: ctrl.signal,
       ...init,
-      headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+      headers: { Accept: 'application/json', ...csrfHeader, ...(init?.headers ?? {}) },
     })
   } catch {
     throw new ApiError(0, 'network') // aborted / offline
@@ -60,13 +72,22 @@ export const apiPost = <T>(path: string, body?: unknown): Promise<T> =>
 export const apiDelete = <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' })
 
 /** Mint a costing-app session for the demo user so the MES SPA inherits it.
- *  Idempotent server-side; silently no-ops when the API is offline. */
-export async function mesAutoLogin(): Promise<void> {
-  try {
-    await apiPost('/api/mes/autologin')
-  } catch {
-    /* mock mode takes over */
+ *  Idempotent server-side; silently no-ops when the API is offline.
+ *
+ *  Deduplicated (WO v4.18 §3.5): the autologin POST fires at most once per app
+ *  load, no matter how many contexts call it on mount. Every refresh path — the
+ *  Refresh button, the branch-switch signal — uses a context's `refetch()`
+ *  (reads only) and must NOT re-trigger autologin. So `bootstrap = mesAutoLogin
+ *  + refetch` runs once on mount; `refetch` runs on every subsequent refresh. */
+let _autoLoginPromise: Promise<void> | null = null
+export function mesAutoLogin(): Promise<void> {
+  if (!_autoLoginPromise) {
+    _autoLoginPromise = apiPost('/api/mes/autologin').then(
+      () => undefined,
+      () => undefined, // offline / unauthorised → mock mode takes over
+    )
   }
+  return _autoLoginPromise
 }
 
 // ── Error → UX mapping (WO §3.2). Mutators call this in their catch block. ──────

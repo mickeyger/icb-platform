@@ -22,8 +22,9 @@ import {
   Building2,
   type LucideIcon,
 } from 'lucide-react'
-import { useAppData } from '../../store/AppDataContext'
+import { useAppData, type BranchRef } from '../../store/AppDataContext'
 import { Tooltip } from '../ui/Tooltip'
+import { Spinner } from '../ui/feedback'
 import { costingsMock, type PermissionKey } from '../../data/costingsData'
 
 interface NavEntry {
@@ -75,7 +76,7 @@ function entryVisible(entry: NavEntry, has: (k: PermissionKey) => boolean): bool
 }
 
 export function TopNav({ dark = false }: { dark?: boolean }) {
-  const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission, activeBranch } = useAppData()
+  const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission, apiMode, activeBranch, accessibleBranches, switchBranch } = useAppData()
   const visibleLinks = NAV_LINKS.filter((l) => entryVisible(l, hasPermission))
 
   return (
@@ -106,13 +107,13 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
         ))}
       </nav>
       <div className="flex items-center gap-2 py-2 pl-4">
-        {activeBranch && (
-          <span
-            title={`Active branch: ${activeBranch.name}`}
-            className="hidden items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-semibold sm:flex"
-          >
-            <Building2 size={13} /> {activeBranch.code}
-          </span>
+        {apiMode === 'live' && activeBranch && (
+          <BranchPicker
+            active={activeBranch}
+            branches={accessibleBranches.length ? accessibleBranches : [activeBranch]}
+            onSwitch={switchBranch}
+            dark={dark}
+          />
         )}
         <button
           onClick={() => setTooltipsEnabled(!tooltipsEnabled)}
@@ -223,6 +224,103 @@ function UserSwitcher({
           <div className={`border-t px-3 py-2 text-[11px] ${dark ? 'border-slate-700 text-slate-500' : 'border-line text-muted'}`}>
             Switching re-renders the nav and action buttons based on each role's permissions.
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Branch picker (WO v4.18 §4.3) — replaces the v4.17 read-only badge. Selecting
+// a branch POSTs /api/session/branch via AppDataContext.switchBranch, which
+// fires the active-branch-changed signal that re-scopes Planning + Materials.
+// No permission gate; hidden in mock mode (rendered only when apiMode==='live').
+function BranchPicker({
+  active,
+  branches,
+  onSwitch,
+  dark,
+}: {
+  active: BranchRef
+  branches: BranchRef[]
+  onSwitch: (id: number) => Promise<void>
+  dark: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [busyId, setBusyId] = useState<number | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', h)
+    return () => window.removeEventListener('mousedown', h)
+  }, [open])
+
+  async function pick(id: number) {
+    if (id === active.id) {
+      setOpen(false)
+      return
+    }
+    setBusyId(id)
+    try {
+      await onSwitch(id)
+    } finally {
+      setBusyId(null)
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div ref={ref} className="relative hidden sm:block">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Switch active branch — refreshes Planning Board and Materials views"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-semibold hover:bg-white/20"
+      >
+        {busyId != null ? <Spinner size={12} /> : <Building2 size={13} />}
+        {active.code}
+        <ChevronDown size={12} className="opacity-70" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className={`absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-md border shadow-2xl ${
+            dark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-line bg-white text-body'
+          }`}
+        >
+          <div className={`px-3 py-2 text-[11px] font-bold uppercase tracking-wide ${dark ? 'text-slate-400' : 'text-muted'}`}>
+            Active branch
+          </div>
+          {branches.map((b) => {
+            const isActive = b.id === active.id
+            return (
+              <button
+                key={b.id}
+                onClick={() => pick(b.id)}
+                disabled={busyId != null}
+                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm disabled:opacity-60 ${
+                  isActive
+                    ? dark
+                      ? 'bg-slate-800'
+                      : 'bg-primary-light text-primary'
+                    : dark
+                      ? 'hover:bg-slate-800'
+                      : 'hover:bg-surface-alt'
+                }`}
+              >
+                <Building2 size={15} />
+                <div className="flex-1">
+                  <div className="font-semibold">{b.code}</div>
+                  <div className={`text-xs ${isActive ? 'text-primary/70' : dark ? 'text-slate-400' : 'text-muted'}`}>{b.name}</div>
+                </div>
+                {busyId === b.id && <Spinner size={12} />}
+                {isActive && busyId == null && <span className="text-[10px] font-bold uppercase">Current</span>}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
