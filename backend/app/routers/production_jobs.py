@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi import status as http_status
 from sqlalchemy.orm import Session
 
-from ..database import User, get_db
-from ..deps import require_user
+from ..database import Branch, User, get_db
+from ..deps import active_branch, require_permission, require_user, user_can
 from ..schemas.production_jobs import (
     PlanningAckRequest, PreJobSignoffRequest, ProductionJobDetail,
     ProductionJobListItem, TimelineEvent, to_detail, to_list_item,
@@ -35,12 +35,15 @@ def list_production_jobs(
     accepted_since: Optional[date] = Query(None, description="Only jobs accepted on/after this date"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    branch: Optional[Branch] = Depends(active_branch),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """List production jobs (compact), filterable by status / branch / accepted date."""
+    """List production jobs (compact), filterable by status / branch / accepted date.
+    branch_id defaults to the session's active branch when omitted (WO v4.16)."""
     statuses = [s.strip() for s in status.split(",") if s.strip()] if status else None
-    rows = svc.list_jobs(db, status=statuses, branch_id=branch_id,
+    eff_branch = branch_id if branch_id is not None else (branch.id if branch is not None else None)
+    rows = svc.list_jobs(db, status=statuses, branch_id=eff_branch,
                          accepted_since=accepted_since, limit=limit, offset=offset)
     return [to_list_item(job, calc, customer, bc) for (job, calc, customer, bc) in rows]
 
@@ -57,7 +60,7 @@ def get_production_job(job_id: int, db: Session = Depends(get_db), user: User = 
 @router.post("/from-calculation/{calculation_id}", response_model=ProductionJobDetail)
 def accept_from_calculation(
     calculation_id: int, response: Response,
-    db: Session = Depends(get_db), user: User = Depends(require_user),
+    db: Session = Depends(get_db), user: User = Depends(require_permission("production.accept")),
 ):
     """Accept an already-accepted calculation into production. Idempotent:
     201 if a new job is created, 200 if one already exists for that calculation."""
@@ -72,7 +75,8 @@ def accept_from_calculation(
 
 
 @router.post("/{job_id}/pre-job-card", response_model=ProductionJobDetail)
-def send_pre_job_card(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def send_pre_job_card(job_id: int, db: Session = Depends(get_db),
+                      user: User = Depends(require_permission("production.pre_job_card"))):
     """Send the pre-job card (status -> pre_job_sent). 422 for repair quotes."""
     try:
         return _detail(svc.send_pre_job_card(db, job_id, user))
@@ -87,8 +91,11 @@ def pre_job_signoff(
     job_id: int, body: PreJobSignoffRequest,
     db: Session = Depends(get_db), user: User = Depends(require_user),
 ):
-    """Record a sales or production sign-off. When both are present, the job
-    auto-progresses to pre_job_confirmed."""
+    """Record a sales or production sign-off (per-role gated). When both are
+    present, the job auto-progresses to pre_job_confirmed."""
+    perm = "production.signoff_sales" if body.role == "sales" else "production.signoff_production"
+    if not user_can(user, perm, db):
+        raise HTTPException(status_code=403, detail=f"Permission denied: {perm}")
     try:
         return _detail(svc.record_signoff(db, job_id, body.role, body.attestation, user))
     except svc.NotFoundError as e:
@@ -98,7 +105,7 @@ def pre_job_signoff(
 @router.post("/{job_id}/planning-ack", response_model=ProductionJobDetail)
 def planning_ack(
     job_id: int, body: PlanningAckRequest,
-    db: Session = Depends(get_db), user: User = Depends(require_user),
+    db: Session = Depends(get_db), user: User = Depends(require_permission("planning.acknowledge")),
 ):
     """Planning acknowledges the job (status -> planning). Requires pre_job_confirmed."""
     try:
@@ -110,7 +117,8 @@ def planning_ack(
 
 
 @router.post("/{job_id}/chassis-received", response_model=ProductionJobDetail)
-def chassis_received(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+def chassis_received(job_id: int, db: Session = Depends(get_db),
+                     user: User = Depends(require_permission("production.chassis_received"))):
     """Confirm the chassis has physically arrived."""
     try:
         return _detail(svc.mark_chassis_received(db, job_id, user))

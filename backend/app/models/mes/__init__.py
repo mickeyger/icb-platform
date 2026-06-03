@@ -70,8 +70,8 @@ class ProductionJob(Base):
     id = Column(Integer, primary_key=True)
     # cross-schema -> icb_costings.calculations.id (FK in 0003, NOT NULL UNIQUE, RESTRICT)
     calculation_record_id = Column(Integer, nullable=False, unique=True)
-    # cross-schema -> icb_costings.branches.id (FK in 0003, RESTRICT)
-    branch_id = Column(Integer, nullable=True)
+    # cross-schema -> icb_costings.branches.id (FK in 0003, RESTRICT); NOT NULL from 0005 (WO v4.16)
+    branch_id = Column(Integer, nullable=False)
     job_number = Column(String(32), unique=True)          # derived from Q-32891 -> 32891
     status = Column(String(24), nullable=False, default="accepted")
     # accepted | pre_job_sent | pre_job_confirmed | planning | in_production | completed
@@ -259,7 +259,7 @@ class StockCount(Base):
     counted_by_name = Column(String(64))
     counted_at = Column(DateTime(timezone=True))
     status = Column(String(16))                    # confirmed | discrepancy | pending
-    branch_id = Column(Integer, nullable=True)     # cross-schema -> icb_costings.branches.id (FK in 0003)
+    branch_id = Column(Integer, nullable=False)    # cross-schema -> icb_costings.branches.id (FK in 0003); NOT NULL from 0005 (WO v4.16)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -390,9 +390,22 @@ class Supplier(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 16. session_branches — active branch per login session (WO v4.16, §0.1).
+#     Keyed by the costing UserSession.id (UUID string). Soft mapping (no FK):
+#     ephemeral session state; an orphaned row is harmless.
+# ─────────────────────────────────────────────────────────────────────────────
+class SessionBranch(Base):
+    __tablename__ = "session_branches"
+    __table_args__ = ({"schema": "icb_mes"},)
+    session_id = Column(String(36), primary_key=True)  # icb_costings.user_sessions.id
+    branch_id = Column(Integer, nullable=False)         # -> icb_costings.branches.id (no FK; soft)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
-    "MesMaterial", "StockPosition", "Supplier",
+    "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
     "CROSS_SCHEMA_FKS",
 ]

@@ -87,6 +87,9 @@ from .routers import discrepancies as _r_discrepancies
 from .routers import po_suggestions as _r_po_suggestions
 from .routers import demand_lines as _r_demand_lines
 from .routers import suppliers as _r_suppliers
+# WO v4.16 — Planning Board + session/branch + per-role gating
+from .routers import session as _r_session
+from .routers import planning as _r_planning
 
 # ─── Logging setup ───────────────────────────────────────────────────────────
 _log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -148,6 +151,10 @@ app.include_router(_r_discrepancies.router)
 app.include_router(_r_po_suggestions.router)
 app.include_router(_r_demand_lines.router)
 app.include_router(_r_suppliers.router)
+# WO v4.16 — Planning Board + session/branch + per-role gating
+app.include_router(_r_session.router)
+app.include_router(_r_planning.board_router)
+app.include_router(_r_planning.router)
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered

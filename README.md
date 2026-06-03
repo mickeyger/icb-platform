@@ -108,6 +108,27 @@ already owns `/api/materials`.
 | GET | `/api/demand-lines` | Forecast read-model (`group_by=week\|sap` rollup) |
 | GET | `/api/suppliers` | Supplier master |
 
+## MES API — planning / session / roles (Phase 2B-3, WO v4.16)
+
+Closes the Phase 2B API layer (ADR 0010). Per-role gating reuses the costing
+permission tables via `require_permission`; the active branch is session-held.
+
+| Method | Path | Purpose (permission) |
+|--------|------|---------|
+| GET | `/api/session` | Current user + active branch (JHB default) + accessible branches |
+| POST | `/api/session/branch` | Switch the active branch (404 if unknown) |
+| GET | `/api/planning-board` | Board: weeks × slots, unscheduled pool, capacity |
+| GET | `/api/planning-slots` | List slots (filters: week / lane / status / branch) |
+| POST | `/api/planning-slots` | Schedule — `planning.schedule` (422 chassis-ETA gate, 409 occupied) |
+| POST | `/api/planning-slots/{id}/move` | Reschedule — `planning.schedule` |
+| DELETE | `/api/planning-slots/{id}` | Unschedule (delete the slot) — `planning.unschedule` |
+| POST | `/api/po-suggestions/{id}/override-supplier` | Override supplier — `buying.override_supplier` |
+| POST | `/api/po-suggestions/raise` | Bulk raise (1 PR / supplier) — `buying.bulk_raise` |
+
+All v4.14–v4.15 mutations are now permission-gated (15 keys, `{domain}.{action}`;
+GET stays ungated). Migration `0005` enforces `branch_id` NOT NULL on the MES
+tables, seeds the keys + role grants, and adds the `icb_mes.pr_number_seq` sequence.
+
 ## Database & migrations
 
 All schema changes go through **Alembic** (`backend/alembic/`). There is no runtime

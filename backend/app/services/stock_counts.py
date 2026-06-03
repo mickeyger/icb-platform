@@ -5,6 +5,7 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.database import Branch
 from app.models.mes import Discrepancy, StockCount, StockPosition
 from app.schemas.discrepancies import DiscrepancyListItem, to_discrepancy_item
 from app.schemas.stock_counts import StockCountListItem, to_stock_count_item
@@ -14,6 +15,13 @@ from app.services.materials import description_map
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _default_branch_id(db: Session):
+    """JHB id — stock_counts.branch_id is NOT NULL (0005); fall back here when the
+    caller supplies no branch (e.g. no active branch in the session)."""
+    b = db.execute(select(Branch).where(Branch.code == "JHB")).scalar_one_or_none()
+    return b.id if b is not None else None
 
 
 def list_counts(db: Session, *, status: Optional[str] = None, branch_id: Optional[int] = None,
@@ -40,6 +48,8 @@ def record_count(db: Session, *, sap_code: str, bin: Optional[str], physical_cou
     ).scalar_one_or_none()
     sap_stock = sp.sap_stock if sp is not None else 0
     status = "confirmed" if physical_count == sap_stock else "discrepancy"
+    if branch_id is None:                       # branch_id is NOT NULL (WO v4.16 / 0005)
+        branch_id = _default_branch_id(db)
     sc = StockCount(
         sap_code=sap_code, bin=bin, sap_stock_at_count=sap_stock, physical_count=physical_count,
         counted_by_user_id=getattr(user, "id", None), counted_by_name=getattr(user, "username", None),

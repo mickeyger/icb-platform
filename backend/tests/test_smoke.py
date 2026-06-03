@@ -62,9 +62,9 @@ def test_mes_schema_tables():
             "where table_schema='icb_mes' and table_type='BASE TABLE'")).scalar()
         new_tables = db.execute(text(
             "select count(*) from information_schema.tables where table_schema='icb_mes' "
-            "and table_name in ('mes_materials','stock_positions','suppliers')")).scalar()
-    assert n == 15
-    assert new_tables == 3
+            "and table_name in ('mes_materials','stock_positions','suppliers','session_branches')")).scalar()
+    assert n == 16
+    assert new_tables == 4
 
 
 def test_legacy_view_exposes_old_shape():

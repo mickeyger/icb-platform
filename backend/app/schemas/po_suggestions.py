@@ -42,6 +42,28 @@ class DeferRequest(BaseModel):
     deferred_until: date
 
 
+class OverrideSupplierRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": {"supplier_name": "Macsteel", "last_price": 4100}})
+    supplier_name: str
+    last_price: Optional[float] = None
+
+
+class BulkRaiseRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": {"ids": [1, 2, 3]}})
+    ids: List[int]
+
+
+class BulkRaiseSkip(BaseModel):
+    id: int
+    reason: str
+
+
+class BulkRaiseResponse(BaseModel):
+    pr_numbers: List[str] = Field(default_factory=list)
+    raised: List[POSuggestionListItem] = Field(default_factory=list)
+    skipped: List[BulkRaiseSkip] = Field(default_factory=list)
+
+
 def to_po_item(p, description: Optional[str] = None,
                supplier_contact: Optional[str] = None) -> POSuggestionListItem:
     """Map a POSuggestion ORM row (+ optional catalogue description + supplier contact)."""

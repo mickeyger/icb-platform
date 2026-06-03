@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from .database import (
     get_db, SessionLocal,
-    User, UserSession,
+    User, UserSession, Branch,
     Permission, RolePermission, UserPermission,
 )
 
@@ -124,13 +124,38 @@ def user_can(user: Optional[User], permission: str, db: Optional[Session] = None
 
 
 def require_perm(permission: str):
-    """FastAPI dependency factory: gate a route on a named permission."""
-    def _dep(request: Request, db: Session = Depends(get_db)) -> User:
-        user = require_user(request, db)
+    """FastAPI dependency factory: gate a route on a named permission.
+
+    Uses `Depends(require_user)` (not a direct call) so the single auth path is
+    reused AND test overrides of `require_user` propagate through the gate.
+    Behaviour in production is identical (require_user still resolves the session)."""
+    def _dep(user: User = Depends(require_user), db: Session = Depends(get_db)) -> User:
         if not user_can(user, permission, db):
             raise HTTPException(status_code=403, detail=f"Permission denied: {permission}")
         return user
     return _dep
+
+
+# WO v4.16: the spec names the gate `require_permission`; it is the existing
+# `require_perm` factory above (reused, not duplicated — see ADR 0010). Routers
+# may import either name.
+require_permission = require_perm
+
+
+# ── Active branch (WO v4.16, ADR 0010) ────────────────────────────────────────
+
+def current_session_id(request: Request) -> Optional[str]:
+    """The raw session cookie id. A dependency so tests can override it."""
+    return request.cookies.get("session_id")
+
+
+def active_branch(session_id: Optional[str] = Depends(current_session_id),
+                  db: Session = Depends(get_db)) -> Optional[Branch]:
+    """The branch the session switched to, or None (lists then show all accessible).
+    Session-held; default JHB is only a display default in GET /api/session — lists
+    filter solely once a branch is explicitly chosen. See ADR 0010."""
+    from .services import session as _sess
+    return _sess.get_switched_branch(db, session_id)
 
 
 # ── Network / request helpers ─────────────────────────────────────────────────

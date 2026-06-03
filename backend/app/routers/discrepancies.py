@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import User, get_db
-from ..deps import require_user
+from ..deps import require_permission, require_user
 from ..schemas.discrepancies import DiscrepancyListItem, ResolveRequest
 from ..services import discrepancies as svc
 
@@ -25,7 +25,7 @@ def list_discrepancies(
 @router.post("/{discrepancy_id}/resolve", response_model=DiscrepancyListItem)
 def resolve_discrepancy(
     discrepancy_id: int, body: ResolveRequest,
-    db: Session = Depends(get_db), user: User = Depends(require_user),
+    db: Session = Depends(get_db), user: User = Depends(require_permission("buying.resolve_discrepancy")),
 ):
     """Resolve a discrepancy (sets resolved_at). 422 if already resolved."""
     try:
