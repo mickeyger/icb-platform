@@ -1,0 +1,6 @@
+# Migration tooling consumed by WSL / bash / pgloader must stay LF on every
+# platform — even on a Windows checkout. CRLF breaks bash scripts and pgloader's
+# config parser. (The .ps1 orchestrator is Windows-only; PowerShell tolerates LF.)
+backend/migrations/pgloader/*.sh    text eol=lf
+backend/migrations/pgloader/*.load  text eol=lf
+backend/migrations/pgloader/*.sql   text eol=lf

@@ -1,0 +1,35 @@
+/*
+ * WO v4.20 — Phase 2D-1: MySQL (faje UAT) -> PostgreSQL icb_costings catalogue load.
+ *
+ * Source: WSL MariaDB (the restored fajecoza_grp_costings.sql) on 127.0.0.1:3307
+ *         (3307 because a Windows mysqld holds 3306 and WSL mirrored networking
+ *         shares the namespace). User `migrate` (TCP; root is unix_socket-only).
+ * Target: the existing local PostgreSQL `icb`, schema `icb_costings`, reachable from
+ *         WSL at 127.0.0.1:5432 thanks to WSL2 mirrored networking.
+ *
+ * Data-only into the existing Phase-1 schema (no DDL). icb_app is a NON-superuser
+ * owner, so it cannot disable RI system triggers (pgloader's `disable triggers`
+ * errors 42501). Instead the FK constraints are dropped before the load
+ * (01b_drop_fks.sql) and re-added after (03_readd_fks.sql — NOT VALID where source
+ * orphans exist, e.g. bill_of_materials.trailer_type_id=51, 202 rows). Sequences are
+ * reset in 02_post_load.sql (owner setval sweep). Skip-list: user_sessions
+ * (ephemeral) + help_request_log (operational log).
+ *
+ * Order: 01_truncate -> 01b_drop_fks -> THIS load -> 02_post_load -> 03_readd_fks.
+ * Run (in WSL): pgloader /mnt/c/Users/micge/Documents/icb-platform/backend/migrations/pgloader/grp_costings.load
+ */
+LOAD DATABASE
+     FROM     mysql://migrate:migrate@127.0.0.1:3307/grp_costings
+     INTO     postgresql://icb_app:icb_app_dev@127.0.0.1:5432/icb
+
+ WITH data only,
+      create no tables,
+      create no indexes,
+      no truncate,
+      batch rows = 2000,
+      prefetch rows = 2000
+
+ EXCLUDING TABLE NAMES MATCHING ~/^user_sessions$/, ~/^help_request_log$/
+
+ ALTER SCHEMA 'grp_costings' RENAME TO 'icb_costings'
+ ;
