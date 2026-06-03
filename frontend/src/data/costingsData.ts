@@ -25,6 +25,7 @@ export type PermissionKey =
   | 'planning.acknowledge'         // v4
   | 'planning.schedule'            // v4.18 — drag-drop schedule / move
   | 'planning.unschedule'          // v4.18 — return a slot to the pool
+  | 'production.chassis_received'  // v4.19 — chassis arrival confirmation
   | 'production.view'
   | 'management.view'
   | 'tablet.signoff'
@@ -111,6 +112,9 @@ export interface Costing {
   promised_date?: string
   site: string
   actions_available: string[]
+  // Work Order v4.19 — linked production job id (null = accepted calc with no job
+  // yet → the "partial" state that renders a "Retry job creation" button).
+  production_job_id?: number | null
 }
 
 export interface ChassisBomItem {
@@ -178,6 +182,7 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'planning.acknowledge',
     'planning.schedule',
     'planning.unschedule',
+    'production.chassis_received',
     'production.view',
     'tablet.signoff',
   ],
@@ -190,6 +195,7 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'planning.acknowledge',
     'planning.schedule',
     'planning.unschedule',
+    'production.chassis_received',
     'production.view',
     'tablet.signoff',
     'kanban.team_lead',
@@ -205,6 +211,7 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'planning.acknowledge',
     'planning.schedule',
     'planning.unschedule',
+    'production.chassis_received',
     'production.view',
     // v4.11 — read-only Materials Dashboard + Weekly Forecast (planner shares the forecast).
     'materials.view',
@@ -222,6 +229,7 @@ export const ROLE_PERMISSIONS: Record<string, PermissionKey[]> = {
     'planning.acknowledge',
     'planning.schedule',
     'planning.unschedule',
+    'production.chassis_received',
     'production.view',
     'management.view',
     'tablet.signoff',

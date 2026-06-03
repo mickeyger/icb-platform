@@ -16,6 +16,7 @@ import {
 } from 'react'
 import seed from '../data/icb_materials_data.json'
 import { apiGet, apiPost, handleApiError, mesAutoLogin } from '../lib/api'
+import { formatPrNumber } from '../lib/format'
 import { useToast } from '../components/ui/toast'
 import { useAppData } from './AppDataContext'
 
@@ -260,14 +261,14 @@ export function MaterialsProvider({ children }: { children: ReactNode }) {
           await refetchPO()
           const suppliersAffected = Array.from(new Set(res.raised.map((r) => r.suggested_supplier)))
           const total = res.raised.reduce((a, r) => a + (r.total ?? 0), 0)
-          return { prNumber: res.pr_numbers.join(', ') || '—', suppliersAffected, total }
+          return { prNumber: res.pr_numbers.map(formatPrNumber).join(', ') || '—', suppliersAffected, total }
         } catch (e) {
           handleApiError(e, toast.push)
           throw e
         }
       }
       await new Promise((r) => setTimeout(r, 150))
-      const prNumber = String(nextPrSeq)
+      const prNumber = formatPrNumber(String(nextPrSeq))
       setNextPrSeq((n) => n + 1)
       const nowISO = new Date().toISOString()
       let total = 0

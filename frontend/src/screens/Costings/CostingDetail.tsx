@@ -14,6 +14,7 @@ import {
   Lock,
 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
+import { apiGet } from '../../lib/api'
 import { useAppData } from '../../store/AppDataContext'
 import { Card, SectionTitle } from '../../components/ui/primitives'
 import { Toast } from '../../components/ui/overlays'
@@ -30,7 +31,7 @@ import type { Costing } from '../../data/costingsData'
 export function CostingDetail() {
   const { quote = '' } = useParams<{ quote: string }>()
   const nav = useNavigate()
-  const { costings, firePreJobCard, scheduleRepairPhases, signoffPreJob, markChassisReceived } = useCostings()
+  const { mode, costings, firePreJobCard, scheduleRepairPhases, signoffPreJob, markChassisReceived } = useCostings()
   const { hasPermission, profile } = useAppData()
   const [toast, setToast] = useState('')
   const [preJobOpen, setPreJobOpen] = useState(false)
@@ -240,7 +241,7 @@ export function CostingDetail() {
             <div className="flex flex-wrap items-start gap-4">
               <button
                 type="button"
-                disabled={!hasPermission('planning.acknowledge')}
+                disabled={!hasPermission('production.chassis_received')}
                 onClick={async () => {
                   const by = profile.id === 'rep_burt' ? 'BURT' : profile.id
                   if (c.chassis_received_at) {
@@ -257,7 +258,7 @@ export function CostingDetail() {
                     ? 'border-status-green bg-status-green text-white'
                     : 'border-status-amber bg-white text-status-amber hover:bg-status-amber/10'
                 }`}
-                title={hasPermission('planning.acknowledge') ? (c.chassis_received_at ? 'Un-tick (mistake correction)' : 'Tick to mark chassis received') : 'Requires Planning role'}
+                title={hasPermission('production.chassis_received') ? (c.chassis_received_at ? 'Un-tick (mistake correction)' : 'Tick to mark chassis received') : 'Requires Planning role'}
               >
                 {c.chassis_received_at ? <CheckCircle2 size={22} /> : <Circle size={22} />}
               </button>
@@ -295,13 +296,13 @@ export function CostingDetail() {
                         type="date"
                         value={chassisReceivedDate || new Date().toISOString().slice(0, 10)}
                         max={new Date().toISOString().slice(0, 10)}
-                        disabled={!hasPermission('planning.acknowledge')}
+                        disabled={!hasPermission('production.chassis_received')}
                         onChange={(e) => setChassisReceivedDate(e.target.value)}
                         className="mt-1 rounded-md border border-line bg-white px-2 py-1 text-sm disabled:bg-surface-alt"
                       />
                       <span className="ml-2 text-[10px] text-muted">(defaults to today; adjust if chassis arrived earlier)</span>
                     </label>
-                    {!hasPermission('planning.acknowledge') && (
+                    {!hasPermission('production.chassis_received') && (
                       <p className="text-[11px] text-muted">
                         <Lock size={11} className="mr-1 inline-block" /> Requires Planning role.
                       </p>
@@ -316,7 +317,9 @@ export function CostingDetail() {
 
       <Card>
         <SectionTitle>Status history</SectionTitle>
-        <StatusTimeline c={c} statusHex={style.hex} />
+        {mode === 'live' && c.production_job_id
+          ? <LiveTimeline pjId={c.production_job_id} />
+          : <StatusTimeline c={c} statusHex={style.hex} />}
       </Card>
 
       <PreJobCardModal
@@ -518,6 +521,52 @@ function StatusTimeline({ c, statusHex }: { c: Costing; statusHex: string }) {
           </li>
         )
       })}
+    </ol>
+  )
+}
+
+// WO v4.19 — live lifecycle timeline from the production-job (derived from its
+// timestamp columns server-side). Falls back to the derived StatusTimeline when
+// there's no production_job (pre-accept) or the API is unreachable.
+const TIMELINE_LABELS: Record<string, string> = {
+  accepted: 'Accepted into production',
+  pre_job_sent: 'Pre-Job Card sent',
+  pre_job_signoff_sales: 'Sales sign-off',
+  pre_job_signoff_production: 'Production sign-off',
+  pre_job_confirmed: 'Pre-Job confirmed',
+  planning_ack: 'Planning acknowledged',
+  chassis_received: 'Chassis received',
+}
+
+function LiveTimeline({ pjId }: { pjId: number }) {
+  const [events, setEvents] = useState<{ event_type: string; occurred_at: string; actor: string | null }[] | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    let alive = true
+    apiGet<{ event_type: string; occurred_at: string; actor: string | null }[]>(`/api/production-jobs/${pjId}/timeline`)
+      .then((e) => { if (alive) setEvents(e) })
+      .catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [pjId])
+
+  if (err) return <p className="text-xs text-muted">Live timeline unavailable.</p>
+  if (!events) return <p className="text-xs text-muted">Loading timeline…</p>
+  if (events.length === 0) return <p className="text-xs text-muted">No lifecycle events recorded yet.</p>
+  return (
+    <ol className="space-y-3">
+      {events.map((e, i) => (
+        <li key={i} className="flex items-start gap-3">
+          <CheckCircle2 size={20} className="text-status-green" />
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-body">
+              {TIMELINE_LABELS[e.event_type] ?? e.event_type.replace(/_/g, ' ')}
+            </div>
+            <div className="text-xs text-muted">
+              {dmy(e.occurred_at)} {hhmm(e.occurred_at)}{e.actor ? ` · ${e.actor}` : ''}
+            </div>
+          </div>
+        </li>
+      ))}
     </ol>
   )
 }

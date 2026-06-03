@@ -17,14 +17,28 @@ import {
   type RepairPhaseInsertion,
   type StatusName,
 } from '../data/costingsData'
+import { apiGet, apiPost, handleApiError, mesAutoLogin } from '../lib/api'
+import { useToast } from '../components/ui/toast'
+import { useAppData } from './AppDataContext'
+
+// WO v4.19 (Phase 2C-3): CostingsContext now rides the v4.17/v4.18 primitives.
+// It reads the calculations spine + the production-jobs lifecycle and merges them
+// (join by calculation_record_id), and its lifecycle mutators POST to
+// /api/production-jobs/* via lib/api — which sends the X-CSRF-Token that the raw
+// fetch used to omit (the legacy mutations were silently 403ing). Chassis-detail
+// capture + repair scheduling have no production-jobs endpoint, so they stay on
+// /api/calculations/* but now go through lib/api (CSRF-safe). Mock mode unchanged.
 
 type Mode = 'live' | 'mock' | 'loading'
+export type AcceptStage = 'idle' | 'accepting' | 'creating_job' | 'partial' | 'done'
 
 interface CostingsValue {
   mode: Mode
   costings: Costing[]
   statusCounts: Record<StatusName | 'Total', number>
   refresh: () => Promise<void>
+  // Per-quote accept progress (WO v4.19 — drives the Accept/Retry button spinner).
+  acceptStage: Record<string, AcceptStage>
   // Mutations — POST to FastAPI in Live mode; update local state in Mock mode.
   firePreJobCard: (quote: string) => Promise<void>
   confirmPreJobCard: (quote: string) => Promise<void>
@@ -32,7 +46,7 @@ interface CostingsValue {
   // Work Order v4 mutators.
   acceptCosting: (quote: string) => Promise<void>
   signoffPreJob: (quote: string, role: 'sales' | 'production', attestation: string, by: string) => Promise<void>
-  ackPlanning: (quote: string, by: string) => Promise<void>
+  ackPlanning: (quote: string, by: string, chassisEta?: string | null, notes?: string | null) => Promise<void>
   // Work Order v4.2 — chassis ETA capture.
   captureChassisEta: (quote: string, payload: ChassisEtaPayload, by: string) => Promise<void>
   loadChassisCatalogue: () => Promise<ChassisCatalogue | null>
@@ -54,48 +68,16 @@ export interface ChassisCatalogue {
   options:   { id: number; kind: string; label: string; axle_count?: number | null; tyre_style?: string | null; price?: number }[]
 }
 
+// v4.14 production-jobs list item — the subset we join on (by calculation_record_id).
+interface ApiProductionJob {
+  id: number
+  calculation_record_id: number
+  job_number: string | null
+  status: string
+  mes_status: string
+}
+
 const CostingsContext = createContext<CostingsValue | null>(null)
-
-// Same-origin in unified mode (FastAPI serves the build on :8000); the Vite dev
-// server proxies /api -> :8000. Override with VITE_API_BASE only for split hosts.
-const API_BASE = import.meta.env.VITE_API_BASE ?? ''
-const FETCH_TIMEOUT_MS = 1500
-
-/** Try to mint a costing-app session for the demo user so the MES iframe
- *  inherits it. Safe to call repeatedly: the server returns `already=true`
- *  when a valid session already exists. Silently fails if the FastAPI app
- *  is offline (no harm — the next fetch will fall back to Mock mode). */
-async function mesAutoLogin(): Promise<void> {
-  try {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
-    await fetch(`${API_BASE}/api/mes/autologin`, {
-      method: 'POST',
-      credentials: 'include',
-      signal: ctrl.signal,
-    })
-    clearTimeout(t)
-  } catch {
-    /* ignore — Mock mode will take over */
-  }
-}
-
-async function fetchLiveCalculations(): Promise<LiveCalculation[] | null> {
-  try {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
-    const res = await fetch(`${API_BASE}/api/calculations?limit=100`, {
-      credentials: 'include',
-      signal: ctrl.signal,
-    })
-    clearTimeout(t)
-    if (!res.ok) return null
-    const data = (await res.json()) as LiveCalculation[]
-    return Array.isArray(data) ? data : null
-  } catch {
-    return null
-  }
-}
 
 function deriveStatusCounts(rows: Costing[]): Record<StatusName | 'Total', number> {
   const counts = { Total: 0 } as Record<StatusName | 'Total', number>
@@ -107,59 +89,167 @@ function deriveStatusCounts(rows: Costing[]): Record<StatusName | 'Total', numbe
   return counts
 }
 
+// §0.1 enrichment: an accepted+ calc's lifecycle status/job-number come from its
+// production_job; pre-accept calcs (no pj) keep their own status. `production_job_id`
+// null on an Accepted row = the "partial" state (accepted calc, job not created yet).
+function mergeProductionJob(c: Costing, pj?: ApiProductionJob): Costing {
+  if (!pj) return { ...c, production_job_id: null }
+  return {
+    ...c,
+    production_job_id: pj.id,
+    status: (pj.mes_status as StatusName) || c.status,
+    job_number_assigned: pj.job_number ?? c.job_number_assigned,
+  }
+}
+
 export function CostingsProvider({ children }: { children: ReactNode }) {
+  const toast = useToast()
+  const { activeBranch } = useAppData()
   const [mode, setMode] = useState<Mode>('loading')
   const [costings, setCostings] = useState<Costing[]>(costingsMock.costings)
-  const liveIdByQuote = useRef<Map<string, number>>(new Map())
+  const [acceptStage, setAcceptStageState] = useState<Record<string, AcceptStage>>({})
+  const liveIdByQuote = useRef<Map<string, number>>(new Map())   // quote -> calculation id
+  const pjIdByQuote = useRef<Map<string, number>>(new Map())     // quote -> production_job id
+  const catalogueCacheRef = useRef<ChassisCatalogue | null>(null)
 
-  const load = useCallback(async () => {
-    // Mint a costing-app session first so the iframe inherits it.
-    await mesAutoLogin()
-    const live = await fetchLiveCalculations()
-    if (live && live.length > 0) {
-      const rows = live.map(liveToCosting)
-      liveIdByQuote.current = new Map(live.map((r) => [r.quote_number ?? `#${r.id}`, r.id]))
+  const setStage = useCallback((quote: string, stage: AcceptStage) => {
+    setAcceptStageState((s) => ({ ...s, [quote]: stage }))
+  }, [])
+
+  // refetch() = reads only (calcs spine ⋈ production-jobs). No autologin (§3.5).
+  const refetch = useCallback(async () => {
+    try {
+      const [calcs, pjs] = await Promise.all([
+        apiGet<LiveCalculation[]>('/api/calculations?limit=100'),
+        apiGet<ApiProductionJob[]>('/api/production-jobs?limit=200'),
+      ])
+      if (!Array.isArray(calcs) || calcs.length === 0) {
+        setCostings(costingsMock.costings)
+        setMode('mock')
+        return
+      }
+      const pjByCalc = new Map((pjs ?? []).map((p) => [p.calculation_record_id, p]))
+      const rows = calcs.map((c) => mergeProductionJob(liveToCosting(c), pjByCalc.get(c.id)))
+      liveIdByQuote.current = new Map(calcs.map((c) => [c.quote_number ?? `#${c.id}`, c.id]))
+      pjIdByQuote.current = new Map(
+        rows.filter((r) => r.production_job_id != null).map((r) => [r.quote_number, r.production_job_id as number]),
+      )
       setCostings(rows)
       setMode('live')
-    } else {
+    } catch {
+      // Backend unreachable / unauthorised → keep the seed, run in mock mode.
       setCostings(costingsMock.costings)
       setMode('mock')
     }
   }, [])
 
+  // Bootstrap once on mount: deduped autologin → read.
   useEffect(() => {
-    load()
-  }, [load])
+    void (async () => {
+      await mesAutoLogin()
+      await refetch()
+    })()
+  }, [refetch])
+
+  // Branch-changed signal (WO v4.18 §4.4): refetch on a real switch only.
+  const prevBranchId = useRef<number | null | undefined>(undefined)
+  useEffect(() => {
+    const id = activeBranch?.id ?? null
+    const prev = prevBranchId.current
+    prevBranchId.current = id
+    if (prev === undefined || prev === null || id === null) return
+    if (prev !== id) void refetch()
+  }, [activeBranch?.id, refetch])
 
   const statusCounts = useMemo(() => {
-    // In Mock mode we trust the bundled status_counts (it represents a fuller
-    // population of 40 costings, not just the 15 sample rows). In Live mode we
-    // derive counts from the live rows.
+    // Mock mode trusts the bundled status_counts (fuller 40-row population); live
+    // derives counts from the live rows.
     return mode === 'mock' ? costingsMock.status_counts : deriveStatusCounts(costings)
   }, [mode, costings])
 
-  async function liveTransition(quote: string, path: string, body?: unknown): Promise<Costing | null> {
-    const id = liveIdByQuote.current.get(quote)
-    if (id == null) return null
-    try {
-      const res = await fetch(`${API_BASE}/api/calculations/${id}/${path}`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-      })
-      if (!res.ok) return null
-      await load() // re-fetch the whole list for simplicity
-      return costings.find((c) => c.quote_number === quote) ?? null
-    } catch {
-      return null
-    }
-  }
+  // ── live helpers ──────────────────────────────────────────────────────────
+  // POST to a production-job lifecycle action, then refetch. Re-throws nothing —
+  // errors surface via handleApiError (422 amber w/ detail, 403 red, etc.).
+  const pjPost = useCallback(
+    async (quote: string, path: string, body?: unknown) => {
+      const id = pjIdByQuote.current.get(quote)
+      if (id == null) {
+        toast.push({ kind: 'warn', message: 'No production job exists for this costing yet.' })
+        return
+      }
+      try {
+        await apiPost(`/api/production-jobs/${id}/${path}`, body)
+        await refetch()
+      } catch (e) {
+        handleApiError(e, toast.push)
+      }
+    },
+    [refetch, toast],
+  )
+
+  // POST to a legacy calculation action (chassis-eta / schedule-repair /
+  // pre-job-confirm — no production-jobs equivalent; now CSRF-safe via lib/api).
+  const legacyPost = useCallback(
+    async (quote: string, path: string, body?: unknown) => {
+      const id = liveIdByQuote.current.get(quote)
+      if (id == null) return
+      try {
+        await apiPost(`/api/calculations/${id}/${path}`, body)
+        await refetch()
+      } catch (e) {
+        handleApiError(e, toast.push)
+      }
+    },
+    [refetch, toast],
+  )
+
+  // ── Work Order v4 mutators ──────────────────────────────────────────────────
+
+  // Accept = sequential two-call (§0.2): legacy /accept (idempotent) then
+  // /production-jobs/from-calculation (201 new / 200 existing). Both legs idempotent,
+  // so this doubles as "Retry job creation" on a partial row (accepted, no job).
+  const acceptCosting = useCallback(
+    async (quote: string) => {
+      if (mode !== 'live') {
+        setCostings((prev) =>
+          prev.map((c) =>
+            c.quote_number === quote && c.status === 'Pending'
+              ? {
+                  ...c,
+                  status: 'Accepted' as StatusName,
+                  accepted_at: new Date().toISOString(),
+                  actions_available: ['view', 'pre_job_card'],
+                }
+              : c,
+          ),
+        )
+        return
+      }
+      const cId = liveIdByQuote.current.get(quote)
+      if (cId == null) return
+      const row = costings.find((c) => c.quote_number === quote)
+      setStage(quote, 'accepting')
+      try {
+        if (!row || row.status === 'Pending') {
+          await apiPost(`/api/calculations/${cId}/accept`) // step 1 — skip if already accepted (retry)
+        }
+        setStage(quote, 'creating_job')
+        await apiPost(`/api/production-jobs/from-calculation/${cId}`) // step 2
+        setStage(quote, 'done')
+        await refetch()
+      } catch (e) {
+        setStage(quote, 'partial') // step 1 ok but step 2 failed → accepted calc, no job
+        handleApiError(e, toast.push)
+        await refetch() // reflect the partial state so the Retry button renders
+      }
+    },
+    [mode, costings, refetch, toast, setStage],
+  )
 
   const firePreJobCard = useCallback(
     async (quote: string) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'pre-job-card')
+        await pjPost(quote, 'pre-job-card')
         return
       }
       setCostings((prev) =>
@@ -177,13 +267,13 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         ),
       )
     },
-    [mode],
+    [mode, pjPost],
   )
 
   const confirmPreJobCard = useCallback(
     async (quote: string) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'pre-job-confirm')
+        await legacyPost(quote, 'pre-job-confirm') // superseded by dual sign-off; kept for back-compat
         return
       }
       setCostings((prev) =>
@@ -200,38 +290,13 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         ),
       )
     },
-    [mode],
-  )
-
-  // ── Work Order v4 mutators ────────────────────────────────────────────────
-
-  const acceptCosting = useCallback(
-    async (quote: string) => {
-      if (mode === 'live') {
-        // Reuses the EXISTING /api/calculations/{id}/accept endpoint.
-        await liveTransition(quote, 'accept')
-        return
-      }
-      setCostings((prev) =>
-        prev.map((c) =>
-          c.quote_number === quote && c.status === 'Pending'
-            ? {
-                ...c,
-                status: 'Accepted' as StatusName,
-                accepted_at: new Date().toISOString(),
-                actions_available: ['view', 'pre_job_card'],
-              }
-            : c,
-        ),
-      )
-    },
-    [mode],
+    [mode, legacyPost],
   )
 
   const signoffPreJob = useCallback(
     async (quote: string, role: 'sales' | 'production', attestation: string, by: string) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'pre-job-signoff', { role, attestation })
+        await pjPost(quote, 'pre-job-signoff', { role, attestation }) // server records the actor from the session
         return
       }
       setCostings((prev) =>
@@ -264,13 +329,13 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [mode],
+    [mode, pjPost],
   )
 
   const ackPlanning = useCallback(
-    async (quote: string, by: string) => {
+    async (quote: string, by: string, chassisEta: string | null = null, notes: string | null = null) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'planning-ack')
+        await pjPost(quote, 'planning-ack', { chassis_eta: chassisEta, notes })
         return
       }
       setCostings((prev) =>
@@ -285,15 +350,15 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         ),
       )
     },
-    [mode],
+    [mode, pjPost],
   )
 
-  // Work Order v4.2 — chassis ETA capture + live catalogue fetch.
-
+  // Work Order v4.2 — chassis ETA capture (rich VIN/BOM). No production-jobs
+  // endpoint for the rich data → stays on the legacy calc route (CSRF-safe now).
   const captureChassisEta = useCallback(
     async (quote: string, payload: ChassisEtaPayload, by: string) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'chassis-eta', payload)
+        await legacyPost(quote, 'chassis-eta', payload)
         return
       }
       setCostings((prev) =>
@@ -318,19 +383,13 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [mode],
+    [mode, legacyPost],
   )
 
-  const catalogueCacheRef = useRef<ChassisCatalogue | null>(null)
   const loadChassisCatalogue = useCallback(async (): Promise<ChassisCatalogue | null> => {
     if (catalogueCacheRef.current) return catalogueCacheRef.current
     try {
-      const res = await fetch(`${API_BASE}/api/chassis/catalogue`, {
-        credentials: 'include',
-        signal: AbortSignal.timeout(2000),
-      })
-      if (!res.ok) return null
-      const data = (await res.json()) as ChassisCatalogue
+      const data = await apiGet<ChassisCatalogue>('/api/chassis/catalogue')
       catalogueCacheRef.current = data
       return data
     } catch {
@@ -338,13 +397,16 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // Work Order v4.3 — mark chassis received. Pass receivedAt=null to un-tick.
+  // Work Order v4.3 — mark chassis received. The production-jobs endpoint marks
+  // receipt (no payload); there is no server un-tick, so un-tick stays mock-only.
   const markChassisReceived = useCallback(
     async (quote: string, receivedAt: string | null, by: string) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'chassis-received', receivedAt === null
-          ? { received: false }
-          : { received: true, received_at: receivedAt })
+        if (receivedAt === null) {
+          toast.push({ kind: 'warn', message: 'Un-ticking chassis receipt isn’t available in live mode yet.' })
+          return
+        }
+        await pjPost(quote, 'chassis-received')
         return
       }
       setCostings((prev) =>
@@ -359,13 +421,13 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         ),
       )
     },
-    [mode],
+    [mode, pjPost, toast],
   )
 
   const scheduleRepairPhases = useCallback(
     async (quote: string, phases: RepairPhaseInsertion[]) => {
       if (mode === 'live') {
-        await liveTransition(quote, 'schedule-repair', {
+        await legacyPost(quote, 'schedule-repair', {
           phases: phases.map((p) => ({
             phase: p.phase,
             bay_id: p.bay_assignment,
@@ -389,24 +451,32 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         ),
       )
     },
-    [mode],
+    [mode, legacyPost],
   )
 
-  const value: CostingsValue = {
-    mode,
-    costings,
-    statusCounts,
-    refresh: load,
-    firePreJobCard,
-    confirmPreJobCard,
-    scheduleRepairPhases,
-    acceptCosting,
-    signoffPreJob,
-    ackPlanning,
-    captureChassisEta,
-    loadChassisCatalogue,
-    markChassisReceived,
-  }
+  const value = useMemo<CostingsValue>(
+    () => ({
+      mode,
+      costings,
+      statusCounts,
+      refresh: refetch,
+      acceptStage,
+      firePreJobCard,
+      confirmPreJobCard,
+      scheduleRepairPhases,
+      acceptCosting,
+      signoffPreJob,
+      ackPlanning,
+      captureChassisEta,
+      loadChassisCatalogue,
+      markChassisReceived,
+    }),
+    [
+      mode, costings, statusCounts, refetch, acceptStage,
+      firePreJobCard, confirmPreJobCard, scheduleRepairPhases, acceptCosting,
+      signoffPreJob, ackPlanning, captureChassisEta, loadChassisCatalogue, markChassisReceived,
+    ],
+  )
 
   return <CostingsContext.Provider value={value}>{children}</CostingsContext.Provider>
 }
