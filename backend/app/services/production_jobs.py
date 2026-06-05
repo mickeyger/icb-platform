@@ -62,7 +62,9 @@ def _job_number_from_quote(quote_number: Optional[str]) -> Optional[str]:
 def _base_select():
     return (
         select(ProductionJob, CalculationRecord, Customer, Branch)
-        .join(CalculationRecord, ProductionJob.calculation_record_id == CalculationRecord.id)
+        # LEFT join: workbook-imported jobs (v4.21) have a NULL calculation_record_id and
+        # no calc row — an inner join would silently drop them from every list/detail read.
+        .join(CalculationRecord, ProductionJob.calculation_record_id == CalculationRecord.id, isouter=True)
         .join(Customer, CalculationRecord.customer_id == Customer.id, isouter=True)
         .join(Branch, ProductionJob.branch_id == Branch.id, isouter=True)
     )

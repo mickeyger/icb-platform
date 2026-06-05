@@ -206,3 +206,65 @@ def test_accepted_mes_status_label_is_neutral(api, fresh_calc):
     assert api.get(f"/api/production-jobs/{jid}").json()["mes_status"] == "Accepted"
     row = next(r for r in api.get("/api/production-jobs?limit=200").json() if r["id"] == jid)
     assert row["mes_status"] == "Accepted"
+
+
+# ── WO v4.21 (Phase 2D-2) — workbook-imported jobs (NULL calc, carrier columns) ─
+@pytest.fixture
+def workbook_job(app_mod):
+    """Factory -> production_job id for a workbook-imported job: NULL
+    calculation_record_id, source='workbook', customer/body/selling on the carriers."""
+    from app.database import SessionLocal, Branch
+    from app.models.mes import ProductionJob
+    created = []
+
+    def _make(**kw):
+        with SessionLocal() as db:
+            jhb = db.query(Branch).filter_by(code="JHB").first()
+            j = ProductionJob(
+                calculation_record_id=None, source="workbook",
+                branch_id=(jhb.id if jhb else None),
+                job_number=kw.get("job_number", f"WB{uuid.uuid4().hex[:6]}"),
+                status=kw.get("status", "planning"),
+                customer_name=kw.get("customer_name", "Workbook Customer Ltd"),
+                description=kw.get("description", "11.9m Dryfreight"),
+                selling_zar=kw.get("selling_zar", 250000.0),
+            )
+            db.add(j)
+            db.commit()
+            created.append(j.id)
+            return j.id
+
+    yield _make
+    with SessionLocal() as db:
+        for jid in created:
+            j = db.get(ProductionJob, jid)
+            if j:
+                db.delete(j)
+        db.commit()
+
+
+def test_workbook_job_lists_without_calc(api, workbook_job):
+    """A production_job with NULL calculation_record_id (workbook import) must appear
+    in the list via the LEFT join, with customer/body/selling from the carrier columns
+    and source='workbook'. Guards the inner-join regression that would silently drop it."""
+    jid = workbook_job(customer_name="Malu Pork", description="6.7m Carcass", selling_zar=312000.0)
+    rows = api.get("/api/production-jobs?limit=300").json()
+    row = next((r for r in rows if r["id"] == jid), None)
+    assert row is not None, "workbook job dropped from list (inner-join regression)"
+    assert row["calculation_record_id"] is None
+    assert row["source"] == "workbook"
+    assert row["customer"] == "Malu Pork"
+    assert row["body_type"] == "6.7m Carcass"
+    assert row["selling_zar"] == 312000.0
+
+
+def test_workbook_job_detail_no_calc(api, workbook_job):
+    """The detail endpoint must not error on a null-calc job; calc-derived fields are
+    None and the workbook carriers come through."""
+    jid = workbook_job()
+    d = api.get(f"/api/production-jobs/{jid}").json()
+    assert d["source"] == "workbook"
+    assert d["calculation_record_id"] is None
+    assert d["quote_number"] is None
+    assert d["is_repair"] is False
+    assert d["customer"] == "Workbook Customer Ltd"

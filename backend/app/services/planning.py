@@ -61,8 +61,10 @@ def _job_ref(job: ProductionJob, calc, customer) -> PlanningJobRef:
     dims = json.loads(calc.dimensions_json) if calc and calc.dimensions_json else {}
     return PlanningJobRef(
         id=job.id, job_number=job.job_number, status=job.status,
-        customer=(customer.name if customer is not None else None),
-        body_type=dims.get("body_type"), selling_zar=result.get("selling_zar"),
+        # carrier fallback for workbook-imported jobs (no calc/customer join), v4.21
+        customer=(customer.name if customer is not None else job.customer_name),
+        body_type=(dims.get("body_type") or job.description),
+        selling_zar=(result.get("selling_zar") if calc else job.selling_zar),
         branch_id=job.branch_id, chassis_eta=job.chassis_eta,
         chassis_received_at=job.chassis_received_at, planned_start_date=job.planned_start_date,
     )

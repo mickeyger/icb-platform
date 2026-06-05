@@ -28,11 +28,13 @@ They must move without breaking any reader during the transition.
 - Migration `0003` creates the tables, copies the data (a no-op on the empty dev
   DB; real at the future prod migration), and creates the view. It does **not**
   drop the columns from `calculations`.
-- A follow-up migration (**`0006+`**), after a clean UAT week, drops the 18 columns
+- A follow-up migration (**`0007+`**), after a clean UAT week, drops the 18 columns
   from `calculations`. The view already reads the moved columns from
   `production_jobs`, so it survives that drop unchanged.
   **Removal target: after ≥4 weeks clean UAT (Plan §10 Q-UC-04) — ~2026-07-01.**
   **Renumber:** migration `0004` was taken by the v4.15 Materials/Buying/Stores
-  tables (ADR 0009) and `0005` by the v4.16 branch-NOT-NULL + permission seed + PR
-  sequence (ADR 0010), so this column-drop slides to the next free revision (`0006+`).
+  tables (ADR 0009), `0005` by the v4.16 branch-NOT-NULL + permission seed + PR
+  sequence (ADR 0010), and `0006` by the v4.21 workbook-jobs migration (nullable
+  calculation FK + `source`/carrier columns, ADR 0012), so this column-drop slides
+  to the next free revision (`0007+`).
 - `CalculationRecord` still declares the 18 columns until that drop migration.

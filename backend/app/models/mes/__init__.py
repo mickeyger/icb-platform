@@ -68,14 +68,24 @@ class ProductionJob(Base):
     )
 
     id = Column(Integer, primary_key=True)
-    # cross-schema -> icb_costings.calculations.id (FK in 0003, NOT NULL UNIQUE, RESTRICT)
-    calculation_record_id = Column(Integer, nullable=False, unique=True)
+    # cross-schema -> icb_costings.calculations.id (FK in 0003, RESTRICT). NULLABLE from
+    # 0006 (WO v4.21): workbook-imported jobs have no originating calculation. UNIQUE kept
+    # (Postgres allows multiple NULLs; quote-born jobs still can't share a calc).
+    calculation_record_id = Column(Integer, nullable=True, unique=True)
     # cross-schema -> icb_costings.branches.id (FK in 0003, RESTRICT); NOT NULL from 0005 (WO v4.16)
     branch_id = Column(Integer, nullable=False)
     job_number = Column(String(32), unique=True)          # derived from Q-32891 -> 32891
     status = Column(String(24), nullable=False, default="accepted")
     # accepted | pre_job_sent | pre_job_confirmed | planning | in_production | completed
     accepted_at = Column(DateTime(timezone=True))         # NEW (spec); no source column in calculations
+
+    # ── WO v4.21 (0006): workbook-imported jobs (no originating calculation) ──
+    source = Column(String(16), nullable=False, default="quote", server_default="quote")
+    # carriers populated for workbook jobs; quote-born jobs leave these NULL and derive
+    # customer/description/selling from the calc join (read-path falls back to carriers).
+    customer_name = Column(String(128))
+    description = Column(String(255))
+    selling_zar = Column(Float)
 
     # ── 18 columns moved from icb_costings.calculations (ordinals 15-32) ──
     pre_job_sent_at = Column(DateTime(timezone=True))

@@ -3,6 +3,23 @@
 Index of one-shot / re-runnable data migrations for the local & UAT `icb` database.
 (Schema migrations live in `backend/alembic/` — this folder is for **data** loads.)
 
+## v4.21 — ENTERPRISE PLANNING workbook → icb_mes (Phase 2D-2)
+
+Loads the live operational state from `ENTERPRISE PLANNING - 2026.xlsx` into `icb_mes`
+(**186 production jobs, 132 planning slots, 1564 demand lines**) + re-seeds the
+Materials/Buying/Stores master data from the mockup. **One-shot** (TRUNCATE + reload).
+Migration **0006** lets workbook jobs (which have no costing calculation) exist —
+`production_jobs.calculation_record_id` nullable + `source` + carrier columns.
+
+- **Re-run:** `pwsh backend/scripts/import_workbook.ps1 -Backup`
+- **Load report:** [`v4.21-workbook-load-report.md`](./v4.21-workbook-load-report.md)
+- **Decision record:** [`../adr/0012-workbook-imported-production-jobs.md`](../adr/0012-workbook-imported-production-jobs.md)
+- **The MES dashboards are now populated** — the Planning Board shows real ICB jobs.
+  Workbook jobs surface on the **Planning Board** (production-jobs-spine), **not** the
+  Costings dashboard (calculations-spine — they have no calc). The Stock/Buying
+  transactional tables (stock_counts / discrepancies / po_suggestions) stay empty
+  (generated in-app).
+
 ## v4.20 — faje UAT catalogue → PostgreSQL (Phase 2D-1)
 
 Replaces the mock seed in the `icb_costings` schema with the **real faje UAT catalogue**
@@ -18,7 +35,7 @@ schema; the Jinja Cost Calculator is verified regression-free against it.
 - **Rollback:** `pg_restore --clean --if-exists --no-owner` from the pre-load
   `pg_dump -Fc` snapshot (default `~/Documents/icb_db_backups/`).
 
-### ⚠️ Expected after v4.20: the MES dashboards are empty (until v4.21)
+### ⚠️ Expected after v4.20 — ✅ now RESOLVED by v4.21: the MES dashboards are empty until v4.21
 
 The migration **truncates all `icb_mes` tables** (production jobs, planning slots, stock
 counts, discrepancies, PO suggestions, …) so the reloaded calculations don't orphan stale
