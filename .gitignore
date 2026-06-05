@@ -24,6 +24,10 @@ dist/
 *.sqlite3
 *.bak*
 
+# ---- Local operational source workbooks (off-repo; the ETL reads these by path,
+#      same policy as v4.20's fajecoza_grp_costings.sql — large binaries + real ICB data) ----
+latest documents/
+
 # ---- Logs ----
 logs/
 *.log

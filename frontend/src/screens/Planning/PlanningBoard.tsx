@@ -739,6 +739,8 @@ function LivePlanningBoard() {
   const [poolHot, setPoolHot] = useState(false)
   const [openSlot, setOpenSlot] = useState<PlanningSlot | null>(null)
   const [ackTarget, setAckTarget] = useState<Costing | null>(null)
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'quote' | 'workbook'>('all')  // WO v4.22 source fork
+  const matchesSource = (j: PlanningJob) => sourceFilter === 'all' || j.source === sourceFilter
 
   // Mark chassis received for a scheduled slot → CostingsContext (quote-keyed) →
   // POST /api/production-jobs/{id}/chassis-received, then refetch the board badge.
@@ -844,6 +846,19 @@ function LivePlanningBoard() {
           <h1 className="text-xl font-bold text-body">Planning Board</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="flex items-center gap-1" title="Filter board by job source (WO v4.22)">
+            {(['all', 'quote', 'workbook'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSourceFilter(s)}
+                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
+                  sourceFilter === s ? 'bg-primary text-white' : 'border border-line bg-white text-body hover:bg-surface-alt'
+                }`}
+              >
+                {s === 'all' ? 'All' : s === 'quote' ? 'Quote-born' : 'Workbook'}
+              </button>
+            ))}
+          </div>
           <span className="font-semibold">Week {data.kpis.current_week}</span>
           <span className="rounded-md border border-line bg-white px-3 py-1.5">{board.weeks.length} weeks</span>
         </div>
@@ -859,7 +874,7 @@ function LivePlanningBoard() {
             className={`rounded-md transition ${poolHot ? 'ring-2 ring-status-amber' : ''}`}
           >
             <div className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">
-              Unscheduled ({board.pool.length + ackCandidates.length})
+              Unscheduled ({board.pool.filter(matchesSource).length + ackCandidates.length})
             </div>
             {ackCandidates.length > 0 && (
               <div className="mb-3 space-y-2">
@@ -880,7 +895,7 @@ function LivePlanningBoard() {
               </div>
             )}
             <div className="space-y-2">
-              {board.pool.map((job) => (
+              {board.pool.filter(matchesSource).map((job) => (
                 <div
                   key={job.id}
                   draggable={canSchedule}
@@ -894,14 +909,17 @@ function LivePlanningBoard() {
                   <div className="flex-1">
                     <div className="flex flex-wrap items-center justify-between gap-1">
                       <span className="font-mono text-sm font-semibold">#{job.job_number}</span>
-                      <ChassisBadge state={getChassisState(job)} eta={job.chassis_eta} />
+                      <span className="flex items-center gap-1">
+                        <SourceBadge source={job.source} />
+                        <ChassisBadge state={getChassisState(job)} eta={job.chassis_eta} />
+                      </span>
                     </div>
                     <div className="text-xs text-body">{job.customer}</div>
                     {job.body_type && <div className="text-[11px] text-muted">{job.body_type}</div>}
                   </div>
                 </div>
               ))}
-              {board.pool.length === 0 && <div className="text-sm text-muted">All scheduled.</div>}
+              {board.pool.filter(matchesSource).length === 0 && <div className="text-sm text-muted">All scheduled.</div>}
             </div>
             <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
               Drag a card onto a slot →{canUnschedule ? ' · drop a scheduled job here to unschedule' : ''}
@@ -964,13 +982,16 @@ function LivePlanningBoard() {
                               title={cell.job.customer}
                               className={`flex w-full items-center gap-1 rounded border-l-4 border-status-green bg-white px-1.5 py-1 text-left hover:border-primary ${
                                 canSchedule ? 'cursor-grab active:cursor-grabbing' : ''
-                              }`}
+                              } ${matchesSource(cell.job) ? '' : 'opacity-30'}`}
                             >
                               <span className="flex-1">
                                 <span className="font-mono text-xs font-semibold">{cell.job.job_number}</span>
                                 <span className="block truncate text-[11px] text-muted">{cell.job.customer}</span>
                               </span>
-                              <ChassisBadge state={getChassisState(cell.job)} eta={cell.job.chassis_eta} />
+                              <span className="flex items-center gap-1">
+                                <SourceBadge source={cell.job.source} />
+                                <ChassisBadge state={getChassisState(cell.job)} eta={cell.job.chassis_eta} />
+                              </span>
                             </button>
                           ) : null}
                         </td>
@@ -1037,6 +1058,23 @@ function ChassisBadge({ state, eta }: { state: ChassisState; eta: string | null 
       className="whitespace-nowrap rounded bg-status-amber/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-status-amber"
     >
       ETA committed
+    </span>
+  )
+}
+
+// §3.4 (WO v4.22) — source badge: WB = imported from the planning workbook (no
+// originating costing calc), Q = quote-born (accepted costing). Lets planners tell
+// the two job origins apart on the board; pairs with the toolbar source filter.
+function SourceBadge({ source }: { source: string }) {
+  const workbook = source === 'workbook'
+  return (
+    <span
+      title={workbook ? 'Imported from the planning workbook' : 'Quote-born (accepted costing)'}
+      className={`whitespace-nowrap rounded px-1 py-0.5 text-[9px] font-bold uppercase ${
+        workbook ? 'bg-primary/15 text-primary' : 'bg-status-green/15 text-status-green'
+      }`}
+    >
+      {workbook ? 'WB' : 'Q'}
     </span>
   )
 }

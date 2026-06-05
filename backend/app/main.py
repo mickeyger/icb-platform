@@ -63,6 +63,7 @@ from .services import (
 )
 from .routers import customers as _r_customers, users as _r_users
 from .routers import chassis as _r_chassis, materials as _r_materials
+from .routers import chassis_register as _r_chassis_register  # WO v4.22
 from .routers import auth as _r_auth, trailers as _r_trailers
 from .routers import skin_taping as _r_skin_taping, calculator as _r_calculator
 from .routers import health as _r_health, formulas as _r_formulas
@@ -142,6 +143,7 @@ app.include_router(_r_help.router)
 app.include_router(_r_pre_job_card.router)
 app.include_router(_r_pre_job_card.demo_router)
 app.include_router(_r_chassis_catalogue.router)
+app.include_router(_r_chassis_register.router)  # WO v4.22 — chassis register API
 app.include_router(_r_mes_views.router)  # WO v4.7 — /mes/dashboard + /mes/calculator
 app.include_router(_r_production_jobs.router)  # WO v4.14 — production-jobs API
 # WO v4.15 — Materials / Buying / Stores APIs (12 endpoints across 6 routers)

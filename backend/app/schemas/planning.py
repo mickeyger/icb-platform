@@ -15,6 +15,7 @@ class PlanningJobRef(BaseModel):
     id: int
     job_number: Optional[str] = None
     status: Optional[str] = None
+    source: str = "quote"                   # 'quote' | 'workbook' (WO v4.22 source-column fork)
     customer: Optional[str] = None
     body_type: Optional[str] = None
     selling_zar: Optional[float] = None

@@ -31,6 +31,7 @@ export interface PlanningJob {
   body_type: string | null
   selling_zar: number | null
   status: string | null
+  source: string             // 'quote' | 'workbook' (WO v4.22 source-column fork)
   chassis_eta: string | null
   chassis_received_at: string | null
 }
@@ -87,6 +88,7 @@ export interface ApiPlanningJobRef {
   id: number
   job_number: string | null
   status: string | null
+  source: string | null      // 'quote' | 'workbook' (WO v4.22)
   customer: string | null
   body_type: string | null
   selling_zar: number | null
