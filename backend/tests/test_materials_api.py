@@ -185,9 +185,24 @@ def test_material_detail_and_404(api):
     assert api.get("/api/mes-materials/NOPE-404").status_code == 404
 
 
+def test_material_stock_comes_from_oitw(api):
+    # WO v4.23 cross-schema read: stock is sourced from icb_sap.OITW, not icb_mes.stock_positions.
+    # PNL-FLR-100-BG seeds OnHand=4, IsCommited=0, OnOrder=10 -> the GENERATED Available = 14.
+    # The old stock_positions mock had free=4, so free==14 proves the OITW source + generated col.
+    d = api.get("/api/mes-materials/PNL-FLR-100-BG").json()
+    assert d["stock"]["sap_stock"] == 4
+    assert d["stock"]["open_po_qty"] == 10
+    assert d["stock"]["free"] == 14            # Available = OnHand - IsCommited + OnOrder
+    assert d["stock"]["open_po_eta"] is None   # OITW carries no PO ETA
+
+
 def test_materials_low_stock_filter(api):
+    # WO v4.23: stock now comes from icb_sap.OITW, where free == Available
+    # (OnHand - IsCommited + OnOrder). DOR-RR-2000 (0/0/0) -> 0 is low; FRZ-CT-380 (0/0/1)
+    # now nets to 1 because it has an incoming PO, so it is no longer low.
     rows = api.get("/api/mes-materials?low_stock=true").json()
-    assert len(rows) == 2  # DOR-RR-2000 + FRZ-CT-380 (free == 0)
+    assert len(rows) == 1
+    assert rows[0]["sap_code"] == "DOR-RR-2000"
     assert all(m["stock"]["free"] <= 0 for m in rows)
 
 
