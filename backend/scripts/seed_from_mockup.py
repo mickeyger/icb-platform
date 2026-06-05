@@ -38,6 +38,10 @@ from app.models.mes import (  # noqa: E402
     Discrepancy, DemandLine, MesMaterial, PlanningSlot, POSuggestion, ProductionJob,
     ReworkTicket, StockCount, StockPosition, Supplier,
 )
+from app.models.sap import OITM, OITW, OWHS  # noqa: E402
+
+_SAP_WHS_CODE = "HEIDEL"
+_SAP_WHS_NAME = "Heidelberg (JHB main)"
 
 _MES_TABLES = [
     "production_jobs", "work_orders", "tasks", "sign_offs", "photos", "rework_tickets",
@@ -88,11 +92,21 @@ def _setval(db, schema_table):
     ))
 
 
+def _icb_sap_present(db) -> bool:
+    """icb_sap exists only after migration 0008 (WO v4.23). Guard the SAP-mock seed so
+    seeding still works on a DB that hasn't applied 0008 yet."""
+    return db.execute(sa_text(
+        "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'icb_sap'"
+    )).first() is not None
+
+
 def _truncate_mes(db):
     db.execute(sa_text(
         "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
         + " RESTART IDENTITY CASCADE"
     ))
+    if _icb_sap_present(db):   # WO v4.23 — clear the SAP-mock landing zone too (independent of icb_mes)
+        db.execute(sa_text('TRUNCATE icb_sap."OITW", icb_sap."OITM", icb_sap."OWHS" CASCADE'))
     db.commit()
 
 
@@ -302,6 +316,32 @@ def seed(reset: bool = False) -> None:
                 last_refreshed=_dt(s.get("last_refreshed")),
             ))
         counts["stock_positions"] = len(sps)
+
+        # ── 11b. icb_sap (SAP-mock) — mirror the mock stock into OITM/OITW/OWHS (WO v4.23,
+        #         ADR 0013). /api/materials + the cycle-count baseline now read icb_sap.OITW,
+        #         so CI/dev — where the real Inventory ETL can't run — needs SAP stock seeded
+        #         here. The real loader (import_inventory_to_sap_mock.py) replaces these with
+        #         the live ~5485 items. Available is GENERATED (OnHand-IsCommited+OnOrder).
+        if _icb_sap_present(db):
+            db.add(OWHS(WhsCode=_SAP_WHS_CODE, WhsName=_SAP_WHS_NAME, Inactive="N"))
+            db.flush()
+            for m in mats:
+                db.add(OITM(ItemCode=m.get("sap_code"), ItemName=m.get("description"),
+                            InvntryUom="EA", U_LastPurchasePrice=m.get("last_price"), validFor="Y"))
+            db.flush()
+            oitm_codes = {m.get("sap_code") for m in mats}
+            n_oitw = 0
+            for s in sps:
+                if s.get("sap_code") not in oitm_codes:   # OITW.ItemCode FK -> OITM; skip unmatched
+                    continue
+                db.add(OITW(ItemCode=s.get("sap_code"), WhsCode=_SAP_WHS_CODE,
+                            OnHand=s.get("sap_stock") or 0, IsCommited=s.get("allocated") or 0,
+                            OnOrder=s.get("open_po_qty") or 0))
+                n_oitw += 1
+            db.flush()
+            counts["icb_sap OWHS/OITM/OITW"] = f"1 / {len(mats)} / {n_oitw}"
+        else:
+            counts["icb_sap (skipped)"] = "schema absent — apply migration 0008 then re-seed"
 
         # ── 12. suppliers — supplier master (WO v4.15; no icb_costings.suppliers) ─
         sups = materials.get("suppliers", [])

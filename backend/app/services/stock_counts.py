@@ -2,11 +2,12 @@
 from datetime import date, datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import Branch
-from app.models.mes import Discrepancy, StockCount, StockPosition
+from app.models.mes import Discrepancy, StockCount
+from app.models.sap import OITW
 from app.schemas.discrepancies import DiscrepancyListItem, to_discrepancy_item
 from app.schemas.stock_counts import StockCountListItem, to_stock_count_item
 from app.services.errors import InvalidStateError, NotFoundError
@@ -41,12 +42,15 @@ def list_counts(db: Session, *, status: Optional[str] = None, branch_id: Optiona
 
 def record_count(db: Session, *, sap_code: str, bin: Optional[str], physical_count: float,
                  branch_id: Optional[int] = None, user=None) -> StockCountListItem:
-    """Record a cycle count. status = confirmed if physical == SAP-at-count else discrepancy
-    (SAP stock defaults to 0 when no stock position exists, matching the mockup)."""
-    sp = db.execute(
-        select(StockPosition).where(StockPosition.sap_code == sap_code)
-    ).scalar_one_or_none()
-    sap_stock = sp.sap_stock if sp is not None else 0
+    """Record a cycle count. status = confirmed if physical == SAP-at-count else discrepancy.
+
+    The SAP-at-count baseline is the live system on-hand from icb_sap.OITW (WO v4.23/ADR 0013 —
+    the SAP-mock landing zone, replacing icb_mes.stock_positions). Summed across warehouses so a
+    future multi-warehouse load is handled; defaults to 0 when the item has no OITW row."""
+    on_hand = db.execute(
+        select(func.sum(OITW.OnHand)).where(OITW.ItemCode == sap_code)
+    ).scalar()
+    sap_stock = float(on_hand) if on_hand is not None else 0
     status = "confirmed" if physical_count == sap_stock else "discrepancy"
     if branch_id is None:                       # branch_id is NOT NULL (WO v4.16 / 0005)
         branch_id = _default_branch_id(db)

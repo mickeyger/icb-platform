@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import Material as CostingMaterial
-from app.models.mes import MesMaterial, StockCount, StockPosition
+from app.models.mes import MesMaterial, StockCount
+from app.models.sap import OITW
 from app.schemas.materials import (
     MaterialDetail, MaterialListItem, to_material_detail, to_material_item,
 )
@@ -31,11 +32,15 @@ def description_map(db: Session, sap_codes) -> dict:
 
 
 def _materials_select():
-    # icb_mes.mes_materials ⋈ icb_mes.stock_positions ⋈ (LEFT) icb_costings.materials  (§4.5).
+    # icb_mes.mes_materials ⋈ icb_sap.OITW (SAP-mock stock, WO v4.23/ADR 0013)
+    #                       ⋈ (LEFT) icb_costings.materials price (§4.5).
     # CostingMaterial is schema-less (renders bare `materials` -> icb_costings via search_path).
+    # OITW has a composite PK (ItemCode, WhsCode); the mock loads a single warehouse (HEIDEL),
+    # so the join is 1:1 per ItemCode. If multiple warehouses are ever loaded this must
+    # aggregate OnHand/IsCommited/OnOrder by ItemCode first (noted in ADR 0013).
     return (
-        select(MesMaterial, StockPosition, CostingMaterial.price_per_unit)
-        .join(StockPosition, MesMaterial.sap_code == StockPosition.sap_code, isouter=True)
+        select(MesMaterial, OITW, CostingMaterial.price_per_unit)
+        .join(OITW, MesMaterial.sap_code == OITW.ItemCode, isouter=True)
         .join(CostingMaterial, MesMaterial.sap_code == CostingMaterial.sap_code, isouter=True)
     )
 
