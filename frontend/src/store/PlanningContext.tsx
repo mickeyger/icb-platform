@@ -50,6 +50,7 @@ const apiToJob = (j: ApiPlanningJobRef): PlanningJob => ({
   body_type: j.body_type,
   selling_zar: j.selling_zar,
   status: j.status,
+  source: j.source ?? 'quote',
   chassis_eta: j.chassis_eta,
   chassis_received_at: j.chassis_received_at,
 })

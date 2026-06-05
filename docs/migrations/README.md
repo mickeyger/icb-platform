@@ -3,6 +3,20 @@
 Index of one-shot / re-runnable data migrations for the local & UAT `icb` database.
 (Schema migrations live in `backend/alembic/` — this folder is for **data** loads.)
 
+## v4.22 — Real ICB operational sources → icb_mes (Phase 2D-3)
+
+Re-anchors `icb_mes` to the **real Production-Server workbooks**: re-points `demand_lines` to
+`01 - MRP 2026.xlsx` (**390** lines, day-block layout with real job numbers in row 3), and adds
+`live_daily_count` (**312**, from Live Daily Count's 6 category sheets) + `chassis_register` (**321**,
+from Truck Register; 17 hoist cols + full-row `raw_row_json`). Migration **0007** (additive). The
+Planning Board gains a **source badge (WB/Q) + an All/Quote-born/Workbook filter**; chassis read API at
+**`/api/chassis-register`**.
+
+- **Re-run:** `pwsh backend/scripts/import_workbook.ps1 -Backup` (now multi-source)
+- **Load report:** [`v4.22-rescope-load-report.md`](./v4.22-rescope-load-report.md)
+- **SAP codes are disjoint (0% match)** vs `sap_item_codes` — reconciled in **v4.23** (`icb_sap.OITM`
+  + the `demand_lines.sap_code → OITM.ItemCode` FK, NOT VALID).
+
 ## v4.21 — ENTERPRISE PLANNING workbook → icb_mes (Phase 2D-2)
 
 Loads the live operational state from `ENTERPRISE PLANNING - 2026.xlsx` into `icb_mes`

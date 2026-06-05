@@ -61,6 +61,7 @@ def _job_ref(job: ProductionJob, calc, customer) -> PlanningJobRef:
     dims = json.loads(calc.dimensions_json) if calc and calc.dimensions_json else {}
     return PlanningJobRef(
         id=job.id, job_number=job.job_number, status=job.status,
+        source=job.source,                      # WO v4.22 source-column fork
         # carrier fallback for workbook-imported jobs (no calc/customer join), v4.21
         customer=(customer.name if customer is not None else job.customer_name),
         body_type=(dims.get("body_type") or job.description),

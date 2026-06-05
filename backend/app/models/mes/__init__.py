@@ -413,9 +413,75 @@ class SessionBranch(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 17. live_daily_count — Stores physical counts (WO v4.22, §0.2). Loaded from
+#     "02 - Live Daily Count 2026.xlsx"; the 6 category sheets (ALU/STEEL/TIMBER/
+#     EPS/PU/COILS) melted into one row per counted item, tagged with `category`.
+#     NUMERIC columns from the WO §3.1 sketch are Float here, matching every other
+#     icb_mes money/qty column (po_suggestions.last_price, stock_counts.* etc.).
+# ─────────────────────────────────────────────────────────────────────────────
+class LiveDailyCount(Base):
+    __tablename__ = "live_daily_count"
+    __table_args__ = (
+        Index("ix_live_daily_count_sap_code", "sap_code"),
+        Index("ix_live_daily_count_category", "category"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(64), nullable=False)
+    description = Column(String(255))
+    uom = Column(String(16))
+    category = Column(String(32), nullable=False)   # ALU | STEEL | TIMBER | EPS | PU | COILS
+    on_hand = Column(Float)
+    rejected_stock = Column(Float)
+    max_stock = Column(Float)
+    top_up = Column(Float)
+    ordered = Column(Float)
+    price = Column(Float)
+    variance_qty = Column(Float)
+    variance_value = Column(Float)
+    counted_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 18. chassis_register — chassis lifecycle (WO v4.22, §0.3). Loaded from
+#     "Book1 TRUCK REGISTER 2026.xlsx / JOBS & CHASSIS": 17 hoisted columns +
+#     the full 112-col source row preserved in `raw_row_json` (so future fields
+#     don't require a re-import). Linked to production_jobs by `job_number` (soft).
+# ─────────────────────────────────────────────────────────────────────────────
+class ChassisRegister(Base):
+    __tablename__ = "chassis_register"
+    __table_args__ = (
+        Index("ix_chassis_register_job_number", "job_number"),
+        Index("ix_chassis_register_vehicle_id_no", "vehicle_id_no"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    job_number = Column(String(32))
+    customer_name = Column(String(255))
+    telephone = Column(String(64))
+    contact_person = Column(String(255))
+    vehicle_id_no = Column(String(64))     # VIN
+    model = Column(String(64))
+    make = Column(String(64))
+    description = Column(String(255))       # "Existing Chassis", "Freezer Body", ...
+    submit_status = Column(String(64))      # "Documents Done", "CANCELLED", ...
+    date_received_1 = Column(Date)
+    vcl_1 = Column(String(64))
+    date_left_1 = Column(Date)
+    dcl_1 = Column(String(64))
+    date_received_2 = Column(Date)
+    vcl_2 = Column(String(64))
+    date_left_2 = Column(Date)
+    dcl_2 = Column(String(64))
+    raw_row_json = Column(JSONB)            # full 112-col source row (future-proofing)
+    imported_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
     "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
+    "LiveDailyCount", "ChassisRegister",
     "CROSS_SCHEMA_FKS",
 ]
