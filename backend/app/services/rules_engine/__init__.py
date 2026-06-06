@@ -5,6 +5,6 @@ evaluated by an AST-safe evaluator, resolved to SAP codes via icb_mes.bom_rule_l
 priced via icb_mes.material_price_overrides → icb_sap.OITM. The spike's geometry.py stays the
 parity oracle (tests/test_v4_25_rules_engine_parity.py).
 """
-from .evaluator import EvaluationError, evaluate
+from .evaluator import EvaluationError, evaluate, validate_expression
 
-__all__ = ["evaluate", "EvaluationError"]
+__all__ = ["evaluate", "validate_expression", "EvaluationError"]

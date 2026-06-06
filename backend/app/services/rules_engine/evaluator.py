@@ -120,6 +120,17 @@ def _eval(node: ast.AST, ctx: Mapping):
     raise EvaluationError(f"disallowed expression construct: {type(node).__name__}")
 
 
+def validate_expression(expression: str) -> None:
+    """Parse + whitelist-check a formula WITHOUT executing it (WO v4.26 §0.7). Raises
+    EvaluationError on a syntax error or any disallowed construct. Used by admin create/update
+    + the POST /api/admin/bom-rules/validate-formula endpoint."""
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as e:
+        raise EvaluationError(f"invalid formula syntax: {e}") from e
+    _validate(tree)
+
+
 def evaluate(expression: str, context: Mapping) -> float:
     """Evaluate a rule expression against a flat spec context. Raises EvaluationError on
     any non-whitelisted construct, unknown variable, or runtime error (e.g. div-by-zero)."""

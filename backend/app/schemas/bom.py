@@ -6,7 +6,7 @@ parity-oracle reference; this is what `POST /api/bom/generate` (rules-engine-bac
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,7 +19,8 @@ class PanelSpec(BaseModel):
 
 class JobSpec(BaseModel):
     job: Optional[int] = None
-    body_type: Literal["Freezer"]            # v4.25 scope (§0.7)
+    body_type: str                           # WO v4.26: any of the 8 body types (Freezer rules exist;
+    #                                          other body types have no geometry rules until v4.27 → empty BOM)
     length_mm: int
     width_mm: int
     height_mm: int
@@ -34,6 +35,35 @@ class JobSpec(BaseModel):
     reveal_rear_mm: int = 93
     reveal_partition_mm: int = 56
     panel_length_mm: int = 2440              # 'New Prep'!AO8 resolution (spike boundary)
+
+
+# ── early-binding raw entry shapes (WO v4.26) — dropdown labels, resolved by the DDM resolver ──
+class RawPanelSpec(BaseModel):
+    """Dropdown selections (labels) for one panel; resolved to a PanelSpec by the DDM resolver."""
+    material: Optional[str] = None           # {panel}_material dropdown label
+    thickness: Optional[str] = None          # {panel}_material_thickness dropdown label
+    skin: Optional[str] = None               # {panel}_reinforcement / _plywood dropdown label
+
+
+class JobSpecRaw(BaseModel):
+    """Early-binding entry shape: dropdown labels + dimensions. The DDM resolver turns this into a
+    resolved JobSpec (spec values + combination-bound SAP codes per panel) before the engine runs."""
+    job: Optional[int] = None
+    body_type: str
+    length_mm: int
+    width_mm: int
+    height_mm: int
+    roof: RawPanelSpec = RawPanelSpec()
+    sides: RawPanelSpec = RawPanelSpec()
+    floor: RawPanelSpec = RawPanelSpec()
+    front: RawPanelSpec = RawPanelSpec()
+    rear: RawPanelSpec = RawPanelSpec()
+    partition: RawPanelSpec = RawPanelSpec()
+    reveal_top_mm: int = 81
+    reveal_side_mm: int = 65
+    reveal_rear_mm: int = 93
+    reveal_partition_mm: int = 56
+    panel_length_mm: int = 2440
 
 
 class BomLine(BaseModel):
@@ -79,6 +109,25 @@ class BomRuleLookupOut(BaseModel):
     lookup_key: str
     lookup_value: str
     notes: Optional[str] = None
+    created_by: Optional[str] = None
+    updated_by: Optional[str] = None
+
+
+class BomSpecOptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    spec_field_type: str
+    body_type: str
+    section: str
+    option_label: str
+    spec_value: str
+    sap_code: Optional[str] = None
+    is_default: bool
+    priority: int
+    active: bool
+    notes: Optional[str] = None
+    created_by: Optional[str] = None
+    updated_by: Optional[str] = None
 
 
 class MaterialPriceOverrideOut(BaseModel):

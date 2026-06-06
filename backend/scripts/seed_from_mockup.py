@@ -108,6 +108,14 @@ def _bom_rules_present(db) -> bool:
     )).first() is not None
 
 
+def _bom_spec_options_present(db) -> bool:
+    """icb_mes.bom_spec_options exists only after migration 0010 (WO v4.26)."""
+    return db.execute(sa_text(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'icb_mes' AND table_name = 'bom_spec_options'"
+    )).first() is not None
+
+
 def _truncate_mes(db):
     db.execute(sa_text(
         "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
@@ -359,6 +367,15 @@ def seed(reset: bool = False) -> None:
             counts["bom_rules / lookups"] = f"{rc['bom_rules']} / {rc['bom_rule_lookups']}"
         else:
             counts["bom_rules (skipped)"] = "tables absent — apply migration 0009 then re-seed"
+
+        # ── 11d. bom_spec_options (WO v4.26) — DDM dropdown catalogue / early-binding, so CI/dev
+        #         have spec options for the DDM resolver + per-body-type parity tests.
+        if _bom_spec_options_present(db):
+            from scripts.seed_v4_26_spec_options import seed_spec_options
+            so = seed_spec_options(db)
+            counts["bom_spec_options"] = so["total"]
+        else:
+            counts["bom_spec_options (skipped)"] = "table absent — apply migration 0010 then re-seed"
 
         # ── 12. suppliers — supplier master (WO v4.15; no icb_costings.suppliers) ─
         sups = materials.get("suppliers", [])

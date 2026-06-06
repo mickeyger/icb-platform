@@ -1,75 +1,36 @@
-"""WO v4.25 §3.5/§3.7 — production BOM generate + read-only admin inspection.
+"""WO v4.25/§0.8 v4.26 — BOM generation endpoint (rules-engine-backed).
 
-Replaces the v4.24 spike router (`app/spikes/v4_24/router.py`) — same `POST /api/bom/generate`
-contract (JobSpec → BomOutput), now rules-engine-backed (icb_mes.bom_rules + lookups +
-material_price_overrides → icb_sap.OITM). Plus read-only admin GETs for inspecting the
-seeded rules / lookups / overrides (full CRUD deferred to v4.26). icb_sap stays read-only
-(ADR 0013); endpoint is stateless (no persistence).
+`POST /api/bom/generate` accepts EITHER a resolved `JobSpec` (v4.25 shape, default) OR — when the
+body carries `"mode": "raw"` — a `JobSpecRaw` of dropdown labels, which the DDM resolver turns into
+a resolved JobSpec (early-binding) before the rules engine runs. Both reach the same engine.
+
+Admin CRUD for the master-data tables lives under app/routers/admin/* (WO v4.26).
 """
-from typing import List, Optional
-
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..database import User, get_db
-from ..deps import require_admin, require_user
-from ..models.mes import BomRule, BomRuleLookup, MaterialPriceOverride
-from ..schemas.bom import (
-    BomOutput, BomRuleLookupOut, BomRuleOut, JobSpec, MaterialPriceOverrideOut,
-)
+from ..deps import require_user
+from ..schemas.bom import BomOutput, JobSpec, JobSpecRaw
+from ..services.rules_engine.ddm_resolver import SpecResolutionError, resolve_jobspec_raw
 from ..services.rules_engine.engine import RulesEngine
 
 router = APIRouter(tags=["bom"])
 
 
 @router.post("/api/bom/generate", response_model=BomOutput)
-def generate_bom(spec: JobSpec, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """Generate the Vacuum-Materials panel BOM for a resolved Freezer job spec (rules engine)."""
+async def generate_bom(request: Request, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Generate the Vacuum-Materials panel BOM. Send a resolved JobSpec, or `{"mode":"raw", ...}`
+    with dropdown labels for the early-binding (DDM-resolved) path."""
+    body = await request.json()
+    try:
+        if isinstance(body, dict) and body.get("mode") == "raw":
+            spec = resolve_jobspec_raw(db, JobSpecRaw.model_validate(body))
+        else:
+            spec = JobSpec.model_validate(body)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors())
+    except SpecResolutionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return RulesEngine(db).generate_bom(spec)
-
-
-@router.get("/api/admin/bom-rules", response_model=List[BomRuleOut])
-def list_bom_rules(
-    body_type: Optional[str] = Query(None),
-    section: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_admin),
-):
-    stmt = select(BomRule)
-    if body_type:
-        stmt = stmt.where(BomRule.body_type == body_type)
-    if section:
-        stmt = stmt.where(BomRule.section == section)
-    stmt = stmt.order_by(BomRule.body_type, BomRule.section, BomRule.priority, BomRule.id)
-    return db.execute(stmt).scalars().all()
-
-
-@router.get("/api/admin/bom-rule-lookups", response_model=List[BomRuleLookupOut])
-def list_bom_rule_lookups(
-    body_type: Optional[str] = Query(None),
-    section: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_admin),
-):
-    stmt = select(BomRuleLookup)
-    if body_type:
-        stmt = stmt.where(BomRuleLookup.body_type == body_type)
-    if section:
-        stmt = stmt.where(BomRuleLookup.section == section)
-    stmt = stmt.order_by(BomRuleLookup.body_type, BomRuleLookup.section,
-                         BomRuleLookup.lookup_type, BomRuleLookup.lookup_key)
-    return db.execute(stmt).scalars().all()
-
-
-@router.get("/api/admin/material-price-overrides", response_model=List[MaterialPriceOverrideOut])
-def list_material_price_overrides(
-    sap_code: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-    user: User = Depends(require_admin),
-):
-    stmt = select(MaterialPriceOverride)
-    if sap_code:
-        stmt = stmt.where(MaterialPriceOverride.sap_code == sap_code)
-    stmt = stmt.order_by(MaterialPriceOverride.sap_code, MaterialPriceOverride.valid_from.desc())
-    return db.execute(stmt).scalars().all()

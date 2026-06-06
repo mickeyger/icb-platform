@@ -490,6 +490,8 @@ class BomRule(Base):
     __tablename__ = "bom_rules"
     __table_args__ = (
         Index("ix_bom_rules_body_section", "body_type", "section", "panel"),
+        UniqueConstraint("body_type", "section", "panel", "output_field",
+                         name="uq_bom_rules_body_section_panel_field"),  # WO v4.26 §0.5 (dup-seed guard)
         {"schema": "icb_mes"},
     )
     id = Column(Integer, primary_key=True)
@@ -529,6 +531,8 @@ class BomRuleLookup(Base):
     notes = Column(Text)                                  # human description
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))                      # WO v4.26 — admin CRUD audit (§0.4)
+    updated_by = Column(String(128))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -556,11 +560,46 @@ class MaterialPriceOverride(Base):
     updated_by = Column(String(128))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 22. bom_spec_options — DDM dropdown catalogue / early-binding data model (WO v4.26 §3.1).
+#     One row per (spec_field_type × body_type × spec_value): the value a formula consumes +
+#     the dropdown label Nadie sees. Most rows are body_type='*' (the DDM options are
+#     field-scoped, largely body-agnostic); the resolver tries the exact body_type then '*'.
+#     sap_code is usually NULL — the panel's SAP code early-binds at the (material × thickness)
+#     COMBINATION via bom_rule_lookups, NOT per single dropdown (ADR 0014); populated only for
+#     genuinely 1:1-coded options. Validated against icb_sap.OITM at the app layer (no FK).
+# ─────────────────────────────────────────────────────────────────────────────
+class BomSpecOption(Base):
+    __tablename__ = "bom_spec_options"
+    __table_args__ = (
+        Index("ix_bom_spec_options_field_body", "spec_field_type", "body_type", "active"),
+        UniqueConstraint("spec_field_type", "body_type", "section", "spec_value",
+                         name="uq_bom_spec_options_field_body_value"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    spec_field_type = Column(String(64), nullable=False)   # 'roof_material', 'roof_material_thickness'
+    body_type = Column(String(32), nullable=False)         # 'Freezer' … or '*' for cross-body
+    section = Column(String(64), nullable=False, default="Vacuum Materials",
+                     server_default="Vacuum Materials")
+    option_label = Column(String(255), nullable=False)     # 'EPS 24DV' shown in the dropdown
+    spec_value = Column(String(255), nullable=False)       # the value formulas/lookups consume
+    sap_code = Column(String(64))                          # usually NULL (combination-bound; ADR 0014)
+    is_default = Column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
+    priority = Column(Integer, nullable=False, default=100, server_default="100")
+    active = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
     "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
     "LiveDailyCount", "ChassisRegister",
-    "BomRule", "BomRuleLookup", "MaterialPriceOverride",
+    "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",
     "CROSS_SCHEMA_FKS",
 ]

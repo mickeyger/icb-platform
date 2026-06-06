@@ -13,7 +13,7 @@ import { LiveCalculator } from './screens/Costings/LiveCalculator'
 import { MaterialsDashboard } from './screens/Materials/MaterialsDashboard'
 import { POSuggestionQueue } from './screens/Materials/POSuggestionQueue'
 import { StoresReconciliation } from './screens/Materials/StoresReconciliation'
-import { AdminBomRules } from './screens/Admin/AdminBomRules'
+import { AdminModule } from './screens/Admin/AdminModule'
 
 export default function App() {
   return (
@@ -39,8 +39,9 @@ export default function App() {
       <Route path="/production" element={<Layout><ProductionDashboard /></Layout>} />
       <Route path="/management" element={<Layout><ManagementDashboard /></Layout>} />
       <Route path="/qc" element={<Layout><QcFinalCheck /></Layout>} />
-      {/* WO v4.25 — read-only BOM rules-engine inspection (admin-gated) */}
-      <Route path="/admin/rules" element={<Layout><AdminBomRules /></Layout>} />
+      {/* WO v4.25 read-only inspector → WO v4.26 full admin CRUD module (admin-gated) */}
+      <Route path="/admin" element={<Navigate to="/admin/spec-options" replace />} />
+      <Route path="/admin/:resource" element={<Layout><AdminModule /></Layout>} />
       <Route path="*" element={<Navigate to="/production" replace />} />
     </Routes>
   )

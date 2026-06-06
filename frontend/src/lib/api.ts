@@ -69,6 +69,13 @@ export const apiPost = <T>(path: string, body?: unknown): Promise<T> =>
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 
+export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
+  request<T>(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+
 export const apiDelete = <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' })
 
 /** Mint a costing-app session for the demo user so the MES SPA inherits it.
