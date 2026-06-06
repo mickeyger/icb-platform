@@ -111,6 +111,14 @@ class ProductionJob(Base):
     # ── production scheduling ──
     planned_start_date = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
+
+    # ── WO v4.27 (0011): BOM persistence link ──
+    # current_bom_id -> icb_mes.generated_boms.id; the FK is added in migration 0011
+    # (column-on-model / FK-in-migration) to avoid the production_jobs <-> generated_boms
+    # create_all cycle. bom_status: pending | complete | incomplete | manual.
+    current_bom_id = Column(Integer, nullable=True)
+    bom_status = Column(String(16), nullable=False, default="pending", server_default="pending")
+
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -595,11 +603,68 @@ class BomSpecOption(Base):
     updated_by = Column(String(128))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 23. generated_boms — immutable, versioned BOM snapshot per production job
+#     (WO v4.27 §0.3/§0.8). One row per BOM-on-accept; each re-accept adds a new
+#     version. `current` flags the active version — the partial-unique index enforces
+#     at most one current=true per job. production_jobs.current_bom_id points back to it
+#     (that FK is created in 0011, not here, to avoid a create_all cycle).
+# ─────────────────────────────────────────────────────────────────────────────
+class GeneratedBom(Base):
+    __tablename__ = "generated_boms"
+    __table_args__ = (
+        UniqueConstraint("production_job_id", "version", name="uq_generated_boms_job_version"),
+        # at most one current BOM per job (partial unique)
+        Index("ux_generated_boms_current", "production_job_id",
+              unique=True, postgresql_where=sa_text('"current"')),
+        Index("ix_generated_boms_production_job_id", "production_job_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    bom_status = Column(String(16), nullable=False, default="complete", server_default="complete")
+    # complete | incomplete | manual
+    grand_total = Column(Numeric(18, 4))
+    current = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    metadata_json = Column(JSONB)
+    generated_at = Column(DateTime(timezone=True), default=_utcnow, server_default=sa_text("now()"))
+    generated_by = Column(String(128))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 24. bom_lines — the line items of a generated_boms snapshot (WO v4.27 §0.8).
+# ─────────────────────────────────────────────────────────────────────────────
+class BomLine(Base):
+    __tablename__ = "bom_lines"
+    __table_args__ = (
+        Index("ix_bom_lines_generated_bom_id", "generated_bom_id"),
+        Index("ix_bom_lines_sap_code", "sap_code"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    generated_bom_id = Column(
+        Integer, ForeignKey("icb_mes.generated_boms.id", ondelete="CASCADE"), nullable=False
+    )
+    sap_code = Column(String(64), nullable=False)
+    description = Column(String(255))
+    qty = Column(Numeric(18, 6), nullable=False)
+    unit_price = Column(Numeric(18, 4))
+    line_total = Column(Numeric(18, 4))
+    section = Column(String(64))
+    source = Column(String(16), nullable=False, default="rule", server_default="rule")  # rule | manual
+    price_source = Column(String(16))                     # 'override' | 'sap' (v4.25 pricing)
+    line_order = Column(Integer, nullable=False, default=0, server_default="0")
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
     "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
     "LiveDailyCount", "ChassisRegister",
     "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",
+    "GeneratedBom", "BomLine",
     "CROSS_SCHEMA_FKS",
 ]
