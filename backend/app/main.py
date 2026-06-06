@@ -64,6 +64,7 @@ from .services import (
 from .routers import customers as _r_customers, users as _r_users
 from .routers import chassis as _r_chassis, materials as _r_materials
 from .routers import chassis_register as _r_chassis_register  # WO v4.22
+from .routers import chassis_records as _r_chassis_records  # WO v4.28 — chassis lifecycle
 from .routers import bom_generate as _r_bom_generate  # WO v4.25 (POST /api/bom/generate, rules engine)
 from .routers.admin import (  # WO v4.26 — admin CRUD for the 4 master-data tables
     bom_rules as _r_admin_rules, bom_rule_lookups as _r_admin_lookups,
@@ -162,6 +163,7 @@ app.include_router(_r_pre_job_card.router)
 app.include_router(_r_pre_job_card.demo_router)
 app.include_router(_r_chassis_catalogue.router)
 app.include_router(_r_chassis_register.router)  # WO v4.22 — chassis register API
+app.include_router(_r_chassis_records.router)  # WO v4.28 — chassis lifecycle API
 app.include_router(_r_mes_views.router)  # WO v4.7 — /mes/dashboard + /mes/calculator
 app.include_router(_r_production_jobs.router)  # WO v4.14 — production-jobs API
 # WO v4.15 — Materials / Buying / Stores APIs (12 endpoints across 6 routers)
