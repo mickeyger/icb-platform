@@ -3,8 +3,8 @@
     WO v4.23 — re-runnable icb_sap (SAP-mock) loader.
 
 .DESCRIPTION
-    Ensures migrations are at head (0008 creates icb_sap), then runs the one-shot
-    TRUNCATE+RELOAD loader: OWHS + OITM + OITW from 04 - Inventory 2026.xlsx, enriched
+    Ensures migrations are at head, then runs the FK-safe UPSERT + soft-delete loader
+    (WO v4.27 §3.6; replaces the v4.23 TRUNCATE+RELOAD): OWHS + OITM + OITW from 04 - Inventory 2026.xlsx, enriched
     from PRICE 2017 MARCH (08 April 2026).xlsx / Last P.P. Writes ONLY icb_sap; the Cost
     Calculator / icb_costings / faje are untouched.
 
@@ -33,7 +33,7 @@ $repo    = Split-Path -Parent $backend                              # backend\..
 $py      = Join-Path $backend '.venv\Scripts\python.exe'
 
 Write-Host "== WO v4.23 icb_sap (SAP-mock) loader -> $PgUser@$PgHost/$PgDb ==" -ForegroundColor Green
-Write-Host "   (TRUNCATEs icb_sap, reloads OITM/OITW/OWHS from Inventory + PRICE)`n"
+Write-Host "   (UPSERT + soft-delete OITM/OITW/OWHS from Inventory + PRICE; FK-safe, no TRUNCATE)`n"
 
 if ($Backup) {
     if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Force $BackupDir | Out-Null }
