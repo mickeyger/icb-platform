@@ -73,8 +73,9 @@ def test_freezer_raw_resolves_to_full_bom(seeded):
 
 @pytest.mark.parametrize("body_type", ["Chiller", "Dryfreight", "Insulated Trailer"])
 def test_per_body_type_resolution_structural(seeded, body_type):
-    """Non-Freezer: DDM resolution is structurally correct (dropdowns→specs). Geometry rules are
-    Freezer-only until v4.27, so generate_bom yields 0 lines for these — a documented distinction."""
+    """Non-Freezer: DDM resolution is structurally correct (dropdowns→specs). WO v4.27 ported the
+    per-body-type Vacuum geometry, so these bodies now generate a non-empty BOM (the detailed
+    per-body parity lives in test_v4_27_per_body_parity)."""
     from app.schemas.bom import JobSpecRaw
     from app.services.rules_engine.ddm_resolver import resolve_jobspec_raw
     from app.services.rules_engine.engine import RulesEngine
@@ -83,7 +84,7 @@ def test_per_body_type_resolution_structural(seeded, body_type):
         spec = resolve_jobspec_raw(db, JobSpecRaw.model_validate(raw))
         assert spec.roof.material == "EPS 24DV" and spec.sides.thickness_mm == 56  # resolved structurally
         out = RulesEngine(db).generate_bom(spec)
-    assert out.lines == [] or len(out.lines) == 0  # no Freezer-specific rules for this body type yet
+    assert len(out.lines) > 0  # WO v4.27 — geometry now exists for these body types
 
 
 # ── §3.9 admin CRUD + validation + role-gating (auth injected) ──

@@ -1,7 +1,9 @@
 """WO v4.23 — load the icb_sap (SAP-mock) schema from the Inventory + PRICE workbooks.
 
-One-shot TRUNCATE + RELOAD (per the Q-Ph2D-03 lock). Writes ONLY icb_sap (read-only from
-app code — ADR 0013). Sources:
+UPSERT + soft-delete (WO v4.27 §3.6, replacing the v4.23 one-shot TRUNCATE+RELOAD): items
+absent from the import are flagged validFor='N', returning items UPSERTed back to 'Y' — nothing
+is physically deleted, so the demand_lines->OITM FK (landed in 0011) can never be cascade-
+violated (ADR 0013 forward pattern). Writes ONLY icb_sap (read-only from app code). Sources:
   * 04 - Inventory 2026.xlsx / Sheet1 — primary: OWHS (Whse row 2), OITM + OITW (rows 3+).
     Header row 1: Item No. | Item Description | Stock UoM | In Stock | Committed | Ordered |
     Available | Item Price | Total | Confirmed.
@@ -27,6 +29,7 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from sqlalchemy import text as sa_text  # noqa: E402
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: E402
 
 from app.database import SessionLocal  # noqa: E402
 from app.models.sap import OITM, OITW, OWHS  # noqa: E402
@@ -64,6 +67,33 @@ def _grp_cod(code):
     return _GRP_MAP.get((m.group()[:3].upper() if m else ""), 99)
 
 
+def _upsert(db, model, rows, index_elements, update_cols):
+    """Chunked INSERT ... ON CONFLICT (index_elements) DO UPDATE (Postgres UPSERT)."""
+    for i in range(0, len(rows), 1000):
+        chunk = rows[i:i + 1000]
+        stmt = pg_insert(model).values(chunk)
+        db.execute(stmt.on_conflict_do_update(
+            index_elements=index_elements,
+            set_={c: getattr(stmt.excluded, c) for c in update_cols},
+        ))
+
+
+def _soft_delete_absent_oitm(db, incoming_codes) -> int:
+    """Flag OITM rows absent from `incoming_codes` as validFor='N' (NO physical delete → the
+    demand_lines->OITM FK is never violated). Temp-table anti-join: fast at ~5.5k codes, and
+    correct for an empty incoming set (unlike a literal `NOT IN ()`)."""
+    db.execute(sa_text("DROP TABLE IF EXISTS _incoming_codes"))
+    db.execute(sa_text("CREATE TEMP TABLE _incoming_codes (code varchar PRIMARY KEY) ON COMMIT DROP"))
+    if incoming_codes:
+        db.execute(sa_text("INSERT INTO _incoming_codes (code) VALUES (:c) ON CONFLICT DO NOTHING"),
+                   [{"c": c} for c in incoming_codes])
+    res = db.execute(sa_text(
+        'UPDATE icb_sap."OITM" SET "validFor" = \'N\' '
+        'WHERE "ItemCode" NOT IN (SELECT code FROM _incoming_codes) AND "validFor" <> \'N\''))
+    db.execute(sa_text("DROP TABLE IF EXISTS _incoming_codes"))
+    return res.rowcount or 0
+
+
 def _load_inventory(db, inventory, report):
     wb = openpyxl.load_workbook(inventory, read_only=True, data_only=True)
     ws = wb[wb.sheetnames[0]]
@@ -88,14 +118,20 @@ def _load_inventory(db, inventory, report):
         if on_hand > 0:
             onhand_pos += 1
     wb.close()
-    db.bulk_insert_mappings(OITM, oitm)
+    # WO v4.27 §3.6 — UPSERT + soft-delete (NOT TRUNCATE+RELOAD): soft-delete first (absent ->
+    # validFor='N'), then UPSERT returning/new items back to 'Y'. No physical delete → the
+    # demand_lines->OITM FK can never be cascade-violated (ADR 0013).
+    soft_deleted = _soft_delete_absent_oitm(db, [o["ItemCode"] for o in oitm])
+    _upsert(db, OITM, oitm, ["ItemCode"],
+            ["ItemName", "InvntryUom", "ItmsGrpCod", "U_LastPurchasePrice", "validFor"])
     db.flush()
-    db.bulk_insert_mappings(OITW, oitw)   # "Available" omitted -> PG GENERATED column fills it
+    _upsert(db, OITW, oitw, ["ItemCode", "WhsCode"],
+            ["OnHand", "IsCommited", "OnOrder", "AvgPrice"])   # "Available" is GENERATED
     db.flush()
-    report["OWHS"] = 1
     report["OITM"] = len(oitm)
     report["OITW"] = len(oitw)
     report["OITW_onhand_positive"] = onhand_pos
+    report["OITM_soft_deleted"] = soft_deleted
 
 
 def _enrich_from_price(db, price, report):
@@ -166,9 +202,13 @@ def run(inventory: Path, price: Path) -> dict:
     report = {"inventory": str(inventory), "price": str(price)}
     db = SessionLocal()
     try:
-        db.execute(sa_text('TRUNCATE icb_sap."OITW", icb_sap."OITM", icb_sap."OWHS" CASCADE'))
-        db.add(OWHS(WhsCode=WHS_CODE, WhsName=WHS_NAME, Inactive="N"))
+        # WO v4.27 §3.6 — UPSERT the warehouse (no TRUNCATE; the demand_lines->OITM FK is live).
+        ow = pg_insert(OWHS).values(WhsCode=WHS_CODE, WhsName=WHS_NAME, Inactive="N")
+        db.execute(ow.on_conflict_do_update(
+            index_elements=["WhsCode"],
+            set_={"WhsName": ow.excluded.WhsName, "Inactive": ow.excluded.Inactive}))
         db.flush()
+        report["OWHS"] = 1
         _load_inventory(db, inventory, report)
         _enrich_from_price(db, price, report)
         # Orphan reconciliation: demand_lines.sap_code not present in OITM (for the FK / v4.23 report).

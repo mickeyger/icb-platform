@@ -46,6 +46,11 @@ target_metadata = Base.metadata
 # migrations rather than declared on the schema-less costing models.
 _RELEVANT_SCHEMAS = {None, "icb_costings", "icb_mes"}
 
+# Cross-schema FKs declared in migrations, not on models. The icb_mes -> icb_sap FK
+# (WO v4.27) can't be excluded by the schema-compare below because icb_sap is NOT a
+# reflected schema (so obj.referred_table won't resolve), hence the explicit name guard.
+_CROSS_SCHEMA_FK_NAMES = {"fk_demand_lines_sap_code"}
+
 
 def _include_name(name, type_, parent_names):
     if type_ == "schema":
@@ -55,6 +60,8 @@ def _include_name(name, type_, parent_names):
 
 def _include_object(obj, name, type_, reflected, compare_to):
     if type_ == "foreign_key_constraint":
+        if name in _CROSS_SCHEMA_FK_NAMES:
+            return False
         try:
             if obj.table.schema != obj.referred_table.schema:
                 return False

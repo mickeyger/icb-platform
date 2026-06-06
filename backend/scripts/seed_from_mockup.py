@@ -365,6 +365,10 @@ def seed(reset: bool = False) -> None:
             from scripts.seed_v4_25_rules import seed_rules
             rc = seed_rules(db)
             counts["bom_rules / lookups"] = f"{rc['bom_rules']} / {rc['bom_rule_lookups']}"
+            # WO v4.27 §3.2 — per-body-type Vacuum geometry for the 7 non-Freezer bodies.
+            from scripts.seed_v4_27_body_geometry import seed_body_geometry
+            bg = seed_body_geometry(db)
+            counts["body_geometry (v4.27)"] = f"{sum(bg.values())} rules / {len(bg)} body types"
         else:
             counts["bom_rules (skipped)"] = "tables absent — apply migration 0009 then re-seed"
 
