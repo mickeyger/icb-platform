@@ -119,6 +119,11 @@ class ProductionJob(Base):
     current_bom_id = Column(Integer, nullable=True)
     bom_status = Column(String(16), nullable=False, default="pending", server_default="pending")
 
+    # ── WO v4.28 (0012): chassis link ──
+    # chassis_record_id -> icb_mes.chassis_records.id; FK added in migration 0012 (column-on-model /
+    # FK-in-migration; nullable, ON DELETE RESTRICT). The chassis_data_json blob stays for back-compat.
+    chassis_record_id = Column(Integer, nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
@@ -659,6 +664,89 @@ class BomLine(Base):
     line_order = Column(Integer, nullable=False, default=0, server_default="0")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 25. chassis_records — VIN-anchored chassis lifecycle record (WO v4.28 §0.2).
+#     Relational successor to the v4.22 chassis_register workbook table (which stays for
+#     rollback). One row per VIN; cycle detail lives in chassis_lifecycle_events.
+# ─────────────────────────────────────────────────────────────────────────────
+class ChassisRecord(Base):
+    __tablename__ = "chassis_records"
+    __table_args__ = (
+        UniqueConstraint("vin", name="uq_chassis_records_vin"),
+        Index("ix_chassis_records_job_number", "job_number"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    vin = Column(String(32), nullable=False)               # vehicle_id_no (VIN anchor; UNIQUE)
+    job_number = Column(String(32))                        # soft link (text; no FK — register provenance)
+    customer_name = Column(String(128))
+    contact_person = Column(String(128))
+    telephone = Column(String(64))
+    make = Column(String(64))
+    model = Column(String(64))
+    description = Column(String(255))
+    status = Column(String(24), nullable=False, default="received", server_default="received")
+    # received | in_workshop | dispatched | returned (denormalised from the latest event)
+    submit_status = Column(String(32))                    # legacy register value
+    source = Column(String(16), nullable=False, default="register", server_default="register")  # register | vcl_form
+    source_register_id = Column(Integer)                   # originating chassis_register.id (traceability)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 26. chassis_lifecycle_events — per-cycle book-in (VCL) / dispatch (DCL) events (WO v4.28 §0.2).
+#     Cycle N has up to two events: VCL (paired with date_received_N) + DCL (date_left_N).
+#     Multi-cycle chassis (re-visits) carry cycle_number 2+.
+# ─────────────────────────────────────────────────────────────────────────────
+class ChassisLifecycleEvent(Base):
+    __tablename__ = "chassis_lifecycle_events"
+    __table_args__ = (
+        UniqueConstraint("chassis_record_id", "cycle_number", "event_type",
+                         name="uq_chassis_events_record_cycle_type"),
+        Index("ix_chassis_events_record", "chassis_record_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    chassis_record_id = Column(
+        Integer, ForeignKey("icb_mes.chassis_records.id", ondelete="CASCADE"), nullable=False
+    )
+    cycle_number = Column(Integer, nullable=False, default=1, server_default="1")
+    event_type = Column(String(8), nullable=False)         # 'VCL' (book-in) | 'DCL' (dispatch)
+    event_date = Column(Date)                              # date_received_N (VCL) / date_left_N (DCL)
+    legacy_reference = Column(String(128))                 # vcl_N / dcl_N free-text carried from the register
+    checklist_json = Column(JSONB)                         # structured checklist from the new screens (NULL for legacy)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    created_by = Column(String(128))                       # captured-by (workshop role)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 27. chassis_photos — photo evidence attached to a VCL/DCL event (WO v4.28 §0.2).
+#     Local-filesystem storage now; TODO(§5.3/v4.31): swap to a file-store abstraction.
+# ─────────────────────────────────────────────────────────────────────────────
+class ChassisPhoto(Base):
+    __tablename__ = "chassis_photos"
+    __table_args__ = (
+        Index("ix_chassis_photos_event", "lifecycle_event_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    lifecycle_event_id = Column(
+        Integer, ForeignKey("icb_mes.chassis_lifecycle_events.id", ondelete="CASCADE"), nullable=False
+    )
+    file_path = Column(String(512), nullable=False)        # relative: chassis/{record}/{cycle}/{type}/{id}-{name}
+    original_filename = Column(String(255))
+    content_type = Column(String(64))
+    size_bytes = Column(Integer)
+    caption = Column(String(255))
+    uploaded_at = Column(DateTime(timezone=True), default=_utcnow)
+    uploaded_by = Column(String(128))
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
@@ -666,5 +754,6 @@ __all__ = [
     "LiveDailyCount", "ChassisRegister",
     "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",
     "GeneratedBom", "BomLine",
+    "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
     "CROSS_SCHEMA_FKS",
 ]

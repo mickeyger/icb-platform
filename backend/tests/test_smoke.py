@@ -56,7 +56,8 @@ def test_mes_schema_tables():
     # 12 (WO v4.13) + 3 (v4.15: mes_materials/stock_positions/suppliers) + 1 (v4.16:
     # session_branches) + 2 (v4.22: live_daily_count/chassis_register)
     # + 3 (v4.25: bom_rules/bom_rule_lookups/material_price_overrides)
-    # + 1 (v4.26: bom_spec_options) + 2 (v4.27: generated_boms/bom_lines) = 24.
+    # + 1 (v4.26: bom_spec_options) + 2 (v4.27: generated_boms/bom_lines)
+    # + 3 (v4.28: chassis_records/chassis_lifecycle_events/chassis_photos) = 27.
     from sqlalchemy import text
     from app.database import SessionLocal
     with SessionLocal() as db:
@@ -78,12 +79,16 @@ def test_mes_schema_tables():
         v427_tables = db.execute(text(
             "select count(*) from information_schema.tables where table_schema='icb_mes' "
             "and table_name in ('generated_boms','bom_lines')")).scalar()
-    assert n == 24
+        v428_tables = db.execute(text(
+            "select count(*) from information_schema.tables where table_schema='icb_mes' "
+            "and table_name in ('chassis_records','chassis_lifecycle_events','chassis_photos')")).scalar()
+    assert n == 27
     assert new_tables == 4
     assert v422_tables == 2
     assert v425_tables == 3
     assert v426_tables == 1
     assert v427_tables == 2
+    assert v428_tables == 3
 
 
 def test_legacy_view_exposes_old_shape():
