@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.mes import BomSpecOption
-from app.schemas.bom import JobSpec, JobSpecRaw, PanelSpec
+from app.schemas.bom import JobSpec, JobSpecRaw, PanelSpec, RawPanelSpec
 
 _SECTION = "Vacuum Materials"
 _CROSS = "*"
@@ -100,3 +100,39 @@ def resolve_jobspec_raw(db: Session, raw: JobSpecRaw) -> JobSpec:
         reveal_rear_mm=raw.reveal_rear_mm, reveal_partition_mm=raw.reveal_partition_mm,
         panel_length_mm=raw.panel_length_mm, **panels,
     )
+
+
+# ── WO v4.27 — defaults-fill (Option A) ──────────────────────────────────────
+def default_option(db: Session, spec_field_type: str, body_type: str) -> Optional[str]:
+    """The is_default option_label for a field (exact body_type, then '*'); None if no default."""
+    for bt in (body_type, _CROSS):
+        row = db.execute(
+            select(BomSpecOption).where(
+                BomSpecOption.spec_field_type == spec_field_type,
+                BomSpecOption.body_type == bt,
+                BomSpecOption.section == _SECTION,
+                BomSpecOption.active.is_(True),
+                BomSpecOption.is_default.is_(True),
+            ).order_by(BomSpecOption.priority, BomSpecOption.id)
+        ).scalars().first()
+        if row is not None:
+            return row.option_label
+    return None
+
+
+def default_jobspec_raw(db: Session, body_type: str, *, job, length_mm, width_mm,
+                        height_mm) -> JobSpecRaw:
+    """Build a JobSpecRaw whose panel selections are the DDM defaults for `body_type`.
+
+    Used by BOM-on-accept (WO v4.27 §3.5) when the accepted calc carries dims + a trailer_type but
+    no per-panel selections: panels are filled from the `is_default` spec options, then resolved by
+    `resolve_jobspec_raw`. Fields without a default stay None (the engine skips that panel)."""
+    panels = {}
+    for panel_name, fmap in _PANEL_FIELDS.items():
+        panels[panel_name] = RawPanelSpec(
+            material=default_option(db, fmap["material"], body_type),
+            thickness=default_option(db, fmap["thickness"], body_type),
+            skin=default_option(db, fmap["skin"], body_type) if fmap["skin"] else None,
+        )
+    return JobSpecRaw(job=job, body_type=body_type, length_mm=length_mm, width_mm=width_mm,
+                      height_mm=height_mm, **panels)

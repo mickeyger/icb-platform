@@ -122,6 +122,14 @@ def accept_calculation(db: Session, calculation_id: int, user) -> tuple[JobRow, 
         accepted_at=_now(),
     )
     db.add(job)
+    db.flush()   # assign job.id so the BOM-on-accept rows can FK to it
+
+    # WO v4.27 §3.4 — generate + persist the BOM on accept (defaults-fill; incomplete never blocks,
+    # §0.5). Skip only the admin 'manual' escape. Lazy import avoids a service-layer import cycle.
+    if job.bom_status != "manual":
+        from app.services.bom_on_accept import generate_and_persist_bom
+        generate_and_persist_bom(db, job)
+
     db.commit()
     db.refresh(job)
     return get_with_costing(db, job.id), True
