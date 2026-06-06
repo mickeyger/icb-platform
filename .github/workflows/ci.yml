@@ -22,7 +22,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://icb_app:icb_app_dev@localhost:5432/icb
       SESSION_SECRET: ci-test-secret-not-for-production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # PostgreSQL 16 on Linux AND Windows runners (early cross-OS warning).
       - name: Set up PostgreSQL
@@ -34,12 +34,12 @@ jobs:
           port: 5432
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
 
