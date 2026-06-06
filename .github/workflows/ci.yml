@@ -78,4 +78,18 @@ jobs:
 
       - name: Backend tests
         working-directory: backend
-        run: pytest
+        run: pytest --ignore=tests/journeys
+
+      # WO v4.26.1 — end-to-end journey tests (Playwright). The _common.py session fixture
+      # boots uvicorn (serving the built dist against the seeded DB) and tears it down, so this
+      # step just installs the browser and runs pytest. Runs on Linux + Windows; a failing
+      # journey blocks the merge (§0.6).
+      - name: Journey tests (Playwright)
+        working-directory: backend
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            python -m playwright install --with-deps chromium
+          else
+            python -m playwright install chromium
+          fi
+          pytest tests/journeys/ -v

@@ -30,7 +30,7 @@ export function AdminModule() {
         <h1 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">Master data</h1>
         <nav className="space-y-1">
           {ADMIN_ORDER.map((k) => (
-            <NavLink key={k} to={`/admin/${k}`}
+            <NavLink key={k} to={`/admin/${k}`} data-testid={`admin-nav-${k}`}
               className={({ isActive }) =>
                 `block rounded px-3 py-2 text-sm ${isActive ? 'bg-primary text-white' : 'text-body hover:bg-surface-alt'}`}>
               {ADMIN_RESOURCES[k].title}

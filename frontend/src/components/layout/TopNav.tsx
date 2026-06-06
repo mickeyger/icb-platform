@@ -85,6 +85,7 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
 
   return (
     <header
+      data-testid="top-nav"
       className={`flex items-center gap-1 px-4 ${
         dark ? 'bg-slate-950 text-slate-200' : 'bg-primary text-white'
       }`}
@@ -98,6 +99,7 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
           <Tooltip key={to} k={k}>
             <NavLink
               to={to}
+              data-testid={`nav-${k.replace('nav.', '')}`}
               className={({ isActive }) =>
                 `flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
                   isActive ? 'bg-white/20' : 'hover:bg-white/10'
