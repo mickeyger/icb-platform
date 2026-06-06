@@ -2,3 +2,4 @@
 -r requirements.txt
 pytest>=8.0
 ruff>=0.6
+playwright>=1.40   # WO v4.26.1 — end-to-end journey tests (backend/tests/journeys/)
