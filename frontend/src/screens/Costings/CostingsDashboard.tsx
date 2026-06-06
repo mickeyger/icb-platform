@@ -99,7 +99,7 @@ export function CostingsDashboard() {
   }
 
   return (
-    <div className="p-4">
+    <div className="p-4" data-testid="costings-dashboard">
       {/* Header */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Tooltip k="costings_dashboard.header_title">
@@ -219,7 +219,7 @@ export function CostingsDashboard() {
       {/* Table */}
       <Card className="p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm" data-testid="costings-table">
             <thead className="bg-primary text-left text-white">
               <tr>
                 <th className="px-2 py-2"></th>
@@ -238,6 +238,7 @@ export function CostingsDashboard() {
               {filtered.map((c, i) => (
                 <tr
                   key={c.quote_number}
+                  data-testid="costing-row"
                   className={`cursor-pointer border-b border-line hover:bg-primary-light/40 ${
                     i % 2 ? 'bg-surface-alt' : 'bg-white'
                   }`}
