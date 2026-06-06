@@ -100,6 +100,14 @@ def _icb_sap_present(db) -> bool:
     )).first() is not None
 
 
+def _bom_rules_present(db) -> bool:
+    """icb_mes.bom_rules exists only after migration 0009 (WO v4.25)."""
+    return db.execute(sa_text(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'icb_mes' AND table_name = 'bom_rules'"
+    )).first() is not None
+
+
 def _truncate_mes(db):
     db.execute(sa_text(
         "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
@@ -342,6 +350,15 @@ def seed(reset: bool = False) -> None:
             counts["icb_sap OWHS/OITM/OITW"] = f"1 / {len(mats)} / {n_oitw}"
         else:
             counts["icb_sap (skipped)"] = "schema absent — apply migration 0008 then re-seed"
+
+        # ── 11c. bom_rules + lookups (WO v4.25) — rules-engine substrate, seeded from the
+        #         v4.24 spike geometry so CI/dev have rules for /api/bom/generate + the parity test.
+        if _bom_rules_present(db):
+            from scripts.seed_v4_25_rules import seed_rules
+            rc = seed_rules(db)
+            counts["bom_rules / lookups"] = f"{rc['bom_rules']} / {rc['bom_rule_lookups']}"
+        else:
+            counts["bom_rules (skipped)"] = "tables absent — apply migration 0009 then re-seed"
 
         # ── 12. suppliers — supplier master (WO v4.15; no icb_costings.suppliers) ─
         sups = materials.get("suppliers", [])

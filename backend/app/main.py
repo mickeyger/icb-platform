@@ -64,7 +64,7 @@ from .services import (
 from .routers import customers as _r_customers, users as _r_users
 from .routers import chassis as _r_chassis, materials as _r_materials
 from .routers import chassis_register as _r_chassis_register  # WO v4.22
-from .spikes.v4_24 import router as _r_bom_spike  # WO v4.24 spike (POST /api/bom/generate)
+from .routers import bom_generate as _r_bom_generate  # WO v4.25 (POST /api/bom/generate, rules engine)
 from .routers import auth as _r_auth, trailers as _r_trailers
 from .routers import skin_taping as _r_skin_taping, calculator as _r_calculator
 from .routers import health as _r_health, formulas as _r_formulas
@@ -158,7 +158,7 @@ app.include_router(_r_suppliers.router)
 app.include_router(_r_session.router)
 app.include_router(_r_planning.board_router)
 app.include_router(_r_planning.router)
-app.include_router(_r_bom_spike.router)  # WO v4.24 spike — POST /api/bom/generate (not MES-integrated)
+app.include_router(_r_bom_generate.router)  # WO v4.25 — /api/bom/generate (rules engine) + admin inspection
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered

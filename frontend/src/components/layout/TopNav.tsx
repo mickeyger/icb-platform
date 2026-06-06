@@ -33,6 +33,7 @@ interface NavEntry {
   icon: LucideIcon
   k: string
   perm?: PermissionKey | PermissionKey[]  // any one of these grants access
+  adminOnly?: boolean                     // WO v4.25 — gate on AppData.isAdmin (no perm key)
 }
 
 const NAV_LINKS: NavEntry[] = [
@@ -60,6 +61,8 @@ const NAV_LINKS: NavEntry[] = [
   // this would re-gate behind `management.view`.
   { to: '/management',       label: 'Management',   icon: BarChart3,     k: 'nav.management_dashboard' },
   { to: '/qc',               label: 'QC',           icon: CheckSquare,   k: 'nav.qc',                   perm: 'qc.signoff' },
+  // WO v4.25 — read-only BOM rules-engine inspection; admin users only (live session role).
+  { to: '/admin/rules',      label: 'Rules',        icon: ShieldCheck,   k: 'nav.admin_rules',          adminOnly: true },
 ]
 
 const PROFILE_ICONS: Record<string, LucideIcon> = {
@@ -69,15 +72,16 @@ const PROFILE_ICONS: Record<string, LucideIcon> = {
   ShieldCheck,
 }
 
-function entryVisible(entry: NavEntry, has: (k: PermissionKey) => boolean): boolean {
+function entryVisible(entry: NavEntry, has: (k: PermissionKey) => boolean, isAdmin: boolean): boolean {
+  if (entry.adminOnly) return isAdmin
   if (!entry.perm) return true
   const perms = Array.isArray(entry.perm) ? entry.perm : [entry.perm]
   return perms.some(has)
 }
 
 export function TopNav({ dark = false }: { dark?: boolean }) {
-  const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission, apiMode, activeBranch, accessibleBranches, switchBranch } = useAppData()
-  const visibleLinks = NAV_LINKS.filter((l) => entryVisible(l, hasPermission))
+  const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission, isAdmin, apiMode, activeBranch, accessibleBranches, switchBranch } = useAppData()
+  const visibleLinks = NAV_LINKS.filter((l) => entryVisible(l, hasPermission, isAdmin))
 
   return (
     <header
