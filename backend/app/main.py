@@ -65,6 +65,10 @@ from .routers import customers as _r_customers, users as _r_users
 from .routers import chassis as _r_chassis, materials as _r_materials
 from .routers import chassis_register as _r_chassis_register  # WO v4.22
 from .routers import bom_generate as _r_bom_generate  # WO v4.25 (POST /api/bom/generate, rules engine)
+from .routers.admin import (  # WO v4.26 — admin CRUD for the 4 master-data tables
+    bom_rules as _r_admin_rules, bom_rule_lookups as _r_admin_lookups,
+    material_price_overrides as _r_admin_overrides, bom_spec_options as _r_admin_spec_options,
+)
 from .routers import auth as _r_auth, trailers as _r_trailers
 from .routers import skin_taping as _r_skin_taping, calculator as _r_calculator
 from .routers import health as _r_health, formulas as _r_formulas
@@ -107,6 +111,19 @@ logging.basicConfig(
 logger = logging.getLogger("burtcost")
 
 app = FastAPI(title="Trailer Costing System")
+
+# WO v4.26 — map admin CRUD domain errors to HTTP status codes (422 validation, 409 conflict).
+from .services.admin_bom import AdminConflictError, AdminValidationError  # noqa: E402
+
+
+@app.exception_handler(AdminValidationError)
+async def _admin_validation_handler(request: Request, exc: AdminValidationError):
+    return JSONResponse({"detail": str(exc)}, status_code=422)
+
+
+@app.exception_handler(AdminConflictError)
+async def _admin_conflict_handler(request: Request, exc: AdminConflictError):
+    return JSONResponse({"detail": str(exc)}, status_code=409)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 # CORS for the Icecold Bodies MES React mockup (Vite dev 5173, Vite preview 4173).
 # Lets the mockup fetch /api/calculations + the new pre-job-card endpoints during
@@ -158,7 +175,13 @@ app.include_router(_r_suppliers.router)
 app.include_router(_r_session.router)
 app.include_router(_r_planning.board_router)
 app.include_router(_r_planning.router)
-app.include_router(_r_bom_generate.router)  # WO v4.25 — /api/bom/generate (rules engine) + admin inspection
+app.include_router(_r_bom_generate.router)  # WO v4.25 — /api/bom/generate (rules engine)
+# WO v4.26 — admin CRUD for the 4 master-data tables + OITM autocomplete
+app.include_router(_r_admin_rules.router)
+app.include_router(_r_admin_lookups.router)
+app.include_router(_r_admin_overrides.router)
+app.include_router(_r_admin_spec_options.router)
+app.include_router(_r_admin_spec_options.search_router)
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered

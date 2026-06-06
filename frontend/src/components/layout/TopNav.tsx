@@ -61,8 +61,8 @@ const NAV_LINKS: NavEntry[] = [
   // this would re-gate behind `management.view`.
   { to: '/management',       label: 'Management',   icon: BarChart3,     k: 'nav.management_dashboard' },
   { to: '/qc',               label: 'QC',           icon: CheckSquare,   k: 'nav.qc',                   perm: 'qc.signoff' },
-  // WO v4.25 — read-only BOM rules-engine inspection; admin users only (live session role).
-  { to: '/admin/rules',      label: 'Rules',        icon: ShieldCheck,   k: 'nav.admin_rules',          adminOnly: true },
+  // WO v4.26 — master-data admin CRUD module; admin users only (live session role).
+  { to: '/admin/spec-options', label: 'Admin',      icon: ShieldCheck,   k: 'nav.admin',                adminOnly: true },
 ]
 
 const PROFILE_ICONS: Record<string, LucideIcon> = {
