@@ -65,6 +65,7 @@ interface AppDataValue {
   permissions: PermissionKey[]
   // Live session (WO v4.17).
   apiMode: ApiMode
+  isAdmin: boolean              // WO v4.25 — live session user.role === 'admin' (admin inspection gate)
   activeBranch: BranchRef | null
   // Branch picker (WO v4.18).
   accessibleBranches: BranchRef[]
@@ -90,6 +91,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [sessionPerms, setSessionPerms] = useState<Set<string>>(new Set())
   const [activeBranch, setActiveBranch] = useState<BranchRef | null>(null)
   const [accessibleBranches, setAccessibleBranches] = useState<BranchRef[]>([])
+  const [sessionRole, setSessionRole] = useState<string | null>(null)  // WO v4.25 (admin gate)
 
   useEffect(() => {
     let alive = true
@@ -99,6 +101,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         const s = await apiGet<SessionInfo>('/api/session')
         if (!alive) return
         setSessionPerms(new Set(s.permissions))
+        setSessionRole(s.user?.role ?? null)
         setActiveBranch(s.active_branch)
         setAccessibleBranches(s.accessible_branches)
         setCsrfToken(s.csrf_token ?? null)
@@ -121,6 +124,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       try {
         const s = await apiPost<SessionInfo>('/api/session/branch', { branch_id: branchId })
         setSessionPerms(new Set(s.permissions))
+        setSessionRole(s.user?.role ?? null)
         setActiveBranch(s.active_branch)
         setAccessibleBranches(s.accessible_branches)
         setCsrfToken(s.csrf_token ?? null)
@@ -161,11 +165,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       hasPermission,
       permissions: mockPermissions,
       apiMode,
+      isAdmin: apiMode === 'live' && sessionRole === 'admin',
       activeBranch,
       accessibleBranches,
       switchBranch,
     }
-  }, [acceptedJobs, reworkTickets, tooltipsEnabled, profile, mockPermissions, apiMode, sessionPerms, activeBranch, accessibleBranches, switchBranch])
+  }, [acceptedJobs, reworkTickets, tooltipsEnabled, profile, mockPermissions, apiMode, sessionPerms, sessionRole, activeBranch, accessibleBranches, switchBranch])
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>
 }

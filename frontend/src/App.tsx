@@ -13,6 +13,7 @@ import { LiveCalculator } from './screens/Costings/LiveCalculator'
 import { MaterialsDashboard } from './screens/Materials/MaterialsDashboard'
 import { POSuggestionQueue } from './screens/Materials/POSuggestionQueue'
 import { StoresReconciliation } from './screens/Materials/StoresReconciliation'
+import { AdminBomRules } from './screens/Admin/AdminBomRules'
 
 export default function App() {
   return (
@@ -38,6 +39,8 @@ export default function App() {
       <Route path="/production" element={<Layout><ProductionDashboard /></Layout>} />
       <Route path="/management" element={<Layout><ManagementDashboard /></Layout>} />
       <Route path="/qc" element={<Layout><QcFinalCheck /></Layout>} />
+      {/* WO v4.25 — read-only BOM rules-engine inspection (admin-gated) */}
+      <Route path="/admin/rules" element={<Layout><AdminBomRules /></Layout>} />
       <Route path="*" element={<Navigate to="/production" replace />} />
     </Routes>
   )

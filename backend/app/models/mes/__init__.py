@@ -26,10 +26,11 @@ Other deviations (documented in the WO as-shipped note + ADR 0005/0007):
 Status/enum-like fields are VARCHAR (matching `calculations.status`) with allowed
 values in comments — avoids native PG ENUM churn in migrations.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric, String, Text,
+    UniqueConstraint, text as sa_text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -478,10 +479,88 @@ class ChassisRegister(Base):
     imported_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 19. bom_rules — rules-engine geometry rules (WO v4.25, §3.1). One row per
+#     (body_type × section × panel × output_field); `formula_expression` is an
+#     expression string run by the AST-safe evaluator. Seeded from the v4.24 spike's
+#     geometry.py. `panel` carries the foam/skin layer ('Floor (foam)'/'Floor (skin)')
+#     since a panel face has two material layers in the BOM.
+# ─────────────────────────────────────────────────────────────────────────────
+class BomRule(Base):
+    __tablename__ = "bom_rules"
+    __table_args__ = (
+        Index("ix_bom_rules_body_section", "body_type", "section", "panel"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    body_type = Column(String(32), nullable=False)        # 'Freezer' (v4.25 scope)
+    section = Column(String(64), nullable=False)           # 'Vacuum Materials'
+    panel = Column(String(64), nullable=False)             # 'Roof (foam)', 'Floor (skin)', ...
+    output_field = Column(String(32), nullable=False)      # 'qty' (v4.25); v4.27 adds others
+    formula_expression = Column(Text, nullable=False)      # 'ceil((length_mm - 275) / 1220)'
+    priority = Column(Integer, nullable=False, default=100, server_default="100")
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 20. bom_rule_lookups — description/code resolution data (WO v4.25, §3.1 + §0
+#     nuance). v4.25 seeds lookup_type='spec_to_sap_code' (key '<material>|<thickness>'
+#     -> value SAP ItemCode; human description in `notes`) — the 6-row representation
+#     of the spike's (material,thickness)->code map (keeps the §5 6-lookup count).
+# ─────────────────────────────────────────────────────────────────────────────
+class BomRuleLookup(Base):
+    __tablename__ = "bom_rule_lookups"
+    __table_args__ = (
+        Index("ix_bom_rule_lookups_lookup", "body_type", "section", "lookup_type", "lookup_key"),
+        UniqueConstraint("body_type", "section", "lookup_type", "lookup_key",
+                         name="uq_bom_rule_lookups_key"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    body_type = Column(String(32), nullable=False)
+    section = Column(String(64), nullable=False)
+    lookup_type = Column(String(32), nullable=False)      # 'spec_to_sap_code'
+    lookup_key = Column(String(255), nullable=False)      # 'EPS 24DV|76'
+    lookup_value = Column(String(255), nullable=False)    # 'GRP-MPS-A-0077'
+    notes = Column(Text)                                  # human description
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 21. material_price_overrides — Nadie-managed per-item price overrides (WO v4.25,
+#     §0.5). Pricing precedence: an active override (valid_from <= today AND
+#     (valid_to IS NULL OR valid_to >= today)) wins; else fall back to
+#     icb_sap.OITM.U_LastPurchasePrice. Empty initially (the v4.24 spike found OITM
+#     diverges from the Module's internal prices, −12%…+18%).
+# ─────────────────────────────────────────────────────────────────────────────
+class MaterialPriceOverride(Base):
+    __tablename__ = "material_price_overrides"
+    __table_args__ = (
+        Index("ix_material_price_overrides_sap_code_valid", "sap_code", "valid_from", "valid_to"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    sap_code = Column(String(64), nullable=False)         # -> icb_sap.OITM.ItemCode (no FK; soft)
+    override_price = Column(Numeric(18, 4), nullable=False)
+    reason = Column(Text)
+    valid_from = Column(Date, nullable=False, default=date.today, server_default=sa_text("CURRENT_DATE"))
+    valid_to = Column(Date)                               # null = current
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
     "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
     "LiveDailyCount", "ChassisRegister",
+    "BomRule", "BomRuleLookup", "MaterialPriceOverride",
     "CROSS_SCHEMA_FKS",
 ]
