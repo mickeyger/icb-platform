@@ -16,9 +16,10 @@ export type ChassisState = 'none' | 'eta_committed' | 'received'
  *  received → 'received'; ETA set but not received → 'eta_committed' (Path B);
  *  neither → 'none' (case (a): no ETA committed yet). */
 export function getChassisState(
-  job: { chassis_eta: string | null; chassis_received_at: string | null },
+  job: { chassis_eta: string | null; chassis_received_at: string | null; chassis_received_signal?: string | null },
 ): ChassisState {
-  if (job.chassis_received_at) return 'received'
+  // WO v4.29 D3: prefer the read-bridge signal (latest VCL event, else legacy column).
+  if (job.chassis_received_signal || job.chassis_received_at) return 'received'
   if (job.chassis_eta) return 'eta_committed'
   return 'none'
 }
@@ -34,6 +35,10 @@ export interface PlanningJob {
   source: string             // 'quote' | 'workbook' (WO v4.22 source-column fork)
   chassis_eta: string | null
   chassis_received_at: string | null
+  // WO v4.29 D3 read-bridge: authoritative chassis-received signal (VCL event date, else legacy
+  // column) + its source ('vcl' | 'legacy' | null) for the receipt tooltip.
+  chassis_received_signal: string | null
+  chassis_received_source: string | null
 }
 
 export interface PlanningSlot {
@@ -95,6 +100,8 @@ export interface ApiPlanningJobRef {
   branch_id: number | null
   chassis_eta: string | null
   chassis_received_at: string | null
+  chassis_received_signal: string | null   // WO v4.29 D3 read-bridge
+  chassis_received_source: string | null   // 'vcl' | 'legacy' | null
   planned_start_date: string | null
 }
 

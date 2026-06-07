@@ -21,7 +21,11 @@ class PlanningJobRef(BaseModel):
     selling_zar: Optional[float] = None
     branch_id: Optional[int] = None
     chassis_eta: Optional[datetime] = None
-    chassis_received_at: Optional[datetime] = None
+    chassis_received_at: Optional[datetime] = None       # legacy column (DEPRECATED-as-write, ADR 0016)
+    # WO v4.29 D3 read-bridge (§0.3): authoritative chassis-received signal — latest VCL event date,
+    # else the legacy column. `source` is 'vcl' | 'legacy' | None for the cell tooltip.
+    chassis_received_signal: Optional[datetime] = None
+    chassis_received_source: Optional[str] = None
     planned_start_date: Optional[datetime] = None
 
 

@@ -105,6 +105,10 @@ class ProductionJob(Base):
     chassis_eta_captured_at = Column(DateTime(timezone=True))
     chassis_eta_captured_by = Column(String(64))
     chassis_data_json = Column(Text)
+    # DEPRECATED as a write column per ADR 0016 (WO v4.29). Reads prefer the read-bridge
+    # JOIN (chassis_records.lifecycle_events via chassis_record_id); this column is a
+    # transitional fallback for legacy rows. New chassis-received signal flows via the
+    # chassis lifecycle event path, not direct writes here.
     chassis_received_at = Column(DateTime(timezone=True))
     chassis_received_by = Column(String(64))
 
@@ -122,7 +126,9 @@ class ProductionJob(Base):
     # ── WO v4.28 (0012): chassis link ──
     # chassis_record_id -> icb_mes.chassis_records.id; FK added in migration 0012 (column-on-model /
     # FK-in-migration; nullable, ON DELETE RESTRICT). The chassis_data_json blob stays for back-compat.
-    chassis_record_id = Column(Integer, nullable=True)
+    # WO v4.29 (0014): backfilled from the job_number match + indexed (ix_production_jobs_chassis_record_id)
+    # for the chassis read-bridge JOIN (§0.3). Postgres does not auto-index a FK's referencing column.
+    chassis_record_id = Column(Integer, nullable=True, index=True)
 
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

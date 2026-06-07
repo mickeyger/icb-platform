@@ -46,7 +46,7 @@ interface CostingsValue {
   // Work Order v4 mutators.
   acceptCosting: (quote: string) => Promise<void>
   signoffPreJob: (quote: string, role: 'sales' | 'production', attestation: string, by: string) => Promise<void>
-  ackPlanning: (quote: string, by: string, chassisEta?: string | null, notes?: string | null) => Promise<void>
+  ackPlanning: (quote: string, by: string, payload?: ChassisEtaPayload | null, notes?: string | null) => Promise<void>
   // Work Order v4.2 — chassis ETA capture.
   captureChassisEta: (quote: string, payload: ChassisEtaPayload, by: string) => Promise<void>
   loadChassisCatalogue: () => Promise<ChassisCatalogue | null>
@@ -333,9 +333,19 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
   )
 
   const ackPlanning = useCallback(
-    async (quote: string, by: string, chassisEta: string | null = null, notes: string | null = null) => {
+    async (quote: string, by: string, payload: ChassisEtaPayload | null = null, notes: string | null = null) => {
       if (mode === 'live') {
-        await pjPost(quote, 'planning-ack', { chassis_eta: chassisEta, notes })
+        // WO v4.29 D2: planning-ack captures the chassis ETA + rich chassis data in one step,
+        // replacing the deadlocked legacy /api/calculations/{id}/chassis-eta call (ADR 0016).
+        await pjPost(quote, 'planning-ack', {
+          chassis_eta: payload?.chassis_eta || null,
+          notes,
+          chassis_vin: payload?.chassis_vin,
+          chassis_model: payload?.chassis_model,
+          customer_dealer: payload?.customer_dealer,
+          tail_lift_code: payload?.tail_lift_code,
+          chassis_inhouse_bom: payload?.chassis_inhouse_bom,
+        })
         return
       }
       setCostings((prev) =>

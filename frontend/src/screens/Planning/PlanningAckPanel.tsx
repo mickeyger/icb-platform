@@ -23,9 +23,9 @@ export function PlanningAckPanel({
 }: {
   costing: Costing | null
   onClose: () => void
-  onAcknowledge: (c: Costing, chassisEta: string) => void | Promise<void>
+  onAcknowledge: (c: Costing, payload: ChassisEtaPayload) => void | Promise<void>
 }) {
-  const { profile, hasPermission } = useAppData()
+  const { profile, hasPermission, apiMode } = useAppData()
   const { captureChassisEta, loadChassisCatalogue } = useCostings()
   const canAck = hasPermission('planning.acknowledge')
 
@@ -53,10 +53,14 @@ export function PlanningAckPanel({
   async function handleAcknowledge() {
     if (!costing) return
     const by = profile.id === 'rep_burt' ? 'BURT' : profile.id
-    // Step 1: capture chassis ETA + rich data (legacy calc route, CSRF-safe via lib/api).
-    // Step 2: planning-ack — the parent passes form.chassis_eta through to /planning-ack (§0.3).
-    await captureChassisEta(costing.quote_number, form, by)
-    await onAcknowledge(costing, form.chassis_eta)
+    // WO v4.29 D2: in LIVE mode the ack (onAcknowledge → ackPlanning → POST /planning-ack) captures the
+    // chassis ETA + rich chassis data on the production job in one step. The legacy calc /chassis-eta
+    // endpoint is status-gated to 'planning' and deadlocked the ack (the calc is still 'accepted' at
+    // this point), so it now runs in MOCK mode only (offline-demo local state). See ADR 0016.
+    if (apiMode !== 'live') {
+      await captureChassisEta(costing.quote_number, form, by)
+    }
+    await onAcknowledge(costing, form)
   }
 
   return (

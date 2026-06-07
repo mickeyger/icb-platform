@@ -59,6 +59,15 @@ class PreJobSignoffRequest(BaseModel):
 class PlanningAckRequest(BaseModel):
     chassis_eta: Optional[date] = Field(default=None, examples=["2026-06-12"])
     notes: Optional[str] = Field(default=None, examples=["Chassis ETA confirmed with dealer."])
+    # WO v4.29 D2: the planning-ack panel captures the chassis ETA + rich chassis data in ONE step on
+    # the production-job surface. The legacy /api/calculations/{id}/chassis-eta endpoint was status-gated
+    # to calc status 'planning' and mismatched the v4.19 pj-centric flow (deadlock — see ADR 0016), so
+    # these optional rich fields now persist to production_jobs.chassis_data_json alongside the ETA.
+    chassis_vin: Optional[str] = None
+    chassis_model: Optional[str] = None
+    customer_dealer: Optional[str] = None
+    tail_lift_code: Optional[str] = None
+    chassis_inhouse_bom: Optional[list] = None
 
 
 # ── Responses ────────────────────────────────────────────────────────────────

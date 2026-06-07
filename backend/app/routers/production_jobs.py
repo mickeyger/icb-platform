@@ -60,15 +60,20 @@ def get_production_job(job_id: int, db: Session = Depends(get_db), user: User = 
 @router.post("/from-calculation/{calculation_id}", response_model=ProductionJobDetail)
 def accept_from_calculation(
     calculation_id: int, response: Response,
+    branch: Optional[Branch] = Depends(active_branch),
     db: Session = Depends(get_db), user: User = Depends(require_permission("production.accept")),
 ):
     """Accept an already-accepted calculation into production. Idempotent:
-    201 if a new job is created, 200 if one already exists for that calculation."""
+    201 if a new job is created, 200 if one already exists for that calculation.
+    The session's active branch covers calcs with no branch_id (WO v4.29 D1)."""
     try:
-        row, created = svc.accept_calculation(db, calculation_id, user)
+        row, created = svc.accept_calculation(
+            db, calculation_id, user,
+            fallback_branch_id=(branch.id if branch is not None else None),
+        )
     except svc.NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except svc.CalculationNotAcceptedError as e:
+    except (svc.CalculationNotAcceptedError, svc.BranchUnavailableError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     response.status_code = http_status.HTTP_201_CREATED if created else http_status.HTTP_200_OK
     return _detail(row)
@@ -107,9 +112,16 @@ def planning_ack(
     job_id: int, body: PlanningAckRequest,
     db: Session = Depends(get_db), user: User = Depends(require_permission("planning.acknowledge")),
 ):
-    """Planning acknowledges the job (status -> planning). Requires pre_job_confirmed."""
+    """Planning acknowledges the job (status -> planning). Requires pre_job_confirmed.
+    Captures the chassis ETA + rich chassis data in one step (WO v4.29 D2)."""
+    chassis_data = {
+        "chassis_vin": body.chassis_vin, "chassis_model": body.chassis_model,
+        "customer_dealer": body.customer_dealer, "tail_lift_code": body.tail_lift_code,
+        "chassis_inhouse_bom": body.chassis_inhouse_bom,
+    }
     try:
-        return _detail(svc.record_planning_ack(db, job_id, body.chassis_eta, body.notes, user))
+        return _detail(svc.record_planning_ack(
+            db, job_id, body.chassis_eta, body.notes, user, chassis_data=chassis_data))
     except svc.NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except svc.WrongStatusForTransitionError as e:

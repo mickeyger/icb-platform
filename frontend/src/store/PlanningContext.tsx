@@ -53,6 +53,8 @@ const apiToJob = (j: ApiPlanningJobRef): PlanningJob => ({
   source: j.source ?? 'quote',
   chassis_eta: j.chassis_eta,
   chassis_received_at: j.chassis_received_at,
+  chassis_received_signal: j.chassis_received_signal ?? null,   // WO v4.29 D3
+  chassis_received_source: j.chassis_received_source ?? null,
 })
 
 const apiToSlot = (s: ApiPlanningSlotItem): PlanningSlot => ({

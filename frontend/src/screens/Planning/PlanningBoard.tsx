@@ -1038,8 +1038,8 @@ function LivePlanningBoard() {
       <PlanningAckPanel
         costing={ackTarget}
         onClose={() => setAckTarget(null)}
-        onAcknowledge={async (c, chassisEta) => {
-          await ackPlanning(c.quote_number, byActor, chassisEta || null)
+        onAcknowledge={async (c, payload) => {
+          await ackPlanning(c.quote_number, byActor, payload)
           await refresh()
           setAckTarget(null)
         }}
@@ -1094,6 +1094,10 @@ function LiveSlotDetail({
 }) {
   const job = slot.job!
   const cs = getChassisState(job)
+  // WO v4.29 D3: receipt date + source from the read-bridge signal (VCL event, else legacy column).
+  const receivedAt = job.chassis_received_signal ?? job.chassis_received_at
+  const receivedVia = job.chassis_received_source === 'vcl' ? 'via VCL'
+    : job.chassis_received_source === 'legacy' ? 'legacy record' : null
   const [busy, setBusy] = useState(false)
   async function tick() {
     setBusy(true)
@@ -1116,7 +1120,9 @@ function LiveSlotDetail({
         {cs === 'received' ? (
           <div className="flex items-center gap-2 text-status-green">
             <CheckCircle2 size={18} />
-            <span className="font-semibold">Chassis received{job.chassis_received_at ? ` ${dmy(job.chassis_received_at)}` : ''}</span>
+            <span className="font-semibold">
+              Chassis received{receivedAt ? ` ${dmy(receivedAt)}` : ''}{receivedVia ? ` · ${receivedVia}` : ''}
+            </span>
           </div>
         ) : (
           <div className="space-y-2">
