@@ -77,7 +77,7 @@ per-event checklists, and photos.
   (`delete source='register'` then reload), reads `chassis_register` and:
   **skips null-VIN (67) + `CANCELLED` (3)**, **merges duplicate VINs** (a repeated VIN appends a
   cycle rather than creating a second record), and **explodes each `_1` / `_2` column pair** into
-  VCL/DCL events. Result: **321 register rows → 250 chassis_records / 495 lifecycle events.** The
+  VCL/DCL events. Result: **321 register rows → 250 chassis_records / 492 lifecycle events.** The
   legacy `chassis_register` table and the `chassis_data_json` blob are **kept for rollback** (not
   dropped in v4.28).
 
