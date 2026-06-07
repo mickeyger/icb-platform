@@ -46,10 +46,17 @@ target_metadata = Base.metadata
 # migrations rather than declared on the schema-less costing models.
 _RELEVANT_SCHEMAS = {None, "icb_costings", "icb_mes"}
 
-# Cross-schema FKs declared in migrations, not on models. The icb_mes -> icb_sap FK
-# (WO v4.27) can't be excluded by the schema-compare below because icb_sap is NOT a
-# reflected schema (so obj.referred_table won't resolve), hence the explicit name guard.
-_CROSS_SCHEMA_FK_NAMES = {"fk_demand_lines_sap_code"}
+# FKs created in MIGRATIONS rather than declared on the ORM models (the column is a plain Integer
+# on the model), so autogenerate must NOT emit a spurious DROP for them. Two reasons a FK lives here
+# (ADR 0015 §7.7): (a) it targets a non-reflected schema — icb_sap — so the schema-compare below
+# can't catch it (obj.referred_table won't resolve); or (b) declaring it on the model would create a
+# Base.metadata.create_all ordering cycle. Intra-schema entries (b) are why a plain schema-compare
+# isn't enough — hence the explicit name guard.
+_MIGRATION_MANAGED_FK_NAMES = {
+    "fk_demand_lines_sap_code",           # icb_mes.demand_lines -> icb_sap.OITM   (WO v4.23, non-reflected schema)
+    "fk_production_jobs_current_bom",     # icb_mes.production_jobs -> generated_boms (WO v4.27, create_all cycle)
+    "fk_production_jobs_chassis_record",  # icb_mes.production_jobs -> chassis_records (WO v4.28, create_all cycle)
+}
 
 
 def _include_name(name, type_, parent_names):
@@ -60,7 +67,7 @@ def _include_name(name, type_, parent_names):
 
 def _include_object(obj, name, type_, reflected, compare_to):
     if type_ == "foreign_key_constraint":
-        if name in _CROSS_SCHEMA_FK_NAMES:
+        if name in _MIGRATION_MANAGED_FK_NAMES:
             return False
         try:
             if obj.table.schema != obj.referred_table.schema:

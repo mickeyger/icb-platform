@@ -203,6 +203,16 @@ def mark_chassis_received(db: Session, job_id: int, user) -> JobRow:
     return get_with_costing(db, job_id)
 
 
+def unmark_chassis_received(db: Session, job_id: int, user) -> JobRow:
+    """WO v4.28 (Flag E) — reverse a chassis-received tick (clears the receipt). Re-enables the
+    planning chassis-ETA gate, which is bypassed while chassis_received_at is set."""
+    job, _, _, _ = get_with_costing(db, job_id)
+    job.chassis_received_at = None
+    job.chassis_received_by = None
+    db.commit()
+    return get_with_costing(db, job_id)
+
+
 def build_timeline(db: Session, job_id: int) -> list[TimelineEvent]:
     job, _, _, _ = get_with_costing(db, job_id)
     # (event_type, timestamp, actor) for each populated lifecycle column.

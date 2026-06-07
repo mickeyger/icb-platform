@@ -78,6 +78,11 @@ export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
 
 export const apiDelete = <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' })
 
+/** Multipart upload (FormData). No Content-Type header → the browser sets the multipart boundary;
+ *  request() still attaches credentials + the CSRF header (WO v4.28 — chassis photo upload). */
+export const apiUpload = <T>(path: string, formData: FormData): Promise<T> =>
+  request<T>(path, { method: 'POST', body: formData })
+
 /** Mint a costing-app session for the demo user so the MES SPA inherits it.
  *  Idempotent server-side; silently no-ops when the API is offline.
  *

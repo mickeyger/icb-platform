@@ -13,6 +13,8 @@ import { LiveCalculator } from './screens/Costings/LiveCalculator'
 import { MaterialsDashboard } from './screens/Materials/MaterialsDashboard'
 import { POSuggestionQueue } from './screens/Materials/POSuggestionQueue'
 import { StoresReconciliation } from './screens/Materials/StoresReconciliation'
+import { ChassisList } from './screens/Chassis/ChassisList'
+import { ChassisDetail } from './screens/Chassis/ChassisDetail'
 import { AdminModule } from './screens/Admin/AdminModule'
 
 export default function App() {
@@ -34,6 +36,9 @@ export default function App() {
       <Route path="/materials" element={<Layout><MaterialsDashboard /></Layout>} />
       <Route path="/materials/suggestions" element={<Layout><POSuggestionQueue /></Layout>} />
       <Route path="/stores/reconciliation" element={<Layout><StoresReconciliation /></Layout>} />
+      {/* WO v4.28 — Chassis lifecycle module */}
+      <Route path="/chassis" element={<Layout><ChassisList /></Layout>} />
+      <Route path="/chassis/:id" element={<Layout><ChassisDetail /></Layout>} />
       <Route path="/tablet/vacuum" element={<Layout><VacuumTablet /></Layout>} />
       <Route path="/kanban/pre-assy" element={<Layout dark><KanbanTV /></Layout>} />
       <Route path="/production" element={<Layout><ProductionDashboard /></Layout>} />

@@ -20,6 +20,7 @@ import {
   CalendarClock,
   ClipboardCheck,
   Building2,
+  Truck,
   type LucideIcon,
 } from 'lucide-react'
 import { useAppData, type BranchRef } from '../../store/AppDataContext'
@@ -53,6 +54,8 @@ const NAV_LINKS: NavEntry[] = [
   { to: '/materials/suggestions',    label: 'Suggestions',    icon: ListChecks,      k: 'nav.materials_suggestions' },
   { to: '/materials?tab=forecast',   label: 'Forecast',       icon: CalendarClock,   k: 'nav.materials_forecast' },
   { to: '/stores/reconciliation',    label: 'Reconciliation', icon: ClipboardCheck,  k: 'nav.stores_reconciliation' },
+  // WO v4.28 — Chassis lifecycle module (viewable by any authenticated user).
+  { to: '/chassis',          label: 'Chassis',      icon: Truck,         k: 'nav.chassis' },
   { to: '/tablet/vacuum',    label: 'Shop Floor',   icon: Tablet,        k: 'nav.tablet_vacuum',        perm: 'tablet.signoff' },
   { to: '/kanban/pre-assy',  label: 'Kanban',       icon: LayoutGrid,    k: 'nav.kanban',               perm: ['kanban.team_lead', 'production.view'] },
   { to: '/production',       label: 'Production',   icon: Factory,       k: 'nav.production_dashboard', perm: 'production.view' },
