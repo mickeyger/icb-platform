@@ -23,7 +23,8 @@ dist/
 *.sqlite
 *.sqlite3
 *.bak*
-backend/uploads/   # WO v4.28 — chassis photo store (local FS; off-repo, §5.3 swap to file-store later)
+# WO v4.28 — chassis photo store (local FS; off-repo, §5.3 swap to file-store later)
+backend/uploads/
 
 # ---- Local operational source workbooks (off-repo; the ETL reads these by path,
 #      same policy as v4.20's fajecoza_grp_costings.sql — large binaries + real ICB data) ----

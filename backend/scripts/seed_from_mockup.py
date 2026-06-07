@@ -116,6 +116,14 @@ def _bom_spec_options_present(db) -> bool:
     )).first() is not None
 
 
+def _chassis_records_present(db) -> bool:
+    """icb_mes.chassis_records exists only after migration 0012 (WO v4.28)."""
+    return db.execute(sa_text(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'icb_mes' AND table_name = 'chassis_records'"
+    )).first() is not None
+
+
 def _truncate_mes(db):
     db.execute(sa_text(
         "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
@@ -380,6 +388,16 @@ def seed(reset: bool = False) -> None:
             counts["bom_spec_options"] = so["total"]
         else:
             counts["bom_spec_options (skipped)"] = "table absent — apply migration 0010 then re-seed"
+
+        # ── 11e. chassis (WO v4.28) — synthetic chassis_records + lifecycle events so CI / fresh
+        #         dev DBs have data for the chassis list + the Playwright chassis journey (real
+        #         records come from translate_chassis_register against the Truck Register workbook).
+        if _chassis_records_present(db):
+            from scripts.seed_v4_28_chassis_mock import seed_chassis_mock
+            cm = seed_chassis_mock(db)
+            counts["chassis_records (mock)"] = f"{cm['chassis_records']} records / {cm['lifecycle_events']} events"
+        else:
+            counts["chassis_records (skipped)"] = "table absent — apply migration 0012 then re-seed"
 
         # ── 12. suppliers — supplier master (WO v4.15; no icb_costings.suppliers) ─
         sups = materials.get("suppliers", [])

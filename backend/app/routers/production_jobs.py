@@ -126,6 +126,16 @@ def chassis_received(job_id: int, db: Session = Depends(get_db),
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.delete("/{job_id}/chassis-received", response_model=ProductionJobDetail)
+def chassis_received_untick(job_id: int, db: Session = Depends(get_db),
+                            user: User = Depends(require_permission("production.chassis_received"))):
+    """WO v4.28 (Flag E) — reverse a chassis-received tick (re-enables the chassis-ETA gate)."""
+    try:
+        return _detail(svc.unmark_chassis_received(db, job_id, user))
+    except svc.NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/{job_id}/timeline", response_model=list[TimelineEvent])
 def production_job_timeline(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Derived lifecycle timeline (from the job's timestamp columns), oldest-first."""
