@@ -15,4 +15,5 @@ from _common import (  # noqa: E402,F401  (re-exported for fixture discovery)
     live_server,
     page,
     playwright_instance,
+    role_users,
 )

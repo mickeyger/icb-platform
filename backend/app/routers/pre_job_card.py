@@ -396,6 +396,16 @@ async def api_mes_autologin(request: Request, db: Session = Depends(get_db)):
     username = _mes_autologin_user()
     if not username:
         raise HTTPException(status_code=403, detail="MES autologin disabled (set MES_DEMO_AUTOLOGIN_USER)")
+    # WO v4.29 §3.6: the per-role journey harness may request a specific demo user. Honoured only here,
+    # where autologin is already enabled + origin-guarded, so one server boot can mint any role per
+    # browser context (the prerequisite for per-role journey coverage). The SPA sends no body → admin.
+    try:
+        _body = await request.json()
+        _requested = _body.get("username") if isinstance(_body, dict) else None
+    except Exception:
+        _requested = None
+    if _requested:
+        username = str(_requested)
 
     # Mirror /login's db_choice swap so the MES sees the same database the
     # interactive login form would: dev = SQLITE_URL, prod = MYSQL_URL.
