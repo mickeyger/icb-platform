@@ -5,14 +5,15 @@ Reads are require_user; mutations gate on the v4.28 permission keys (chassis.cre
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    ChassisEventCapture, ChassisEventOut, ChassisRecordCreate, ChassisRecordDetail,
-    ChassisRecordOut, ChassisRecordUpdate,
+    ChassisEventCapture, ChassisEventOut, ChassisPhotoOut, ChassisRecordCreate,
+    ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
 )
 from ..services import chassis as svc
 
@@ -30,6 +31,13 @@ def list_records(q: Optional[str] = Query(None), status: Optional[str] = Query(N
 def checklists(user: User = Depends(require_user)):
     """VCL/DCL checklist templates (DATA, not UI-hard-coded — Workshop-refine placeholder, v4.28)."""
     return svc.CHASSIS_CHECKLIST_TEMPLATES
+
+
+@router.get("/photos/{photo_id}")
+def serve_photo(photo_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    photo, path = svc.get_photo_file(db, photo_id)
+    return FileResponse(path, media_type=photo.content_type or "application/octet-stream",
+                        filename=photo.original_filename or f"photo-{photo_id}")
 
 
 @router.get("/{record_id}", response_model=ChassisRecordDetail)
@@ -61,3 +69,11 @@ def capture_vcl(record_id: int, payload: ChassisEventCapture, db: Session = Depe
 def capture_dcl(record_id: int, payload: ChassisEventCapture, db: Session = Depends(get_db),
                 user: User = Depends(require_permission("chassis.dcl"))):
     return svc.capture_event(db, record_id, "DCL", payload, who=user.username)
+
+
+@router.post("/{record_id}/events/{event_id}/photos", response_model=List[ChassisPhotoOut],
+             status_code=201)
+def upload_photos(record_id: int, event_id: int, files: List[UploadFile] = File(...),
+                  db: Session = Depends(get_db),
+                  user: User = Depends(require_permission("chassis.update"))):
+    return svc.add_photos(db, record_id, event_id, files, who=user.username)

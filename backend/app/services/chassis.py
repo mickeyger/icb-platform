@@ -17,6 +17,7 @@ from app.models.mes import ChassisLifecycleEvent, ChassisPhoto, ChassisRecord
 from app.schemas.chassis import (
     ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut,
 )
+from app.services import file_store
 
 # Workshop-refine placeholder checklists (WO v4.28). type: 'bool' (toggle) | 'text'.
 CHASSIS_CHECKLIST_TEMPLATES = {
@@ -90,7 +91,9 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     if ev_ids:
         for p in db.execute(select(ChassisPhoto).where(
                 ChassisPhoto.lifecycle_event_id.in_(ev_ids))).scalars().all():
-            photos_by_ev.setdefault(p.lifecycle_event_id, []).append(ChassisPhotoOut.model_validate(p))
+            po = ChassisPhotoOut.model_validate(p)
+            po.url = f"/api/chassis-records/photos/{p.id}"
+            photos_by_ev.setdefault(p.lifecycle_event_id, []).append(po)
     detail = ChassisRecordDetail.model_validate(rec)
     detail.event_count = len(events)
     detail.latest_event_date = max((e.event_date for e in events if e.event_date), default=None)
@@ -165,3 +168,38 @@ def capture_event(db: Session, record_id: int, event_type: str, payload, who: st
     db.commit()
     db.refresh(evt)
     return evt
+
+
+def add_photos(db: Session, record_id: int, event_id: int, files, who: str) -> list[ChassisPhotoOut]:
+    """Attach uploaded photos to a lifecycle event (validates the event belongs to the chassis)."""
+    evt = db.get(ChassisLifecycleEvent, event_id)
+    if evt is None or evt.chassis_record_id != record_id:
+        raise HTTPException(status_code=404, detail="lifecycle event not found for this chassis")
+    out: list[ChassisPhotoOut] = []
+    for up in files:
+        photo = ChassisPhoto(lifecycle_event_id=event_id, original_filename=up.filename,
+                             content_type=up.content_type, uploaded_by=who, file_path="")
+        db.add(photo)
+        db.flush()                                       # assign photo.id for the path
+        rel = file_store.save_chassis_photo(record_id, evt.cycle_number, evt.event_type,
+                                            photo.id, up.filename or "photo", up.file)
+        photo.file_path = rel
+        try:
+            photo.size_bytes = file_store.chassis_photo_abspath(rel).stat().st_size
+        except OSError:
+            pass
+        po = ChassisPhotoOut.model_validate(photo)
+        po.url = f"/api/chassis-records/photos/{photo.id}"
+        out.append(po)
+    db.commit()
+    return out
+
+
+def get_photo_file(db: Session, photo_id: int):
+    photo = db.get(ChassisPhoto, photo_id)
+    if photo is None:
+        raise HTTPException(status_code=404, detail="photo not found")
+    path = file_store.chassis_photo_abspath(photo.file_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="photo file missing")
+    return photo, str(path)

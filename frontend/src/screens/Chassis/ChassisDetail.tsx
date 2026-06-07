@@ -1,14 +1,17 @@
-/** WO v4.28 §0.8 — chassis detail + multi-cycle lifecycle history. Read-path (VCL/DCL capture
- * forms land next). Groups events by cycle; each cycle shows its VCL (book-in) + DCL (dispatch). */
-import { useEffect, useMemo, useState } from 'react'
+/** WO v4.28 §0.8 — chassis detail + multi-cycle lifecycle history + VCL/DCL capture (write-path).
+ * Groups events by cycle; each cycle shows its VCL (book-in) + DCL (dispatch). Capture buttons are
+ * permission-gated (admin sees both); the backend enforces chassis.vcl / chassis.dcl regardless. */
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Truck, LogIn, LogOut, Image } from 'lucide-react'
 
 import { apiGet, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
+import { useAppData } from '../../store/AppDataContext'
 import { Card } from '../../components/ui/primitives'
 import { Skeleton, EmptyState } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, type ChassisEvent, type ChassisRecordDetail } from './types'
+import { VclDclForm, type ChecklistItem } from './VclDclForm'
 
 function Field({ label, value }: { label: string; value?: string | null }) {
   return (
@@ -61,18 +64,25 @@ function EventCard({ ev }: { ev: ChassisEvent }) {
 export function ChassisDetail() {
   const { id } = useParams<{ id: string }>()
   const toast = useToast()
+  const { hasPermission, isAdmin } = useAppData()
   const [rec, setRec] = useState<ChassisRecordDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
+  const [capture, setCapture] = useState<'VCL' | 'DCL' | null>(null)
 
-  useEffect(() => {
-    let live = true
+  const load = useCallback(() => {
     setLoading(true)
     apiGet<ChassisRecordDetail>(`/api/chassis-records/${id}`)
-      .then((r) => { if (live) setRec(r) })
+      .then(setRec)
       .catch((e) => handleApiError(e, toast.push))
-      .finally(() => { if (live) setLoading(false) })
-    return () => { live = false }
+      .finally(() => setLoading(false))
   }, [id, toast])
+
+  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    apiGet<Record<string, ChecklistItem[]>>('/api/chassis-records/checklists')
+      .then(setChecklists).catch(() => { /* templates optional for read */ })
+  }, [])
 
   const cycles = useMemo(() => {
     if (!rec) return [] as { cycle: number; events: ChassisEvent[] }[]
@@ -89,6 +99,9 @@ export function ChassisDetail() {
   if (!rec) return <div className="p-4"><EmptyState title="Chassis not found" hint="This chassis record does not exist." /></div>
 
   const statusCls = CHASSIS_STATUS_STYLE[rec.status] ?? 'bg-surface-alt text-muted'
+  const canVcl = isAdmin || hasPermission('chassis.vcl')
+  const canDcl = isAdmin || hasPermission('chassis.dcl')
+
   return (
     <div className="p-4" data-testid="chassis-detail">
       <Link to="/chassis" className="mb-3 inline-flex items-center gap-1 text-sm text-primary hover:underline">
@@ -112,6 +125,20 @@ export function ChassisDetail() {
           <Field label="Description" value={rec.description} />
           <Field label="Cycles" value={String(cycles.length)} />
         </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {canVcl && (
+            <button data-testid="chassis-capture-vcl" onClick={() => setCapture('VCL')}
+                    className="flex items-center gap-1.5 rounded-md bg-status-amber px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">
+              <LogIn size={16} /> Capture VCL (book-in)
+            </button>
+          )}
+          {canDcl && (
+            <button data-testid="chassis-capture-dcl" onClick={() => setCapture('DCL')}
+                    className="flex items-center gap-1.5 rounded-md bg-status-green px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90">
+              <LogOut size={16} /> Capture DCL (dispatch)
+            </button>
+          )}
+        </div>
       </Card>
 
       <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-muted">Lifecycle history</h2>
@@ -128,6 +155,16 @@ export function ChassisDetail() {
             </div>
           ))}
         </div>
+      )}
+
+      {capture && (
+        <VclDclForm
+          recordId={rec.id}
+          eventType={capture}
+          items={checklists[capture] ?? []}
+          onClose={() => setCapture(null)}
+          onSaved={() => { setCapture(null); load() }}
+        />
       )}
     </div>
   )

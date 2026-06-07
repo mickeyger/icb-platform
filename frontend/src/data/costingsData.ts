@@ -37,6 +37,11 @@ export type PermissionKey =
   | 'materials.override_supplier'
   | 'materials.count'
   | 'materials.bulk_raise'
+  // Work Order v4.28 — Chassis lifecycle module.
+  | 'chassis.create'
+  | 'chassis.update'
+  | 'chassis.vcl'
+  | 'chassis.dcl'
 
 export type RoleId =
   | 'rep_burt'
