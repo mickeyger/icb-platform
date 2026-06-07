@@ -145,20 +145,21 @@ def fresh_planning_job(app_mod):
 
 # ── service unit tests ──────────────────────────────────────────────────────
 def test_eta_gate_blocks_bypasses_and_passes():
+    """WO v4.29 D4 (§0.4 revised, BA 7-Jun): `received` is an explicit kwarg; the gate BLOCKS when
+    there is neither receipt nor ETA (the inverted-symptom fix), RETAINS the within-target-week guard,
+    and bypasses entirely when received."""
     from app.services import planning as pl
 
     class J:
         pass
     j = J()
-    j.chassis_received_at = None
     j.chassis_eta = datetime(2026, 12, 1, tzinfo=timezone.utc)
-    assert pl.eta_gate_reason(j, date(2026, 6, 1)) is not None       # week before ETA -> blocked
-    assert pl.eta_gate_reason(j, date(2026, 12, 7)) is None           # week after ETA -> ok
-    j.chassis_received_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert pl.eta_gate_reason(j, date(2026, 6, 1)) is None             # received -> bypass
-    j.chassis_received_at = None
+    assert pl.eta_gate_reason(j, date(2026, 6, 1), received=False) is not None    # ETA after target week -> blocked
+    assert pl.eta_gate_reason(j, date(2026, 12, 7), received=False) is None       # week of the ETA -> ok
+    assert pl.eta_gate_reason(j, date(2026, 6, 1), received=True) is None         # received -> bypass
     j.chassis_eta = None
-    assert pl.eta_gate_reason(j, date(2026, 6, 1)) is None             # no ETA -> ok
+    assert pl.eta_gate_reason(j, date(2026, 6, 1), received=False) is not None    # no ETA + not received -> BLOCK (v4.29 fix)
+    assert pl.eta_gate_reason(j, date(2026, 6, 1), received=True) is None         # no ETA but received -> ok
 
 
 def test_schedule_occupied_409(fresh_planning_job, admin):
