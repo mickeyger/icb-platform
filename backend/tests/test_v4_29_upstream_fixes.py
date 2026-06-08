@@ -253,8 +253,19 @@ def test_d5_board_lanes_numeric_order(api):
     assert nums == sorted(nums)                                              # ascending numeric, not "Bay-10" < "Bay-2"
 
 
-# ── D6: contiguous week header (no dropped empty weeks) ────────────────────────
-def test_d6_weeks_contiguous(api):
-    weeks = [date.fromisoformat(w["start"]) for w in api.get("/api/planning-board?weeks=8").json()["weeks"]]
+# ── D6: contiguous, current-week-anchored rolling week header ──────────────────
+def test_d6_rolling_window_contiguous_current_anchored(fresh_job, user):
+    from datetime import timedelta
+    from app.database import SessionLocal
+    from app.services import planning as pl
+    this_week = pl._monday(date.today())
+    # a received job scheduled 3 weeks out -> there IS current/future work, so the window anchors on now
+    jid = fresh_job(status="planning", chassis_received_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    with SessionLocal() as db:
+        pl.schedule(db, production_job_id=jid, week=this_week + timedelta(weeks=3), bay="QA-D6ANCHOR", user=user)
+        board = pl.build_board(db, weeks_count=8)
+    weeks = [w.start for w in board.weeks]
     assert len(weeks) == 8
-    assert all((weeks[i + 1] - weeks[i]).days == 7 for i in range(len(weeks) - 1))   # no gaps (W17/W18 fix)
+    assert weeks[0] == this_week                                                       # rolling: anchored on the current week
+    assert all((weeks[i + 1] - weeks[i]).days == 7 for i in range(len(weeks) - 1))     # contiguous, no gaps (W17/W18 fix)
+    assert (this_week + timedelta(weeks=3)) in weeks                                   # the future slot's empty-between weeks are shown

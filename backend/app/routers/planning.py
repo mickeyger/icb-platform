@@ -27,7 +27,7 @@ def _effective_branch_id(branch_id: Optional[int], branch: Optional[Branch]) -> 
 
 @board_router.get("", response_model=PlanningBoard)
 def get_planning_board(
-    weeks: int = Query(8, ge=1, le=52, description="How many contiguous weeks to return (from the first scheduled week)"),
+    weeks: int = Query(12, ge=1, le=52, description="How many contiguous weeks to return (rolling horizon from the current week)"),
     lane: Optional[str] = Query(None, description="Filter to one lane"),
     branch_id: Optional[int] = Query(None, description="Defaults to the session's active branch"),
     branch: Optional[Branch] = Depends(active_branch),

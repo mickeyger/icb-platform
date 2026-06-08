@@ -106,7 +106,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   // the session's active branch, so a branch switch needs only a refetch (§3.5).
   const refetch = useCallback(async () => {
     try {
-      const b = await apiGet<ApiPlanningBoard>('/api/planning-board?weeks=8')
+      const b = await apiGet<ApiPlanningBoard>('/api/planning-board?weeks=12')
       setBoard(apiToBoard(b))
       setMode('live')
     } catch {

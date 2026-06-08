@@ -186,14 +186,17 @@ def _unscheduled_pool(db: Session, *, branch_id=None, exclude_ids=()) -> List[Pl
     return [_job_ref(j, c, cu, vcl) for (j, c, cu, vcl) in db.execute(stmt.order_by(ProductionJob.id)).all()]
 
 
-def build_board(db: Session, *, branch_id=None, weeks_count=8, lane=None) -> PlanningBoard:
+def build_board(db: Session, *, branch_id=None, weeks_count=12, lane=None) -> PlanningBoard:
     rows = db.execute(_slot_select(branch_id=branch_id, lane=lane)).all()
     all_items = [_slot_item(*r) for r in rows]
-    # WO v4.29 D6: show a CONTIGUOUS run of weeks from an anchor (earliest scheduled week, else the
-    # current week), NOT only the weeks that happen to have slots — empty weeks (e.g. W17/W18) were
-    # being dropped, leaving gaps in the header. Anchored weeks are Mondays (PlanningSlot.week is).
+    # WO v4.29 D6: show a CONTIGUOUS run of weeks (empty weeks INCLUDED — W17/W18 were being dropped,
+    # leaving gaps). Anchor on the CURRENT week so the board is a rolling horizon (now + ahead) rather
+    # than drifting into the past on the earliest-ever scheduled week. Fall back to the earliest
+    # scheduled week ONLY if every scheduled job predates today (so the board is never empty).
+    # Anchored weeks are Mondays (PlanningSlot.week is normalised to Monday).
     populated = sorted({it.week for it in all_items if it.week})
-    anchor = populated[0] if populated else _monday(date.today())
+    this_week = _monday(date.today())
+    anchor = this_week if (not populated or populated[-1] >= this_week) else populated[0]
     weeks_sorted = [anchor + timedelta(weeks=i) for i in range(weeks_count)]
     shown_weeks = set(weeks_sorted)
     weeks = [WeekRef(iso=_iso(w), start=w) for w in weeks_sorted]
