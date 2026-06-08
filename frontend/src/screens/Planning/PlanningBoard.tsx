@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Truck, PackageX, GripVertical, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { data } from '../../data/mockData'
@@ -33,6 +33,51 @@ type LocalSlot = SlotAssignment & {
 }
 
 const SLOTS = ['V-1', 'V-2', 'V-3', 'V-4', 'V-5', 'P-1', 'P-2', 'P-3']
+
+// WO v4.29 — middle-mouse (scroll-wheel button) drag-to-pan for the grid panel. Hold the wheel button
+// and move: the panel scrolls left/right/up/down (grab/hand-tool feel — content follows the cursor).
+// Returns a ref to attach to the scrollable element. Suppresses the browser's native middle-click
+// autoscroll (preventDefault on the middle mousedown) and text selection while panning.
+function useMiddleButtonPan<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let panning = false
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0
+    const onMove = (e: MouseEvent) => {
+      if (!panning) return
+      el.scrollLeft = startLeft - (e.clientX - startX)
+      el.scrollTop = startTop - (e.clientY - startY)
+    }
+    const onUp = () => {
+      if (!panning) return
+      panning = false
+      el.style.cursor = ''
+      el.style.userSelect = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 1) return                 // middle (scroll-wheel) button only
+      panning = true
+      startX = e.clientX; startY = e.clientY
+      startLeft = el.scrollLeft; startTop = el.scrollTop
+      el.style.cursor = 'grabbing'
+      el.style.userSelect = 'none'
+      e.preventDefault()                         // stop native autoscroll + text selection
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    }
+    el.addEventListener('mousedown', onDown)
+    return () => {
+      el.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+  return ref
+}
 
 export function PlanningBoard() {
   const { mode } = usePlanning()
@@ -715,6 +760,7 @@ function BoardSkeleton() {
 function LivePlanningBoard() {
   const nav = useNavigate()
   const { board, schedule, move, unschedule, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
+  const panRef = useMiddleButtonPan<HTMLDivElement>()   // WO v4.29 — middle-button drag-to-pan
   const { profile, hasPermission } = useAppData()
   // WO v4.19: planning-ack + chassis-received route through the rewired
   // CostingsContext (→ /api/production-jobs/*); PlanningContext stays board-only.
@@ -949,7 +995,8 @@ function LivePlanningBoard() {
         {/* Week grid — single self-contained scroll panel (WO v4.29): one inner overflow-auto
             unifies the x+y scrollbars; sticky header + frozen first column keep context visible. */}
         <Card className="flex min-h-0 flex-col overflow-hidden p-0">
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div ref={panRef} className="min-h-0 flex-1 overflow-auto" title="Tip: hold the middle mouse button and drag to pan">
+
           {board.weeks.length === 0 ? (
             <EmptyState
               title="No scheduled weeks yet"
