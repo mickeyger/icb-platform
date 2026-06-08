@@ -11,9 +11,11 @@ export function Layout({
   dark?: boolean
 }) {
   return (
-    <div className={`flex min-h-screen flex-col ${dark ? 'bg-slate-900' : 'bg-surface-alt'}`}>
+    <div className={`flex h-screen flex-col overflow-hidden ${dark ? 'bg-slate-900' : 'bg-surface-alt'}`}>
       <TopNav dark={dark} />
-      <main className="flex-1">{children}</main>
+      {/* WO v4.29: app-shell — main is the scroll container (min-h-0 lets it shrink so screens that
+          manage their own internal scroll, e.g. the Planning board, fit one viewport without a page scroll). */}
+      <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
       {!dark && (
         <footer className="border-t border-line bg-white px-4 py-2 text-center text-xs text-muted">
           Icecold Bodies MES — Phase 0 mockup · Snapshot {dmy(data._meta.snapshot_date)} ·

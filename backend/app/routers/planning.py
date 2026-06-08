@@ -28,6 +28,7 @@ def _effective_branch_id(branch_id: Optional[int], branch: Optional[Branch]) -> 
 @board_router.get("", response_model=PlanningBoard)
 def get_planning_board(
     weeks: int = Query(12, ge=1, le=52, description="How many contiguous weeks to return (rolling horizon from the current week)"),
+    start: Optional[date] = Query(None, description="Jump-to: anchor the window on the week containing this date (Monday-normalised); defaults to the rolling current week"),
     lane: Optional[str] = Query(None, description="Filter to one lane"),
     branch_id: Optional[int] = Query(None, description="Defaults to the session's active branch"),
     branch: Optional[Branch] = Depends(active_branch),
@@ -36,7 +37,7 @@ def get_planning_board(
 ):
     """The board grid: weeks × slots with assigned jobs, the unscheduled pool, and capacity."""
     return svc.build_board(db, branch_id=_effective_branch_id(branch_id, branch),
-                           weeks_count=weeks, lane=lane)
+                           weeks_count=weeks, lane=lane, start=start)
 
 
 @router.get("", response_model=list[PlanningSlotItem])

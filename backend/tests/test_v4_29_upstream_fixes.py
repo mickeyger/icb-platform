@@ -269,3 +269,26 @@ def test_d6_rolling_window_contiguous_current_anchored(fresh_job, user):
     assert weeks[0] == this_week                                                       # rolling: anchored on the current week
     assert all((weeks[i + 1] - weeks[i]).days == 7 for i in range(len(weeks) - 1))     # contiguous, no gaps (W17/W18 fix)
     assert (this_week + timedelta(weeks=3)) in weeks                                   # the future slot's empty-between weeks are shown
+
+
+# ── Planning jump: `start` anchors the window on a chosen week (WO v4.29 follow-up) ─
+def test_planning_start_param_service():
+    from app.database import SessionLocal
+    from app.services import planning as pl
+    target = pl._monday(date(2026, 9, 14))                                             # a fixed future week
+    with SessionLocal() as db:
+        board = pl.build_board(db, weeks_count=8, start=target)
+    weeks = [w.start for w in board.weeks]
+    assert len(weeks) == 8
+    assert weeks[0] == target                                                          # jump: window anchored on `start`
+    assert all((weeks[i + 1] - weeks[i]).days == 7 for i in range(len(weeks) - 1))     # contiguous
+
+
+def test_planning_start_param_api(api):
+    from app.services.planning import _monday
+    start = date(2026, 8, 31)
+    weeks = [date.fromisoformat(w["start"]) for w in
+             api.get(f"/api/planning-board?weeks=6&start={start.isoformat()}").json()["weeks"]]
+    assert len(weeks) == 6
+    assert weeks[0] == _monday(start)                                                  # Monday-normalised anchor
+    assert all((weeks[i + 1] - weeks[i]).days == 7 for i in range(len(weeks) - 1))

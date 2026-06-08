@@ -24,6 +24,27 @@ export function dmy(iso: string | null | undefined): string {
   return `${String(d.getDate()).padStart(2, '0')} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
 }
 
+// "Jun 2026" from an ISO date string (WO v4.29 planning jump). String-sliced (TZ-safe for YYYY-MM-DD).
+export function monthYear(iso: string | null | undefined): string {
+  if (!iso || iso.length < 7) return '—'
+  const m = parseInt(iso.slice(5, 7), 10) - 1
+  return `${MONTHS[m] ?? '?'} ${iso.slice(0, 4)}`
+}
+
+// First-of-month ISO + label for the current month and the next n-1 (WO v4.29 planning month-jump).
+// Returns e.g. [{iso:'2026-06-01', label:'Jun 2026'}, ...]; values are Monday-normalised server-side.
+export function nextMonths(n: number): { iso: string; label: string }[] {
+  const out: { iso: string; label: string }[] = []
+  const now = new Date()
+  let y = now.getFullYear()
+  let m = now.getMonth()
+  for (let i = 0; i < n; i++) {
+    out.push({ iso: `${y}-${String(m + 1).padStart(2, '0')}-01`, label: `${MONTHS[m]} ${y}` })
+    if (++m > 11) { m = 0; y += 1 }
+  }
+  return out
+}
+
 // 24-hour HH:MM
 export function hhmm(iso: string | Date): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Truck, PackageX, GripVertical, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { data } from '../../data/mockData'
-import { zarShort, zar, dmy } from '../../lib/format'
+import { zarShort, zar, dmy, monthYear, nextMonths } from '../../lib/format'
 import { Card, StatusPill } from '../../components/ui/primitives'
 import { SidePanel } from '../../components/ui/overlays'
 import { JobDetailStub } from '../../components/JobDetailStub'
@@ -415,10 +415,10 @@ function MockPlanningBoard() {
         <Card className="overflow-x-auto p-0">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="bg-primary text-white">
-                <th className="px-2 py-2 text-left font-semibold">Slot</th>
+              <tr className="text-white">
+                <th className="sticky left-0 top-0 z-30 bg-primary px-2 py-2 text-left font-semibold">Slot</th>
                 {weeks.map((w) => (
-                  <th key={w.week} className="px-2 py-2 text-left font-semibold">
+                  <th key={w.week} className="sticky top-0 z-20 bg-primary px-2 py-2 text-left font-semibold">
                     {w.week}
                     <div className="text-[10px] font-normal opacity-80">{dmy(w.start)}</div>
                   </th>
@@ -428,7 +428,7 @@ function MockPlanningBoard() {
             <tbody>
               {SLOTS.map((slot) => (
                 <tr key={slot} className="border-b border-line">
-                  <td className="bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold">{slot}</td>
+                  <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold shadow-[inset_-1px_0_0_#E5E7EB]">{slot}</td>
                   {weeks.map((w) => {
                     const cell = cellFor(w.week, slot)
                     const key = `${w.week}:${slot}`
@@ -557,7 +557,7 @@ function FooterRow({
 }) {
   const row = (
     <tr className="border-t border-line bg-surface-alt">
-      <td className="px-2 py-1.5 text-xs font-semibold text-muted">{label}</td>
+      <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 text-xs font-semibold text-muted shadow-[inset_-1px_0_0_#E5E7EB]">{label}</td>
       {cells.map((c, i) => (
         <td
           key={i}
@@ -696,14 +696,14 @@ function SlotDetail({
 // ── Initial-load skeleton (first real use of the Skeleton primitive — §3.1) ─────
 function BoardSkeleton() {
   return (
-    <div className="p-4">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-4 flex shrink-0 items-center justify-between">
         <h1 className="text-xl font-bold text-body">Planning Board</h1>
         <span className="text-xs text-muted">Loading…</span>
       </div>
-      <div className="grid grid-cols-[250px_1fr] gap-4">
-        <Card className="self-start"><Skeleton rows={4} /></Card>
-        <Card className="p-0"><Skeleton rows={8} /></Card>
+      <div className="grid min-h-0 flex-1 grid-cols-[250px_1fr] gap-4">
+        <Card className="min-h-0 overflow-y-auto"><Skeleton rows={4} /></Card>
+        <Card className="min-h-0 overflow-auto p-0"><Skeleton rows={8} /></Card>
       </div>
     </div>
   )
@@ -714,7 +714,7 @@ function BoardSkeleton() {
 // legacy ack pool + chassis tick are NOT here (dead in live per §0.5; 2C-3). ────
 function LivePlanningBoard() {
   const nav = useNavigate()
-  const { board, schedule, move, unschedule, lastUpdated, refresh } = usePlanning()
+  const { board, schedule, move, unschedule, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
   const { profile, hasPermission } = useAppData()
   // WO v4.19: planning-ack + chassis-received route through the rewired
   // CostingsContext (→ /api/production-jobs/*); PlanningContext stays board-only.
@@ -839,8 +839,8 @@ function LivePlanningBoard() {
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           <div className="mb-0.5 text-[11px] text-muted">MES › Planning › Board</div>
           <h1 className="text-xl font-bold text-body">Planning Board</h1>
@@ -859,14 +859,33 @@ function LivePlanningBoard() {
               </button>
             ))}
           </div>
-          <span className="font-semibold">Week {data.kpis.current_week}</span>
-          <span className="rounded-md border border-line bg-white px-3 py-1.5">{board.weeks.length} weeks</span>
+          {/* WO v4.29 — window jump: step ‹ ›, jump to a month, or back to Today */}
+          <div className="flex items-center gap-1">
+            <button onClick={prevWindow} title="Earlier weeks" aria-label="Earlier weeks"
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs font-semibold hover:bg-surface-alt">‹</button>
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) jumpTo(e.target.value) }}
+              title="Jump to month"
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs outline-none"
+            >
+              <option value="">Jump to month…</option>
+              {nextMonths(12).map((m) => <option key={m.iso} value={m.iso}>{m.label}</option>)}
+            </select>
+            <button onClick={nextWindow} title="Later weeks" aria-label="Later weeks"
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs font-semibold hover:bg-surface-alt">›</button>
+            <button onClick={today}
+              className="rounded-md border border-line bg-white px-2.5 py-1.5 text-xs font-semibold hover:bg-surface-alt">Today</button>
+          </div>
+          <span className="rounded-md border border-line bg-white px-3 py-1.5 text-xs">
+            {board.weeks.length ? `${monthYear(board.weeks[0].start)} · ${board.weeks.length} wks` : `${board.weeks.length} weeks`}
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-[250px_1fr] gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-[250px_1fr] gap-4">
         {/* Unscheduled pool — also the unschedule drop zone (drag a slot here). */}
-        <Card className="self-start">
+        <Card className="min-h-0 overflow-y-auto">
           <div
             onDragOver={(e) => { if (dragSlot) { e.preventDefault(); setPoolHot(true) } }}
             onDragLeave={() => setPoolHot(false)}
@@ -927,8 +946,10 @@ function LivePlanningBoard() {
           </div>
         </Card>
 
-        {/* Week grid */}
-        <Card className="overflow-x-auto p-0">
+        {/* Week grid — single self-contained scroll panel (WO v4.29): one inner overflow-auto
+            unifies the x+y scrollbars; sticky header + frozen first column keep context visible. */}
+        <Card className="flex min-h-0 flex-col overflow-hidden p-0">
+          <div className="min-h-0 flex-1 overflow-auto">
           {board.weeks.length === 0 ? (
             <EmptyState
               title="No scheduled weeks yet"
@@ -937,10 +958,11 @@ function LivePlanningBoard() {
           ) : (
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="bg-primary text-white">
-                  <th className="px-2 py-2 text-left font-semibold">Slot</th>
+                <tr className="text-white">
+                  {/* corner cell: frozen on BOTH axes, highest z so header/column slide under it */}
+                  <th className="sticky left-0 top-0 z-30 bg-primary px-2 py-2 text-left font-semibold">Slot</th>
                   {board.weeks.map((w) => (
-                    <th key={w.key} className="px-2 py-2 text-left font-semibold">
+                    <th key={w.key} className="sticky top-0 z-20 bg-primary px-2 py-2 text-left font-semibold">
                       {w.key}
                       <div className="text-[10px] font-normal opacity-80">{dmy(w.start)}</div>
                     </th>
@@ -950,7 +972,7 @@ function LivePlanningBoard() {
               <tbody>
                 {bays.map((bay) => (
                   <tr key={bay} className="border-b border-line">
-                    <td className="bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold">{bay}</td>
+                    <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold shadow-[inset_-1px_0_0_#E5E7EB]">{bay}</td>
                     {board.weeks.map((w) => {
                       const cell = cellFor(w.key, bay)
                       const key = `${w.key}:${bay}`
@@ -1014,10 +1036,11 @@ function LivePlanningBoard() {
               </tbody>
             </table>
           )}
+          </div>
         </Card>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex shrink-0 items-center justify-between">
         <LastUpdated at={lastUpdated} onRefresh={refresh} />
         {!canSchedule && (
           <span className="mt-2 text-[11px] text-muted">Read-only — your role can’t schedule on the board.</span>
