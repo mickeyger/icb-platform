@@ -82,7 +82,9 @@ export interface Costing {
   created_by: string
   created_at: string
   cost_zar: number
-  selling_zar: number
+  selling_zar: number              // WO v4.30 §0.2a — post-discount headline (== gross when no discount)
+  gross_selling_zar?: number       // pre-discount selling, shown as "before discount" when a discount exists
+  discount_amount?: number         // currency discount; > 0 means a discount was applied
   gross_profit_zar: number
   markup_pct: number
   status: StatusName
@@ -286,7 +288,10 @@ export interface LiveCalculation {
   customer: string
   user: string
   created_at: string
-  grand_total: number | null
+  grand_total: number | null       // WO v4.30 §0.2a — net of discount (the headline)
+  gross_total?: number | null      // pre-discount selling
+  discount_amount?: number | null
+  discount_kind?: string | null
   status: string
   mes_status: StatusName | string
   is_repair: boolean
@@ -328,7 +333,9 @@ export function liveToCosting(r: LiveCalculation): Costing {
     created_by: r.user || '',
     created_at: r.created_at,
     cost_zar: 0,
-    selling_zar: r.grand_total ?? 0,
+    selling_zar: r.grand_total ?? 0,                         // net (headline)
+    gross_selling_zar: r.gross_total ?? r.grand_total ?? 0,  // pre-discount (for the "before discount" line)
+    discount_amount: r.discount_amount ?? 0,
     gross_profit_zar: 0,
     markup_pct: 0,
     status,
