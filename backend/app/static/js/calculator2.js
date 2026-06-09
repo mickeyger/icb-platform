@@ -3899,6 +3899,8 @@ async function _doApprove(versionAction, nextVersion, reuseQno) {
       reuse_quote_number: versionAction === 'new_version' ? !!reuseQno : false,
       ratio_value: (!isNaN(_ratioRaw) && _ratioRaw > 0) ? _ratioRaw : null,
       ratio_label: _ratioLbl || null,
+      discount_kind:  discountKind,
+      discount_input: discountKind ? discountInput : null,
     });
     lastRecordId   = result.record_id;
     lastResult     = result;
@@ -4556,32 +4558,116 @@ function renderSummary(result) {
     <span>TOTAL COST</span>
     <span class="s-val">${fmt(totalCost)}</span>
   </div>`;
+
+  // ── Discount → Net Total rows (always rendered, hidden when no discount;
+  //    stable IDs so the handlers update them in place — never re-render the
+  //    <input> while typing, or the caret resets and the digits reverse). ──
+  html += `<div class="summary-row highlight-green" id="disc-row" style="display:none">
+    <span class="s-label" id="disc-label">Discount</span>
+    <span class="s-val" id="disc-val">− ${fmt(0)}</span>
+  </div>
+  <div class="summary-row total" id="net-row" style="color:var(--blue-hi);display:none">
+    <span>NET TOTAL</span>
+    <span class="s-val" id="net-val">${fmt(0)}</span>
+  </div>`;
   html += '</div>';
 
   if (hasFullCostAccess) {
-    // ── Geometry grid ──────────────────────────────────────
+    // ── Discount entry (% OR amount — entering one zeroes the other) ─────────
+    const _pctVal = (discountKind === 'percent' && discountInput) ? (+discountInput) : '';
+    const _amtVal = (discountKind === 'amount'  && discountInput) ? (+discountInput) : '';
+    html += `<div style="margin-top:14px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel)">
+      <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px">Discount</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label for="disc-pct" style="font-size:10px;color:var(--text-dim)">Percent %</label>
+          <input id="disc-pct" type="number" min="0" max="100" step="0.1" class="form-control" placeholder="0"
+                 value="${_pctVal}" oninput="applyDiscountInput('percent', this)"
+                 style="font-size:12px;padding:4px 6px;width:100%">
+        </div>
+        <div style="flex:1">
+          <label for="disc-amt" style="font-size:10px;color:var(--text-dim)">Amount R</label>
+          <input id="disc-amt" type="number" min="0" step="0.01" class="form-control" placeholder="0"
+                 value="${_amtVal}" oninput="applyDiscountInput('amount', this)"
+                 style="font-size:12px;padding:4px 6px;width:100%">
+        </div>
+      </div>
+    </div>`;
+
+    // ── Geometry grid — two paired boxes ───────────────────
     const g = result.geometry;
     html += `<div class="geo-grid" style="margin-top:14px">
-      <div class="geo-item"><div class="geo-label">Wall Area</div><div class="geo-value">${fmtNum(g.wall_area,1)} m²</div></div>
-      <div class="geo-item"><div class="geo-label">Roof Area</div><div class="geo-value">${fmtNum(g.roof_area,1)} m²</div></div>
-      <div class="geo-item"><div class="geo-label">Floor Area</div><div class="geo-value">${fmtNum(g.floor_area,1)} m²</div></div>
-      <div class="geo-item"><div class="geo-label">Surface Area</div><div class="geo-value">${fmtNum(g.surface_area,1)} m²</div></div>
+      <div class="geo-item"><div class="geo-label">Floor / Surface Area</div>
+        <div class="geo-value">${fmtNum(g.floor_area,1)} / ${fmtNum(g.surface_area,1)} m²</div></div>
+      <div class="geo-item"><div class="geo-label">Wall / Roof Area</div>
+        <div class="geo-value">${fmtNum(g.wall_area,1)} / ${fmtNum(g.roof_area,1)} m²</div></div>
     </div>`;
   }
 
   area.innerHTML = html;
-  grand.textContent = fmt(totalCost);
 
-  // Sub-line: cost/m² when no ratio; selling price (= withMargin / ratio) when ratio applied
-  const sub = document.getElementById('grand-total-sub');
+  lastGrossTotal = totalCost;
   const ratioValFinal = parseFloat(document.getElementById('f-ratio').value);
-  if (!isNaN(ratioValFinal) && ratioValFinal > 0) {
-    sub.textContent = `Selling Price: ${fmt(withMargin / ratioValFinal)}`;
-  } else if (result.cost_per_sqm) {
-    sub.textContent = `${fmt(result.cost_per_sqm)} / m²`;
-  } else {
-    sub.textContent = '';
+  if (!isNaN(ratioValFinal) && ratioValFinal > 0) _defaultSubText = `Selling Price: ${fmt(withMargin / ratioValFinal)}`;
+  else if (result.cost_per_sqm)                   _defaultSubText = `${fmt(result.cost_per_sqm)} / m²`;
+  else                                            _defaultSubText = '';
+
+  refreshDiscountDisplay();
+}
+
+// ── Discount state (Costings 2 — mirrors calculator.js) ───────────────────────
+let discountKind   = null;   // 'percent' | 'amount' | null
+let discountInput  = 0;
+let lastGrossTotal = 0;
+let _defaultSubText = '';
+
+function computeDiscount(base) {
+  base = +base || 0;
+  let amount = 0;
+  if (discountKind === 'percent' && discountInput > 0) {
+    amount = base * Math.min(Math.max(discountInput, 0), 100) / 100;
+  } else if (discountKind === 'amount' && discountInput > 0) {
+    amount = Math.min(discountInput, base);
   }
+  amount = Math.round(amount * 100) / 100;
+  return { amount, net: Math.round((base - amount) * 100) / 100 };
+}
+
+function refreshDiscountDisplay() {
+  const d = computeDiscount(lastGrossTotal);
+  const show = d.amount > 0;
+  const discRow = document.getElementById('disc-row');
+  const netRow  = document.getElementById('net-row');
+  const grand   = document.getElementById('grand-total');
+  const sub     = document.getElementById('grand-total-sub');
+  if (discRow) {
+    discRow.style.display = show ? '' : 'none';
+    const lbl = document.getElementById('disc-label');
+    if (lbl) lbl.textContent = discountKind === 'percent' ? `Discount (${+discountInput}%)` : 'Discount';
+    const dv = document.getElementById('disc-val');
+    if (dv) dv.textContent = `− ${fmt(d.amount)}`;
+  }
+  if (netRow) {
+    netRow.style.display = show ? '' : 'none';
+    const nv = document.getElementById('net-val');
+    if (nv) nv.textContent = fmt(d.net);
+  }
+  if (grand) grand.textContent = fmt(show ? d.net : lastGrossTotal);
+  if (sub) sub.textContent = show ? `Was ${fmt(lastGrossTotal)} · less ${fmt(d.amount)} discount` : _defaultSubText;
+}
+
+function applyDiscountInput(kind, el) {
+  const v = parseFloat(el.value);
+  if (isNaN(v) || v <= 0) {
+    if (discountKind === kind) { discountKind = null; discountInput = 0; }
+  } else {
+    discountKind = kind;
+    discountInput = v;
+    const other = document.getElementById(kind === 'percent' ? 'disc-amt' : 'disc-pct');
+    if (other) other.value = '';
+  }
+  refreshDiscountDisplay();
+  try { saveLastSession(); } catch (_) {}
 }
 
 function viewFullResults() {

@@ -258,7 +258,7 @@
                 onclick="filterRecent('repair', this)"
                 style="font-size:11px;padding:3px 9px;color:#4a90d9;border-color:rgba(74,144,217,.45)">🔧 Repair</button>
       </div>
-      <span style="font-size:11px;color:var(--text-dim)">Click ⧉ to re-open with same dimensions · right-click a row for admin actions</span>
+      <span style="font-size:11px;color:var(--text-dim)">✏️ Edit (pending only)</span>
       <button id="recent-clear-filter" class="btn btn-outline btn-sm" style="display:none"
               onclick="filterRecent('all', document.getElementById('stat-all'))">✕ Clear filter</button>
     </div>
@@ -317,14 +317,24 @@
           <td>{{ r.user.username if r.user else '—' }}</td>
           <td class="td-num" style="color:var(--blue-hi)">
             {% if r.result_data %}
-              {% set gt = r.result_data.get('selling_price') or r.result_data.get('grand_total') or 0 %}
-              {% if gt %}R {{ '{:,.2f}'.format(gt | float) }}{% endif %}
+              {% set gross = r.result_data.get('selling_price') or r.result_data.get('grand_total') or 0 %}
+              {% set disc = r.discount_amount if r.discount_amount is not none else (r.result_data.get('discount_amount') or 0) %}
+              {% set net = r.net_total if r.net_total is not none else (r.result_data.get('net_total') or gross) %}
+              {% if net %}R {{ '{:,.2f}'.format(net | float) }}{% endif %}
+              {% if disc and disc > 0 %}
+              <span title="Discount −R {{ '{:,.2f}'.format(disc | float) }} off R {{ '{:,.2f}'.format(gross | float) }}"
+                style="display:block;font-size:10px;color:#4ade80">−R {{ '{:,.2f}'.format(disc | float) }} disc</span>
+              {% endif %}
             {% endif %}
           </td>
           <td class="td-actions" style="white-space:nowrap">
             <a href="/results/{{ r.id }}" class="btn btn-outline btn-sm btn-icon-only" title="View this calculation">👀</a>
             <a href="/calculator?from={{ r.id }}" class="btn btn-outline btn-sm btn-icon-only" title="Copy dimensions into a new calculation">⧉</a>
+            {# MIRROR-TO-MES: needs-review — "Edit pending costing" pill; gated to status=='pending'. Port to icb-platform dashboard.html at cutover if the MES wants the same affordance. #}
             {% if rstatus == 'pending' %}
+            <a href="/calculator?edit={{ r.id }}" class="btn btn-outline btn-sm"
+               title="Edit this pending costing — change prices, formulas or dimensions and re-save"
+               style="color:#ffb340;border-color:rgba(255,179,64,.45)">✏️ Edit</a>
             <button class="btn btn-success btn-sm btn-icon-only" title="Accept this calculation" onclick="acceptRecentCalculation({{ r.id }}, this)">✓</button>
             <button class="btn btn-danger btn-sm btn-icon-only" title="Decline this calculation" onclick="declineRecentCalculation({{ r.id }}, this)">✗</button>
             {% endif %}

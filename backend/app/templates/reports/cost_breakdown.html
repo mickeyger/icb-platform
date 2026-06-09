@@ -311,10 +311,26 @@
     <td class="val num-cell">{{ '{:,.2f}'.format(ratio_amount or 0) }}</td>
   </tr>
   {% endif %}
+  {% set _disc = discount_amount or 0 %}
+  {% if _disc and _disc > 0 %}
+  <tr>
+    <td class="lbl">{% if selling_price %}SELLING PRICE{% else %}TOTAL{% endif %}</td>
+    <td class="val num-cell">R {{ '{:,.2f}'.format((selling_price or grand_total) or 0) }}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Discount{% if discount_kind == 'percent' %} ({{ '{:g}'.format(discount_input | float) }}%){% endif %}</td>
+    <td class="val num-cell">− R {{ '{:,.2f}'.format(_disc | float) }}</td>
+  </tr>
+  <tr class="grand">
+    <td class="lbl">NET TOTAL</td>
+    <td class="val num-cell">R {{ '{:,.2f}'.format((net_total or 0) | float) }}</td>
+  </tr>
+  {% else %}
   <tr class="grand">
     <td class="lbl">{% if selling_price %}SELLING PRICE{% else %}TOTAL MANUFACTURING COST{% endif %}</td>
     <td class="val num-cell">R {{ '{:,.2f}'.format((selling_price or grand_total) or 0) }}</td>
   </tr>
+  {% endif %}
 </table>
 
 </body>

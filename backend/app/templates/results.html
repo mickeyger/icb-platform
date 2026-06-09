@@ -95,11 +95,16 @@
     {% endif %}
   </div>
   <div style="text-align:right">
-    {% set _final_price = result.selling_price if result.get('selling_price') else result.grand_total %}
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">SELLING PRICE</div>
+    {% set _gross = result.selling_price if result.get('selling_price') else result.grand_total %}
+    {% set _disc_top = result.get('discount_amount') or 0 %}
+    {% set _final_price = result.get('net_total') if result.get('net_total') is not none else _gross %}
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">{{ 'NET TOTAL' if (_disc_top and _disc_top > 0) else 'SELLING PRICE' }}</div>
     <div style="font-family:var(--font-mono);font-size:32px;font-weight:700;color:var(--blue-hi)">
-      R {{ '{:,.2f}'.format(_final_price) }}
+      R {{ '{:,.2f}'.format(_final_price | float) }}
     </div>
+    {% if _disc_top and _disc_top > 0 %}
+    <div style="font-size:12px;color:#4ade80">less R {{ '{:,.2f}'.format(_disc_top | float) }} discount &nbsp;·&nbsp; was R {{ '{:,.2f}'.format(_gross | float) }}</div>
+    {% endif %}
     {% if result.cost_per_sqm %}
     <div style="font-size:12px;color:var(--text-dim)">
       Manufacturing R {{ '{:,.2f}'.format(result.grand_total) }} &nbsp;·&nbsp; R {{ '{:,.2f}'.format(result.cost_per_sqm) }} / m²
@@ -200,6 +205,17 @@
           </span>
         </div>
         {% endif %}
+        {% set _disc = result.get('discount_amount') or 0 %}
+        {% if _disc and _disc > 0 %}
+        <div class="summary-row highlight-green">
+          <span class="s-label">Discount{% if result.get('discount_kind') == 'percent' %} ({{ '{:g}'.format(result.get('discount_input') | float) }}%){% endif %}</span>
+          <span class="s-val">− R {{ '{:,.2f}'.format(_disc | float) }}</span>
+        </div>
+        <div class="summary-row total" style="color:var(--blue-hi)">
+          <span>NET TOTAL</span>
+          <span class="s-val">R {{ '{:,.2f}'.format((result.get('net_total') or 0) | float) }}</span>
+        </div>
+        {% endif %}
       </div>
       {% else %}
       <div style="padding:16px;color:var(--text-dim);font-size:13px">
@@ -241,6 +257,17 @@
             {{ costing_state_controls() }}
             <span class="s-val">R {{ '{:,.2f}'.format(result.grand_total) }}</span>
           </span>
+        </div>
+        {% endif %}
+        {% set _discr = result.get('discount_amount') or 0 %}
+        {% if _discr and _discr > 0 %}
+        <div class="summary-row highlight-green">
+          <span class="s-label">Discount{% if result.get('discount_kind') == 'percent' %} ({{ '{:g}'.format(result.get('discount_input') | float) }}%){% endif %}</span>
+          <span class="s-val">− R {{ '{:,.2f}'.format(_discr | float) }}</span>
+        </div>
+        <div class="summary-row total" style="color:var(--blue-hi)">
+          <span>NET TOTAL</span>
+          <span class="s-val">R {{ '{:,.2f}'.format((result.get('net_total') or 0) | float) }}</span>
         </div>
         {% endif %}
       </div>
