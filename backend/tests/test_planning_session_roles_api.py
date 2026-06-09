@@ -165,7 +165,10 @@ def test_eta_gate_blocks_bypasses_and_passes():
 def test_schedule_occupied_409(fresh_planning_job, admin):
     from app.database import SessionLocal
     from app.services import planning as pl
-    a, b = fresh_planning_job(), fresh_planning_job()
+    # WO v4.29 D4: the gate now blocks jobs with no chassis signal, so mark the chassis received —
+    # this test is about cell occupancy, not the ETA gate.
+    rcv = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    a, b = fresh_planning_job(chassis_received_at=rcv), fresh_planning_job(chassis_received_at=rcv)
     with SessionLocal() as db:
         pl.schedule(db, production_job_id=a, week=date(2026, 9, 7), bay="QA-1", user=admin)
         with pytest.raises(pl.CellOccupiedError):
@@ -185,7 +188,7 @@ def test_unschedule_frees(fresh_planning_job, admin):
     from app.database import SessionLocal
     from app.models.mes import PlanningSlot
     from app.services import planning as pl
-    jid = fresh_planning_job()
+    jid = fresh_planning_job(chassis_received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))  # D4: ready to schedule
     with SessionLocal() as db:
         it = pl.schedule(db, production_job_id=jid, week=date(2026, 9, 14), bay="QA-3", user=admin)
         pl.unschedule(db, slot_id=it.id, user=admin)
@@ -239,7 +242,7 @@ def test_planning_board_seeded(api):
 
 
 def test_schedule_move_unschedule_roundtrip(api, fresh_planning_job):
-    jid = fresh_planning_job()
+    jid = fresh_planning_job(chassis_received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))  # D4: ready to schedule
     r = api.post("/api/planning-slots", json={"production_job_id": jid, "week": "2026-10-05",
                                               "bay": "QA-7", "lane": "test", "slot_position": 7})
     assert r.status_code == 201
@@ -316,7 +319,7 @@ def test_stores_can_count_not_raise(make_user, api_as):
 
 def test_planner_can_schedule(make_user, api_as, fresh_planning_job):
     c = api_as(make_user("planner"))
-    jid = fresh_planning_job()
+    jid = fresh_planning_job(chassis_received_at=datetime(2026, 1, 1, tzinfo=timezone.utc))  # D4: ready to schedule
     r = c.post("/api/planning-slots", json={"production_job_id": jid, "week": "2026-11-02", "bay": "QA-11"})
     assert r.status_code == 201                                                  # has planning.schedule
 
