@@ -47,8 +47,11 @@ def test_chassis_journey(page: Page) -> None:
     # 4) Search narrows the table (the search box is wired to the list query).
     search = page.get_by_test_id("chassis-search")
     expect(search).to_be_visible(timeout=T)
-    search.fill("MOCK")          # matches the seeded mock VINs on CI; harmless on real data
+    search.fill("MOCK")          # demonstrate the search narrows (matches the seeded mock VINs on CI)
     page.wait_for_timeout(400)   # debounce / refetch settle
+    search.fill("")              # clear so the full list returns — no real-data dependency for the click below
+    page.wait_for_timeout(400)
+    expect(page.get_by_test_id("chassis-row").first).to_be_visible(timeout=T)
 
     # 5) Open the first chassis detail (read-path; the SPA routes without crashing).
     page.get_by_test_id("chassis-row").first.click()
