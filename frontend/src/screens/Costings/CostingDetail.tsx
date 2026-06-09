@@ -410,12 +410,7 @@ function SignoffCheck({
           </button>
           <div className="flex-1">
             <div className={`text-sm font-semibold ${signed ? 'text-status-green' : 'text-body'}`}>{label}</div>
-            {signed ? (
-              <div className="mt-1 text-xs text-muted">
-                <ShieldCheck size={12} className="mr-1 inline-block text-status-green" />
-                Signed by <strong>{by}</strong> at {dmy(at)} {hhmm(at!)}
-              </div>
-            ) : canSign ? (
+            {!signed && (canSign ? (
               <div className="mt-1 text-xs text-muted">
                 You are signed in as <strong>{userName}</strong> ({userRole}). Click the box to open the formal attestation modal.
               </div>
@@ -423,8 +418,17 @@ function SignoffCheck({
               <div className="mt-1 text-xs text-muted">
                 Disabled — requires <strong>{requiredRole}</strong> role to sign off. You are signed in as {userName} ({userRole}).
               </div>
-            )}
+            ))}
           </div>
+          {/* WO v4.29 — signed-off stamp to the RIGHT of the label (date + time + who) */}
+          {signed && (
+            <div className="shrink-0 self-center text-right text-xs text-muted">
+              <div className="font-semibold text-status-green">
+                <ShieldCheck size={12} className="mr-1 inline-block" /> Signed by {by}
+              </div>
+              <div className="tabular-nums">{dmy(at)} {hhmm(at!)}</div>
+            </div>
+          )}
         </label>
       </div>
     </Tooltip>
