@@ -292,3 +292,15 @@ def test_planning_start_param_api(api):
     assert len(weeks) == 6
     assert weeks[0] == _monday(start)                                                  # Monday-normalised anchor
     assert all((weeks[i + 1] - weeks[i]).days == 7 for i in range(len(weeks) - 1))
+
+
+# ── Pre-Job sign-off timestamps surface per-role in the list (so each box ticks immediately) ─
+def test_signoff_timestamps_surface_in_list(api, fresh_job, user):
+    from app.database import SessionLocal
+    from app.services import production_jobs as svc
+    jid = fresh_job(status="pre_job_sent")
+    with SessionLocal() as db:
+        svc.record_signoff(db, jid, "sales", "ok-sales", user)            # only the sales role signs
+    item = next(j for j in api.get("/api/production-jobs?limit=500").json() if j["id"] == jid)
+    assert item["pre_job_signoff_sales_at"] is not None                   # surfaced in the LIST item (the fix)
+    assert item.get("pre_job_signoff_production_at") is None              # the other box stays unsigned

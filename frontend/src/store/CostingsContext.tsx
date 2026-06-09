@@ -75,6 +75,13 @@ interface ApiProductionJob {
   job_number: string | null
   status: string
   mes_status: string
+  // WO v4.29 — per-role sign-off timestamps (live on the production_job) so each box ticks + shows
+  // "signed by … at …" the moment that role signs.
+  pre_job_signoff_sales_at?: string | null
+  pre_job_signoff_sales_by?: string | null
+  pre_job_signoff_production_at?: string | null
+  pre_job_signoff_production_by?: string | null
+  pre_job_confirmed_at?: string | null
 }
 
 const CostingsContext = createContext<CostingsValue | null>(null)
@@ -99,6 +106,13 @@ function mergeProductionJob(c: Costing, pj?: ApiProductionJob): Costing {
     production_job_id: pj.id,
     status: (pj.mes_status as StatusName) || c.status,
     job_number_assigned: pj.job_number ?? c.job_number_assigned,
+    // WO v4.29 — surface the pj's sign-off state (the source of truth) so each box reflects signed +
+    // timestamp immediately, not only once BOTH are in.
+    pre_job_signoff_sales_at: pj.pre_job_signoff_sales_at ?? c.pre_job_signoff_sales_at,
+    pre_job_signoff_sales_by: pj.pre_job_signoff_sales_by ?? c.pre_job_signoff_sales_by,
+    pre_job_signoff_production_at: pj.pre_job_signoff_production_at ?? c.pre_job_signoff_production_at,
+    pre_job_signoff_production_by: pj.pre_job_signoff_production_by ?? c.pre_job_signoff_production_by,
+    pre_job_confirmed_at: pj.pre_job_confirmed_at ?? c.pre_job_confirmed_at,
   }
 }
 
