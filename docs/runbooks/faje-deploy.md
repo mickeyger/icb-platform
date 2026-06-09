@@ -1,9 +1,10 @@
 # faje.co.za deploy runbook — Cost Calculator cutover to icb-platform (WO v4.30)
 
-> **Status: §3.2 DONE.** §A (env contract) + §C (deploy **path (c)** confirmed via ticket #2462727 + the
-> `passenger_wsgi.py` ASGI→WSGI bridge) complete; §D/§E cutover + rollback steps are written. Still pending:
-> §B (the actual env-var VALUES from Michael), the **virtualenv-reuse** answer (§C open question), and §D
-> **execution** in the paired §3.4 session. Single runbook for WO §0.4 (deploy), §0.5 (env), §0.7 (rollback), §3.2–§3.4.
+> **Status: §3.2 DONE; deploy mechanics finalised.** §A (env) + §C (path (c) + the `passenger_wsgi.py`
+> ASGI→WSGI bridge) complete; §D/§E cover BOTH cutover/rollback approaches (parallel-app vs mutate-in-place).
+> Still pending: §B (env-var VALUES from Michael), HostAfrica's **parallel-app** answer (picks the §D/§E
+> variant), and §D **execution** in the paired §3.4 session (~30–45 min). Single runbook for WO §0.4 (deploy),
+> §0.5 (env), §0.7 (rollback), §3.2–§3.4.
 
 Post-cutover, `faje.co.za` is served by **`mickeyger/icb-platform`** (was `GRP-Costing-System`). The Cost
 Calculator (Jinja at `/`, `/calculator`, `/results/...`) is unchanged for users; the underlying repo changes.
@@ -64,36 +65,61 @@ legacy `passenger_wsgi.py`; `a2wsgi==1.10.7` pinned in `backend/requirements.txt
 | Application URL | `faje.co.za/` | unchanged |
 | Startup file | `passenger_wsgi.py` | `passenger_wsgi.py` (now under `backend/`) |
 | Entry point | `application` | `application` (the a2wsgi-wrapped ASGI app) |
-| Virtualenv | `/home/fajecoza/virtualenv/icecoldgrp/3.11/` | ⚠ see open question below |
+| Virtualenv | `/home/fajecoza/virtualenv/icecoldgrp/3.11/` (persists, goes dormant) | **NEW venv auto-created from scratch** on root-change → first Pip Install takes several minutes |
 | Pip install | manual "Run Pip Install" button | same — run after the pull (installs `a2wsgi`, etc.) |
 | Restart | manual button | same — click after each change |
 
 *(Acceptance: `/calculator` stays byte-identical to v4.29 except the intended v4.30 ports + the 55%-ratio
 enhancement.)*
 
-> **⚠ OPEN (Michael → HostAfrica):** does changing the Application root **reuse** the existing virtualenv at
-> `/home/fajecoza/virtualenv/icecoldgrp/3.11/`, or create a NEW one? Affects rollback (a fresh venv leaves the
-> old one intact for revert; a reused/mutated venv must be re-pip-installed on rollback). Doesn't block §3.2.
-> Record the answer here.
+> **✅ RESOLVED (ticket #2462727, virtualenv):** changing the Application Root **creates a brand-new virtualenv
+> from scratch — it does NOT reuse the existing one.** The `icecoldgrp` venv persists but goes **dormant**.
+> Reverting the Root creates *yet another* new venv (it does **not** restore the original). A fresh venv's first
+> **Pip Install takes several minutes.** Consequences:
+> - **Cutover window: allocate ~30–45 min** at the cPanel (fresh pip install + verification), not 5–10.
+> - **Rollback is heavier** for the in-place path — reverting Root = a new venv + a full re-pip-install + restart
+>   (~10–15 min), not an instant flip. See §E for the safer parallel-app option.
+>
+> **⚠ OPEN (Michael → HostAfrica):** can we run a **SECOND "Setup Python App"** pointing at `icb-platform/backend`
+> **alongside** the existing `icecoldgrp` app, and switch faje.co.za URL routing between them once verified?
+> **If yes →** parallel-app cutover with **instant rollback** (route back to the old app, untouched). **If no →**
+> the mutate-in-place path. Record the answer + pick the §D/§E variant.
 
-## §D — Cutover steps (paired session, WO §3.4) — TWO cPanel config changes
+## §D — Cutover steps (paired session, WO §3.4) — allow ~30–45 min
 
+**Two approaches** — pick on the day per the parallel-app answer (§C):
+- **(D1) Parallel-app — PREFERRED (pending HostAfrica "yes"):** stand up a SECOND "Setup Python App" at
+  `icb-platform/backend` (its own new venv → Run Pip Install → Restart → verify on a test URL/route), THEN
+  switch faje.co.za routing to it. The old `icecoldgrp` app stays running + untouched → rollback = flip routing back.
+- **(D2) Mutate-in-place — FALLBACK:** repoint the existing app's Git source + Application Root (steps below).
+  A new venv is created in the process; rollback re-points + rebuilds (~10–15 min; §E).
+
+**Mutate-in-place steps (D2):**
 1. **Pre-cutover snapshot** — record (a) the current `GRP-Costing-System` commit deployed, and (b) ALL current
    Python Setup field values (table above) = the rollback target.
 2. **Switch Git source** — cPanel Git deploy: repo `mickeyger/GRP-Costing-System` → `mickeyger/icb-platform`,
    branch `main` (post-merge); pull.
-3. **Update Application root** — Python Setup: `…/icecoldgrp` → `…/<icb-platform>/backend` (confirm the on-disk path).
-4. **Run Pip Install** — click the button → installs `backend/requirements.txt` (incl. `a2wsgi`). *(Not automatic on Git pull.)*
-5. **Restart** — click the Restart button (required after code/config change).
-6. **Verify** — `faje.co.za/calculator`: log in as a UAT user, walk a costing, save a **discounted** quote and
-   confirm **Net Total** displays correctly, export Excel/PDF, check the dashboard. Confirm zero behavioural diff.
-   *(Run `alembic upgrade head` via the venv if it isn't wired to the deploy — applies 0015, a no-op on the shared DB.)*
+3. **Update Application Root** — Python Setup: `…/icecoldgrp` → `…/<icb-platform>/backend` (confirm the on-disk
+   path). **A NEW venv is created here — the next Pip Install runs from scratch (several minutes).**
+4. **Run Pip Install** — installs `backend/requirements.txt` (incl. `a2wsgi`) into the fresh venv. *(Not automatic on Git pull.)*
+5. **Restart** — click Restart (required after code/config change).
+6. **Verify** — `faje.co.za/calculator`: log in, walk a costing, save a **discounted** quote + confirm **Net
+   Total**, export Excel/PDF, check the dashboard. Zero behavioural diff. *(Run `alembic upgrade head` via the
+   venv if not wired to the deploy — applies 0015, a no-op on the shared DB.)*
 7. **Notify UAT testers** — "Cost Calculator now served from the unified codebase; behaviour unchanged; report issues."
 
-## §E — Rollback (WO §0.7) — reverse BOTH cPanel changes
+For **parallel-app (D1)**: do steps 2–5 on the NEW second app first (verify on a test route), then the only
+"switch" is the URL routing — §D.1's snapshot still applies for the routing revert.
 
-If any step fails, in cPanel: **(1)** revert the **Git source** to `mickeyger/GRP-Costing-System` + pull the
-pre-cutover commit (§D.1); **(2)** revert the **Application root** to `/home/fajecoza/icecoldgrp`; **(3) Run Pip
-Install** (restores the legacy deps — esp. if the virtualenv was reused, see the open question); **(4) Restart**.
-**No DB rollback** — the only schema change (0015) is additive + guarded; the discount columns are
-shared/faje-owned. Document the failure; iterate offline.
+## §E — Rollback (WO §0.7) — path depends on the cutover approach
+
+- **Parallel-app (D1) — instant:** switch faje.co.za URL routing **back to the original `icecoldgrp` app**
+  (it stayed running + untouched). No rebuild. Preferred — pending HostAfrica's parallel-app answer.
+- **Mutate-in-place (D2) — ~10–15 min:** in cPanel: **(1)** revert the **Git source** to
+  `mickeyger/GRP-Costing-System` + pull the pre-cutover commit (§D.1); **(2)** revert the **Application Root**
+  to `/home/fajecoza/icecoldgrp` — **this creates ANOTHER new venv; it does NOT restore the original**;
+  **(3) Run Pip Install** to rebuild the legacy deps into that fresh venv (several minutes); **(4) Restart**.
+  The original dormant venv is not auto-reused, so the re-pip-install is mandatory.
+
+**No DB rollback** in either path — the only schema change (0015) is additive + guarded; the discount columns
+are shared/faje-owned. Document the failure; iterate offline.
