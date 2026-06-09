@@ -1722,6 +1722,9 @@ async function prefillCalculation(recordId) {
     document.getElementById('trailer-select').value = payload.trailer_type_id;
     await loadBOM({ preserveInputs: true });
     applyCalculationInputs(payload);
+    // WO v4.30 — a copy keeps the SOURCE ratio (applyCalculationInputs doesn't set it); reuse the
+    // edit-ratio restorer so copy matches edit and never falls through to the 55% new-costing default.
+    restoreEditRatio(payload.ratio_value, (payload.ui_snapshot || {}).ratio);
     lastRecordId = null;
     document.getElementById('print-btn').disabled = true;
     document.getElementById('view-btn').disabled = true;
@@ -1911,6 +1914,14 @@ function restoreEditRatio(ratioValue, snapRatio) {
       Math.abs(parseFloat(o.value) - Number(ratioValue)) < 1e-6);
     if (m) sel.value = m.value;
   }
+}
+
+// WO v4.30 — a brand-new costing opens with the ratio defaulted to 55%. Edit (?edit=) restores the saved
+// ratio and copy (?from=) restores the source ratio (both via restoreEditRatio), so neither uses this.
+// Guarded on an empty selection so a restored last-session draft keeps the ratio already chosen.
+function defaultNewRatio() {
+  const sel = document.getElementById('f-ratio');
+  if (sel && !sel.value) sel.value = '0.55';   // 0.55 = the "55%" option
 }
 
 // Re-open the chassis panel and restore every chassis dropdown from the saved
@@ -2108,8 +2119,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   } else if (tid) {
     document.getElementById('trailer-select').value = tid;
     loadBOM();
+    defaultNewRatio();              // WO v4.30 — new costing for a trailer: default ratio 55%
   } else {
     await restoreLastSession();
+    defaultNewRatio();              // WO v4.30 — new costing: default ratio 55% (kept only if none restored)
   }
   updateGeo();
 
