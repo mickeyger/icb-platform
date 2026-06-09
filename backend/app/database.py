@@ -390,6 +390,14 @@ class CalculationRecord(Base):
     decline_reason  = Column(Text, nullable=True)
     quote_number    = Column(String(64), nullable=True, index=True)  # Immutable once assigned. Formatted via QuoteCounter template.
     is_repair       = Column(Boolean, default=False)  # quote is for repair work, not a new build
+    # Cost Calculator discount (WO v4.30 port from GRP-Costing-System d2da5bf). Applied to the selling
+    # price; net_total is the post-discount headline (also mirrored into result_json). NULLs = no
+    # discount, behaviour identical to before. Columns already exist on the shared icb_costings DB
+    # (faje's d2da5bf deploy) — §0.2a: no Alembic migration; _run_migrations ensures them on fresh/CI DBs.
+    discount_kind   = Column(String(16), nullable=True)   # 'percent' | 'amount' | NULL
+    discount_input  = Column(Float, nullable=True)        # raw value typed (the % or the flat amount)
+    discount_amount = Column(Float, nullable=True)        # computed currency discount
+    net_total       = Column(Float, nullable=True)        # selling_price - discount_amount (headline)
     # MES Pre-Job Card flow (Step 3 of the Icecold Bodies process).
     pre_job_sent_at      = Column(DateTime, nullable=True)
     pre_job_confirmed_at = Column(DateTime, nullable=True)
@@ -980,6 +988,12 @@ def _run_migrations():
         # Icecold Bodies MES chassis arrival confirmation (Work Order v4.3)
         ("calculations",      "chassis_received_at",                   "DATETIME"),
         ("calculations",      "chassis_received_by",                   "VARCHAR(64)"),
+        # Cost Calculator discount (WO v4.30 port from GRP-Costing-System d2da5bf). Idempotent —
+        # no-op on the shared prod DB where faje's deploy already added them; creates them on fresh/CI DBs.
+        ("calculations",      "discount_kind",                         "VARCHAR(16)"),
+        ("calculations",      "discount_input",                        "FLOAT"),
+        ("calculations",      "discount_amount",                       "FLOAT"),
+        ("calculations",      "net_total",                             "FLOAT"),
         # Body-options support
         ("bill_of_materials", "is_body_option",              "BOOLEAN DEFAULT 0"),
         ("bill_of_materials", "body_option_group",           "VARCHAR(100)"),

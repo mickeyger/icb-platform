@@ -86,6 +86,21 @@ def _build_body_variables(bom_rows) -> dict:
     return out
 
 
+def _apply_body_variable_overrides(body_vars: dict, overrides) -> None:
+    """Overlay caller-supplied body-variable values (keyed by material name) onto
+    the template-derived map. Used when editing a saved costing so the recompute
+    reproduces the quote's insulation thicknesses (EPS/PU) even if the global
+    EPS/PU copy-on-switch has since rewritten the BOM's variable_value on disk.
+    No-op when overrides is falsy, so normal calculations are unaffected."""
+    if not overrides:
+        return
+    for name, val in overrides.items():
+        try:
+            body_vars[str(name)] = float(val)
+        except (TypeError, ValueError):
+            continue
+
+
 def _eval_bom_conditions(raw_json: str | None, selected_opt_names: set[str]) -> bool:
     """Evaluate a row's per-item bom_conditions against the current selections.
 
@@ -132,7 +147,7 @@ def _eval_bom_conditions(raw_json: str | None, selected_opt_names: set[str]) -> 
     return (not all_met) if mode == "exclude" else all_met
 
 
-def _build_bom_items(bom_rows, dims, overrides, body_opt_sel, db, excluded_categories=None, trailer=None, flag_overrides=None, include_all_items=False, user_excluded_bom_ids=None, optional_sections_enabled=None):
+def _build_bom_items(bom_rows, dims, overrides, body_opt_sel, db, excluded_categories=None, trailer=None, flag_overrides=None, include_all_items=False, user_excluded_bom_ids=None, optional_sections_enabled=None, formula_overrides=None):
     """Resolve BOM rows into the bom_items list consumed by calculate_bom().
 
     When `trailer.configurator_v2` is True, additional gating runs on top of the
@@ -215,6 +230,10 @@ def _build_bom_items(bom_rows, dims, overrides, body_opt_sel, db, excluded_categ
     _DRDSR_GROUPS = ('DRD', 'SRD')
 
     user_excluded_set = {int(x) for x in (user_excluded_bom_ids or []) if str(x).strip().lstrip('-').isdigit()}
+    # Per-row formula overrides — used by edit-replay so a saved costing reproduces
+    # exactly even when the BOM's formula_expression has since changed (e.g. the
+    # EPS/PU insulation copy-on-switch rewrites the inactive side's formula).
+    formula_overrides = {str(k): v for k, v in (formula_overrides or {}).items()}
     # Optional sections (is_optional=1, e.g. OPTIONAL EXTRAS) default to OFF. The
     # frontend sends the set of section_ids the user has explicitly opted in;
     # any optional row whose section is not in that set is treated as user-
@@ -267,7 +286,7 @@ def _build_bom_items(bom_rows, dims, overrides, body_opt_sel, db, excluded_categ
                 "category_name":      cat,
                 "bom_section_id":     row.bom_section_id,
                 "section_is_optional": bool(is_opt),
-                "formula_expression": row.formula_expression,
+                "formula_expression": formula_overrides.get(str(row.id), row.formula_expression),
                 "waste_percentage":   row.waste_percentage,
                 "price_per_unit":     price,
                 "unit_of_measure":    mat.unit_of_measure,
@@ -526,6 +545,32 @@ def _apply_chassis_and_margin(result, body, db):
     return result
 
 
+def _apply_discount(result, body):
+    """Apply an optional discount to the Total Cost (selling price). Sets
+    discount_kind / discount_input / discount_amount and net_total on the result.
+    A percent discount is clamped to 0–100; a flat amount is clamped to the total.
+    net_total is ALWAYS set (= the final headline figure) so callers can read one
+    field. No discount → kind/input NULL, discount_amount 0, net_total == total."""
+    base = float(result.get("selling_price") or result.get("grand_total") or 0)
+    kind = (body.get("discount_kind") or "").strip().lower()
+    try:
+        raw = float(body.get("discount_input") or 0)
+    except (TypeError, ValueError):
+        raw = 0.0
+    discount_amount = 0.0
+    if kind == "percent" and raw > 0:
+        discount_amount = round(base * min(max(raw, 0.0), 100.0) / 100.0, 2)
+    elif kind == "amount" and raw > 0:
+        discount_amount = round(min(raw, base), 2)
+    else:
+        kind, raw = None, 0.0
+    result["discount_kind"]   = kind
+    result["discount_input"]  = raw if kind else None
+    result["discount_amount"] = discount_amount
+    result["net_total"]       = round(base - discount_amount, 2)
+    return result
+
+
 # ─── Calculate ───────────────────────────────────────────────────────────────
 
 @router.post("/api/calculate")
@@ -572,8 +617,9 @@ async def api_calculate(request: Request, db: Session = Depends(get_db)):
     user_excluded_bom_ids = body.get("user_excluded_bom_ids") or []
     optional_sections_enabled = body.get("optional_sections_enabled") or []
 
-    bom_items = _build_bom_items(bom_rows, body.get("dimensions", {}), overrides, body_opt_sel, db, excluded_cats, trailer=tt, flag_overrides=flag_overrides, include_all_items=include_all_items, user_excluded_bom_ids=user_excluded_bom_ids, optional_sections_enabled=optional_sections_enabled)
+    bom_items = _build_bom_items(bom_rows, body.get("dimensions", {}), overrides, body_opt_sel, db, excluded_cats, trailer=tt, flag_overrides=flag_overrides, include_all_items=include_all_items, user_excluded_bom_ids=user_excluded_bom_ids, optional_sections_enabled=optional_sections_enabled, formula_overrides=body.get("formula_overrides"))
     body_vars = _build_body_variables(bom_rows)
+    _apply_body_variable_overrides(body_vars, body.get("body_variable_overrides"))
     _t = _mark("build_items_ms", _t)
 
     formula_lib = get_formula_lib()
@@ -582,6 +628,7 @@ async def api_calculate(request: Request, db: Session = Depends(get_db)):
     _t = _mark("formula_eval_ms", _t)
 
     result = _apply_chassis_and_margin(result, body, db)
+    result = _apply_discount(result, body)
     result["trailer_name"] = tt.name
     _attach_formula_debug(result, body_vars, formula_lib, global_vars)
     _t = _mark("chassis_margin_ms", _t)
@@ -677,6 +724,10 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
     next_version   = int(body.get("next_version") or 2)
     is_repair      = bool(body.get("is_repair"))
     reuse_quote_number = bool(body.get("reuse_quote_number"))
+    # When set, this save is an EDIT of an existing PENDING costing rather than a
+    # brand-new one. version_action == "overwrite" updates that record in place;
+    # "new_version" saves a fresh revision (optionally reusing its quote number).
+    edit_record_id = body.get("edit_record_id")
 
     tt = db.query(TrailerType).filter_by(id=trailer_id).first()
     if not tt:
@@ -698,14 +749,16 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
     include_all_items = bool(body.get("include_all_items"))
     user_excluded_bom_ids = body.get("user_excluded_bom_ids") or []
     optional_sections_enabled = body.get("optional_sections_enabled") or []
-    bom_items = _build_bom_items(bom_rows, dims, overrides, body_opt_sel, db, excluded_cats, trailer=tt, flag_overrides=flag_overrides, include_all_items=include_all_items, user_excluded_bom_ids=user_excluded_bom_ids, optional_sections_enabled=optional_sections_enabled)
+    bom_items = _build_bom_items(bom_rows, dims, overrides, body_opt_sel, db, excluded_cats, trailer=tt, flag_overrides=flag_overrides, include_all_items=include_all_items, user_excluded_bom_ids=user_excluded_bom_ids, optional_sections_enabled=optional_sections_enabled, formula_overrides=body.get("formula_overrides"))
     body_vars = _build_body_variables(bom_rows)
+    _apply_body_variable_overrides(body_vars, body.get("body_variable_overrides"))
     formula_lib = {f.name.lower(): f.expression
                    for f in db.query(Formula).filter_by(is_active=True).all()}
     global_vars = {gv.name: gv.value for gv in db.query(GlobalVariable).all()}
     result = calculate_bom(bom_items, dims, body_vars, formula_lib, global_vars)
     _attach_formula_debug(result, body_vars, formula_lib, global_vars)
     result = _apply_chassis_and_margin(result, body, db)
+    result = _apply_discount(result, body)
 
     mat_updated = {row.material.name: (row.material.last_updated.isoformat()
                    if row.material.last_updated else None) for row in bom_rows}
@@ -718,7 +771,68 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
     result["override_reasons_by_bom"]  = {k: r for k, r in override_reasons.items() if k in bom_id_to_name}
     result["override_reasons_by_name"] = {bom_id_to_name[k]: r for k, r in override_reasons.items() if k in bom_id_to_name}
 
+    # Snapshot the raw input selections so a later EDIT can faithfully re-hydrate
+    # the calculator (body options, optional sections, exclusions, overrides).
+    # Stored inside result_json — additive and backward compatible (old records
+    # simply lack the key and fall back to recomputed defaults on edit).
+    result["input_state"] = {
+        "overrides":                 overrides,
+        "override_reasons":          override_reasons,
+        "body_option_selections":    body_opt_sel,
+        "excluded_categories":       excluded_cats,
+        "flag_overrides":            flag_overrides,
+        "user_excluded_bom_ids":     user_excluded_bom_ids,
+        "optional_sections_enabled": optional_sections_enabled,
+        "profit_margin":             profit_margin,
+        "is_repair":                 is_repair,
+        "ratio_value":               body.get("ratio_value"),
+        "ratio_label":               body.get("ratio_label"),
+        "chassis":                   body.get("chassis"),
+        # Complete client-side UI snapshot (body options, DRD/SRD, configurator
+        # draft states, optional sections, full price overrides, chassis, body
+        # variable values). Lets an edit re-hydrate the calculator exactly so the
+        # recomputed total balances with the saved quote. Opaque to the backend.
+        "ui_snapshot":               body.get("ui_snapshot"),
+    }
+
     async with _approve_lock:
+        # ── EDIT: overwrite an existing PENDING costing in place ──────────────
+        # Keeps the record's id, quote number, revision and creation time; only
+        # the recomputed result + dimensions are replaced. Guarded so a stale
+        # page cannot overwrite a quote that has since been accepted/declined.
+        if version_action == "overwrite" and edit_record_id:
+            rec = db.query(CalculationRecord).filter_by(id=int(edit_record_id)).first()
+            if not rec:
+                raise HTTPException(status_code=404, detail="Costing to edit was not found")
+            rec_status = rec.status or ("accepted" if rec.approved_at else "pending")
+            if rec_status != "pending":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Only pending costings can be edited — this one is '{rec_status}'.",
+                )
+            try:
+                _prev = json.loads(rec.result_json) if rec.result_json else {}
+            except Exception:
+                _prev = {}
+            result["version"]   = int(_prev.get("version", 1) or 1)
+            result["is_repair"] = is_repair
+            rec.dimensions_json = json.dumps(dims)
+            rec.result_json     = json.dumps(result)
+            rec.is_repair       = is_repair
+            rec.customer_id     = customer_id
+            rec.discount_kind   = result.get("discount_kind")
+            rec.discount_input  = result.get("discount_input")
+            rec.discount_amount = result.get("discount_amount")
+            rec.net_total       = result.get("net_total")
+            db.commit()
+            db.refresh(rec)
+            result["record_id"]     = rec.id
+            result["quote_number"]  = rec.quote_number
+            result["trailer_name"]  = tt.name
+            _cust = db.query(Customer).filter_by(id=customer_id).first() if customer_id else None
+            result["customer_name"] = _cust.name if _cust else None
+            return JSONResponse(result)
+
         if customer_id and version_action is None:
             fresh_count = db.query(CalculationRecord).filter(
                 CalculationRecord.customer_id     == customer_id,
@@ -753,22 +867,32 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
             dimensions_json=json.dumps(dims),
             result_json=json.dumps(result),
             is_repair=is_repair,
+            discount_kind=result.get("discount_kind"),
+            discount_input=result.get("discount_input"),
+            discount_amount=result.get("discount_amount"),
+            net_total=result.get("net_total"),
         )
         db.add(rec)
         db.flush()
-        if reuse_quote_number and version_action == "new_version" and customer_id:
+        if reuse_quote_number and version_action == "new_version" and (customer_id or edit_record_id):
             # Copy the parent quote's number onto this revision so the whole
             # revision family shares one identifier. assign_quote_number below
             # is idempotent — it returns early when rec.quote_number is set,
             # so the global counter doesn't advance.
-            parent = (db.query(CalculationRecord)
-                        .filter(CalculationRecord.customer_id     == customer_id,
-                                CalculationRecord.trailer_type_id == trailer_id,
-                                CalculationRecord.id              != rec.id,
-                                CalculationRecord.quote_number.isnot(None),
-                                _same_quote_type_filter(is_repair))
-                        .order_by(CalculationRecord.created_at.desc())
-                        .first())
+            parent = None
+            # An edit knows its exact parent record — use it directly so reuse
+            # works even for quotes saved without a customer.
+            if edit_record_id:
+                parent = db.query(CalculationRecord).filter_by(id=int(edit_record_id)).first()
+            if (parent is None or not parent.quote_number) and customer_id:
+                parent = (db.query(CalculationRecord)
+                            .filter(CalculationRecord.customer_id     == customer_id,
+                                    CalculationRecord.trailer_type_id == trailer_id,
+                                    CalculationRecord.id              != rec.id,
+                                    CalculationRecord.quote_number.isnot(None),
+                                    _same_quote_type_filter(is_repair))
+                            .order_by(CalculationRecord.created_at.desc())
+                            .first())
             if parent and parent.quote_number:
                 rec.quote_number = parent.quote_number
                 db.flush()
@@ -875,7 +999,10 @@ async def api_list_calculations(
         if r.result_json:
             try: rd = json.loads(r.result_json)
             except Exception: pass
-        grand_total = float(rd.get("selling_price") or rd.get("grand_total") or 0)
+        # Headline total = net (after discount). Prefer the column, then result_json,
+        # then fall back to the pre-discount selling price / grand total for legacy rows.
+        _net = r.net_total if getattr(r, "net_total", None) is not None else rd.get("net_total")
+        grand_total = float(_net if _net is not None else (rd.get("selling_price") or rd.get("grand_total") or 0))
         raw_status = (getattr(r, "status", None) or ("accepted" if r.approved_at else "pending"))
         # MES status mapping (Addendum v1.2.1): translate the internal lower-case
         # status to the labels the MES React mockup uses on its Costings Dashboard.
@@ -899,7 +1026,11 @@ async def api_list_calculations(
             "customer": r.customer.name if r.customer else "—",
             "user":     r.user.username if r.user else "—",
             "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "—",
-            "grand_total": grand_total if full_access else None,
+            "grand_total": grand_total if full_access else None,   # net of discount (headline)
+            "gross_total":     float(rd.get("selling_price") or rd.get("grand_total") or 0) if full_access else None,
+            "discount_amount": (float(r.discount_amount) if getattr(r, "discount_amount", None) is not None
+                                else (float(rd["discount_amount"]) if rd.get("discount_amount") is not None else 0)) if full_access else None,
+            "discount_kind":   r.discount_kind if getattr(r, "discount_kind", None) is not None else rd.get("discount_kind"),
             "version":    int(rd.get("version", 1)),
             "approved":   bool(r.approved_at),
             "approved_at": r.approved_at.strftime("%Y-%m-%d %H:%M") if r.approved_at else None,
@@ -1012,10 +1143,49 @@ async def api_get_calculation(record_id: int, request: Request, db: Session = De
         result_data = json.loads(rec.result_json) if rec.result_json else {}
     except Exception:
         result_data = {}
+    input_state = result_data.get("input_state") or {}
+    status = rec.status or ("accepted" if rec.approved_at else "pending")
     return {
         "id": rec.id,
         "trailer_type_id": rec.trailer_type_id,
         "customer_id":     rec.customer_id,
         "dimensions":      dims,
-        "profit_margin":   float(result_data.get("profit_margin") or 0),
+        "profit_margin":   float(result_data.get("profit_margin")
+                                 or input_state.get("profit_margin") or 0),
+        # ── Edit-mode fields (used by /calculator?edit=) ──────────────────────
+        "status":        status,
+        "version":       int(result_data.get("version", 1) or 1),
+        "quote_number":  rec.quote_number,
+        "is_repair":     bool(getattr(rec, "is_repair", False)),
+        # Price overrides survive on every record (overrides_by_bom); option
+        # toggles only on records saved with the input_state snapshot.
+        "overrides":               result_data.get("overrides_by_bom")
+                                   or input_state.get("overrides") or {},
+        "override_reasons":        result_data.get("override_reasons_by_bom")
+                                   or input_state.get("override_reasons") or {},
+        "body_option_selections":    input_state.get("body_option_selections") or {},
+        "excluded_categories":       input_state.get("excluded_categories") or [],
+        "flag_overrides":            input_state.get("flag_overrides") or {},
+        "user_excluded_bom_ids":     input_state.get("user_excluded_bom_ids") or [],
+        "optional_sections_enabled": input_state.get("optional_sections_enabled") or [],
+        # Profit ratio lives at the top level of result_json on every record that
+        # used one (set by _apply_chassis_and_margin) — read it there first so the
+        # calculator restores the selling-price ratio on edit and the total doesn't
+        # jump. input_state is only the fallback for the (redundant) newer copy.
+        "ratio_value":               result_data.get("ratio_value")
+                                     if result_data.get("ratio_value") is not None
+                                     else input_state.get("ratio_value"),
+        "ratio_label":               result_data.get("ratio_label")
+                                     or input_state.get("ratio_label"),
+        # Full UI snapshot + chassis for faithful re-hydration on edit.
+        "ui_snapshot":   input_state.get("ui_snapshot") or {},
+        "chassis":       input_state.get("chassis") or result_data.get("chassis"),
+        # Discount (prefer the dedicated columns; fall back to result_json).
+        "discount_kind":   rec.discount_kind   if rec.discount_kind   is not None else result_data.get("discount_kind"),
+        "discount_input":  rec.discount_input  if rec.discount_input  is not None else result_data.get("discount_input"),
+        "discount_amount": rec.discount_amount if rec.discount_amount is not None else result_data.get("discount_amount"),
+        "net_total":       rec.net_total       if rec.net_total       is not None else result_data.get("net_total"),
+        # The saved result itself (sans the bulky input_state echo) so the editor
+        # can display the original figures and run a balance check against them.
+        "saved_result":  {k: v for k, v in result_data.items() if k != "input_state"},
     }
