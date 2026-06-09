@@ -7,6 +7,7 @@ behaviour itself is asserted in test_v4_29_upstream_fixes.py (no irreversible dr
 """
 from __future__ import annotations
 
+import pytest
 from playwright.sync_api import Page, expect
 
 from _common import admin_session, role_session, shot  # noqa: E402  (sys.path set in conftest)
@@ -41,3 +42,21 @@ def test_planning_board_sales_is_readonly(page: Page, live_server: str, role_use
     _open_board(page)
     expect(page.get_by_text(READONLY).first).to_be_visible(timeout=T)   # sales lacks planning.schedule
     shot(page, "03-board-sales-readonly", journey="planning_drag")
+
+
+def test_planning_view_in_production_disabled_d7(page: Page) -> None:
+    # WO v4.29 D7: the slot-detail "View in Production" button is relabelled + disabled (no navigation
+    # to the still-mocked Production Dashboard).
+    admin_session(page)
+    _open_board(page)
+    # the grid fetches + renders its slots after mount — wait for a scheduled cell before asserting
+    try:
+        page.wait_for_selector("[data-testid='slot-cell']", timeout=T)
+    except Exception:
+        pytest.skip("no scheduled slots in the current rolling window")
+    page.get_by_test_id("slot-cell").first.click()
+    btn = page.get_by_test_id("view-in-production")
+    expect(btn).to_be_visible(timeout=T)
+    expect(btn).to_be_disabled()                                        # greyed + cannot navigate
+    expect(btn).to_have_text("View in Production (coming soon)")
+    shot(page, "04-view-in-production-disabled", journey="planning_drag")

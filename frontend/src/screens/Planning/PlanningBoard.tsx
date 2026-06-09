@@ -733,7 +733,12 @@ function SlotDetail({
       </Tooltip>
 
       <button onClick={onOpenJob} className="w-full rounded-md border border-line py-2 font-semibold text-primary hover:bg-surface-alt">Open full job</button>
-      <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>
+      {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
+          onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
+      <button onClick={onViewProduction} disabled
+        title="Production Dashboard wire-up is planned for a future release"
+        className="w-full cursor-not-allowed rounded-md bg-primary py-2 font-semibold text-white opacity-50"
+        data-testid="view-in-production">View in Production (coming soon)</button>
     </div>
   )
 }
@@ -1042,6 +1047,7 @@ function LivePlanningBoard() {
                           {cell && cell.job ? (
                             <button
                               onClick={() => setOpenSlot(cell)}
+                              data-testid="slot-cell"
                               draggable={canSchedule}
                               onDragStart={(e) => {
                                 if (!canSchedule) { e.preventDefault(); return }
@@ -1219,7 +1225,12 @@ function LiveSlotDetail({
         )}
       </div>
 
-      <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>
+      {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
+          onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
+      <button onClick={onViewProduction} disabled
+        title="Production Dashboard wire-up is planned for a future release"
+        className="w-full cursor-not-allowed rounded-md bg-primary py-2 font-semibold text-white opacity-50"
+        data-testid="view-in-production">View in Production (coming soon)</button>
     </div>
   )
 }
