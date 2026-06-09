@@ -207,6 +207,51 @@ def admin_session(page: "Page") -> "Page":
     return page
 
 
+# ── Per-role journeys (WO v4.29 §3.6) ────────────────────────────────────────
+# The journey server boots with MES_DEMO_AUTOLOGIN_USER=admin, but the autologin endpoint accepts an
+# optional `username` (demo-mode only, origin-guarded) so a single server boot can mint any role per
+# browser context — the prerequisite for per-role coverage (the v4.29 prevention shift).
+ROLE_USERS = {"sales": "journey_sales", "production": "journey_production", "planner": "journey_planner"}
+
+
+@pytest.fixture(scope="session")
+def role_users():
+    """Ensure demo users for the per-role journeys exist (idempotent; cleaned up at session end).
+    The journey server runs as a subprocess against this same DB, so the autologin endpoint resolves
+    these usernames. 0005/0013 grant each role its perms; this only seeds the user rows."""
+    from app.database import SessionLocal, User
+    created = []
+    with SessionLocal() as db:
+        for role, uname in ROLE_USERS.items():
+            if db.query(User).filter_by(username=uname).first() is None:
+                db.add(User(username=uname, password_hash="x", role=role))
+                created.append(uname)
+        db.commit()
+    yield ROLE_USERS
+    with SessionLocal() as db:
+        for uname in created:
+            u = db.query(User).filter_by(username=uname).first()
+            if u is not None:
+                db.delete(u)
+        db.commit()
+
+
+def role_session(page: "Page", username: str, base: str = _DEFAULT_BASE) -> "Page":
+    """Mint `username`'s demo session in this browser context, then load the SPA on the shell.
+
+    Mirrors :func:`admin_session` for an arbitrary seeded role: POST the autologin with the requested
+    username FIRST (sets the context's session cookie), then load ``/mes-app/`` — the SPA's own
+    autologin sees the existing valid session and keeps it (WO v4.29 §3.6).
+    """
+    base = base.rstrip("/")
+    resp = page.request.post(f"{base}/api/mes/autologin",
+                             data={"username": username}, headers={"Origin": base})
+    assert resp.ok, f"autologin as {username!r} failed: HTTP {resp.status}"
+    page.goto("/mes-app/")
+    wait_for_dashboard(page)
+    return page
+
+
 def shot(page: "Page", name: str, journey: str = "admin") -> Path:
     """Save a full-page screenshot under docs/screenshots/journeys/<journey>/."""
     out_dir = SCREENSHOT_ROOT / journey

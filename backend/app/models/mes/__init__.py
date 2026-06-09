@@ -65,6 +65,7 @@ class ProductionJob(Base):
         Index("ix_production_jobs_status_start", "status", "planned_start_date"),
         Index("ix_production_jobs_branch_id", "branch_id"),
         Index("ix_production_jobs_calculation_record_id", "calculation_record_id"),
+        Index("ix_production_jobs_chassis_record_id", "chassis_record_id"),   # WO v4.29 (0014)
         {"schema": "icb_mes"},
     )
 
@@ -105,7 +106,14 @@ class ProductionJob(Base):
     chassis_eta_captured_at = Column(DateTime(timezone=True))
     chassis_eta_captured_by = Column(String(64))
     chassis_data_json = Column(Text)
-    chassis_received_at = Column(DateTime(timezone=True))
+    # DEPRECATED-as-write per ADR 0016 (WO v4.29) — see the DB COMMENT (matched here so `alembic check`
+    # stays clean). Reads prefer the read-bridge JOIN (chassis_records.lifecycle_events via
+    # chassis_record_id); this column is a transitional fallback for legacy rows.
+    chassis_received_at = Column(
+        DateTime(timezone=True),
+        comment="DEPRECATED as write column per ADR 0016 (v4.29). Reads prefer "
+                "JOIN(chassis_records.lifecycle_events); retained as legacy fallback.",
+    )
     chassis_received_by = Column(String(64))
 
     # ── production scheduling ──
@@ -122,6 +130,9 @@ class ProductionJob(Base):
     # ── WO v4.28 (0012): chassis link ──
     # chassis_record_id -> icb_mes.chassis_records.id; FK added in migration 0012 (column-on-model /
     # FK-in-migration; nullable, ON DELETE RESTRICT). The chassis_data_json blob stays for back-compat.
+    # WO v4.29 (0014): backfilled from the job_number match + indexed (the Index is declared in
+    # __table_args__ to match the migration's name) for the chassis read-bridge JOIN (§0.3).
+    # Postgres does not auto-index a FK's referencing column.
     chassis_record_id = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=_utcnow)

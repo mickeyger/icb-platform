@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Truck, PackageX, GripVertical, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { data } from '../../data/mockData'
-import { zarShort, zar, dmy } from '../../lib/format'
+import { zarShort, zar, dmy, monthYear, nextMonths } from '../../lib/format'
 import { Card, StatusPill } from '../../components/ui/primitives'
 import { SidePanel } from '../../components/ui/overlays'
 import { JobDetailStub } from '../../components/JobDetailStub'
@@ -33,6 +33,51 @@ type LocalSlot = SlotAssignment & {
 }
 
 const SLOTS = ['V-1', 'V-2', 'V-3', 'V-4', 'V-5', 'P-1', 'P-2', 'P-3']
+
+// WO v4.29 — middle-mouse (scroll-wheel button) drag-to-pan for the grid panel. Hold the wheel button
+// and move: the panel scrolls left/right/up/down (grab/hand-tool feel — content follows the cursor).
+// Returns a ref to attach to the scrollable element. Suppresses the browser's native middle-click
+// autoscroll (preventDefault on the middle mousedown) and text selection while panning.
+function useMiddleButtonPan<T extends HTMLElement>() {
+  const ref = useRef<T>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let panning = false
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0
+    const onMove = (e: MouseEvent) => {
+      if (!panning) return
+      el.scrollLeft = startLeft - (e.clientX - startX)
+      el.scrollTop = startTop - (e.clientY - startY)
+    }
+    const onUp = () => {
+      if (!panning) return
+      panning = false
+      el.style.cursor = ''
+      el.style.userSelect = ''
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 1) return                 // middle (scroll-wheel) button only
+      panning = true
+      startX = e.clientX; startY = e.clientY
+      startLeft = el.scrollLeft; startTop = el.scrollTop
+      el.style.cursor = 'grabbing'
+      el.style.userSelect = 'none'
+      e.preventDefault()                         // stop native autoscroll + text selection
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    }
+    el.addEventListener('mousedown', onDown)
+    return () => {
+      el.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+  return ref
+}
 
 export function PlanningBoard() {
   const { mode } = usePlanning()
@@ -415,10 +460,10 @@ function MockPlanningBoard() {
         <Card className="overflow-x-auto p-0">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="bg-primary text-white">
-                <th className="px-2 py-2 text-left font-semibold">Slot</th>
+              <tr className="text-white">
+                <th className="sticky left-0 top-0 z-30 bg-primary px-2 py-2 text-left font-semibold">Slot</th>
                 {weeks.map((w) => (
-                  <th key={w.week} className="px-2 py-2 text-left font-semibold">
+                  <th key={w.week} className="sticky top-0 z-20 bg-primary px-2 py-2 text-left font-semibold">
                     {w.week}
                     <div className="text-[10px] font-normal opacity-80">{dmy(w.start)}</div>
                   </th>
@@ -428,7 +473,7 @@ function MockPlanningBoard() {
             <tbody>
               {SLOTS.map((slot) => (
                 <tr key={slot} className="border-b border-line">
-                  <td className="bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold">{slot}</td>
+                  <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold shadow-[inset_-1px_0_0_#E5E7EB]">{slot}</td>
                   {weeks.map((w) => {
                     const cell = cellFor(w.week, slot)
                     const key = `${w.week}:${slot}`
@@ -557,7 +602,7 @@ function FooterRow({
 }) {
   const row = (
     <tr className="border-t border-line bg-surface-alt">
-      <td className="px-2 py-1.5 text-xs font-semibold text-muted">{label}</td>
+      <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 text-xs font-semibold text-muted shadow-[inset_-1px_0_0_#E5E7EB]">{label}</td>
       {cells.map((c, i) => (
         <td
           key={i}
@@ -688,7 +733,12 @@ function SlotDetail({
       </Tooltip>
 
       <button onClick={onOpenJob} className="w-full rounded-md border border-line py-2 font-semibold text-primary hover:bg-surface-alt">Open full job</button>
-      <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>
+      {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
+          onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
+      <button onClick={onViewProduction} disabled
+        title="Production Dashboard wire-up is planned for a future release"
+        className="w-full cursor-not-allowed rounded-md bg-primary py-2 font-semibold text-white opacity-50"
+        data-testid="view-in-production">View in Production (coming soon)</button>
     </div>
   )
 }
@@ -696,14 +746,14 @@ function SlotDetail({
 // ── Initial-load skeleton (first real use of the Skeleton primitive — §3.1) ─────
 function BoardSkeleton() {
   return (
-    <div className="p-4">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-4 flex shrink-0 items-center justify-between">
         <h1 className="text-xl font-bold text-body">Planning Board</h1>
         <span className="text-xs text-muted">Loading…</span>
       </div>
-      <div className="grid grid-cols-[250px_1fr] gap-4">
-        <Card className="self-start"><Skeleton rows={4} /></Card>
-        <Card className="p-0"><Skeleton rows={8} /></Card>
+      <div className="grid min-h-0 flex-1 grid-cols-[250px_1fr] gap-4">
+        <Card className="min-h-0 overflow-y-auto"><Skeleton rows={4} /></Card>
+        <Card className="min-h-0 overflow-auto p-0"><Skeleton rows={8} /></Card>
       </div>
     </div>
   )
@@ -714,7 +764,8 @@ function BoardSkeleton() {
 // legacy ack pool + chassis tick are NOT here (dead in live per §0.5; 2C-3). ────
 function LivePlanningBoard() {
   const nav = useNavigate()
-  const { board, schedule, move, unschedule, lastUpdated, refresh } = usePlanning()
+  const { board, schedule, move, unschedule, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
+  const panRef = useMiddleButtonPan<HTMLDivElement>()   // WO v4.29 — middle-button drag-to-pan
   const { profile, hasPermission } = useAppData()
   // WO v4.19: planning-ack + chassis-received route through the rewired
   // CostingsContext (→ /api/production-jobs/*); PlanningContext stays board-only.
@@ -839,8 +890,8 @@ function LivePlanningBoard() {
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+    <div className="flex h-full flex-col p-4">
+      <div className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
           <div className="mb-0.5 text-[11px] text-muted">MES › Planning › Board</div>
           <h1 className="text-xl font-bold text-body">Planning Board</h1>
@@ -859,14 +910,33 @@ function LivePlanningBoard() {
               </button>
             ))}
           </div>
-          <span className="font-semibold">Week {data.kpis.current_week}</span>
-          <span className="rounded-md border border-line bg-white px-3 py-1.5">{board.weeks.length} weeks</span>
+          {/* WO v4.29 — window jump: step ‹ ›, jump to a month, or back to Today */}
+          <div className="flex items-center gap-1">
+            <button onClick={prevWindow} title="Earlier weeks" aria-label="Earlier weeks"
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs font-semibold hover:bg-surface-alt">‹</button>
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) jumpTo(e.target.value) }}
+              title="Jump to month"
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs outline-none"
+            >
+              <option value="">Jump to month…</option>
+              {nextMonths(12).map((m) => <option key={m.iso} value={m.iso}>{m.label}</option>)}
+            </select>
+            <button onClick={nextWindow} title="Later weeks" aria-label="Later weeks"
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs font-semibold hover:bg-surface-alt">›</button>
+            <button onClick={today}
+              className="rounded-md border border-line bg-white px-2.5 py-1.5 text-xs font-semibold hover:bg-surface-alt">Today</button>
+          </div>
+          <span className="rounded-md border border-line bg-white px-3 py-1.5 text-xs">
+            {board.weeks.length ? `${monthYear(board.weeks[0].start)} · ${board.weeks.length} wks` : `${board.weeks.length} weeks`}
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-[250px_1fr] gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-[250px_1fr] gap-4">
         {/* Unscheduled pool — also the unschedule drop zone (drag a slot here). */}
-        <Card className="self-start">
+        <Card className="min-h-0 overflow-y-auto">
           <div
             onDragOver={(e) => { if (dragSlot) { e.preventDefault(); setPoolHot(true) } }}
             onDragLeave={() => setPoolHot(false)}
@@ -927,8 +997,11 @@ function LivePlanningBoard() {
           </div>
         </Card>
 
-        {/* Week grid */}
-        <Card className="overflow-x-auto p-0">
+        {/* Week grid — single self-contained scroll panel (WO v4.29): one inner overflow-auto
+            unifies the x+y scrollbars; sticky header + frozen first column keep context visible. */}
+        <Card className="flex min-h-0 flex-col overflow-hidden p-0">
+          <div ref={panRef} className="min-h-0 flex-1 overflow-auto" title="Tip: hold the middle mouse button and drag to pan">
+
           {board.weeks.length === 0 ? (
             <EmptyState
               title="No scheduled weeks yet"
@@ -937,10 +1010,11 @@ function LivePlanningBoard() {
           ) : (
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="bg-primary text-white">
-                  <th className="px-2 py-2 text-left font-semibold">Slot</th>
+                <tr className="text-white">
+                  {/* corner cell: frozen on BOTH axes, highest z so header/column slide under it */}
+                  <th className="sticky left-0 top-0 z-30 bg-primary px-2 py-2 text-left font-semibold">Slot</th>
                   {board.weeks.map((w) => (
-                    <th key={w.key} className="px-2 py-2 text-left font-semibold">
+                    <th key={w.key} className="sticky top-0 z-20 bg-primary px-2 py-2 text-left font-semibold">
                       {w.key}
                       <div className="text-[10px] font-normal opacity-80">{dmy(w.start)}</div>
                     </th>
@@ -950,7 +1024,7 @@ function LivePlanningBoard() {
               <tbody>
                 {bays.map((bay) => (
                   <tr key={bay} className="border-b border-line">
-                    <td className="bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold">{bay}</td>
+                    <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold shadow-[inset_-1px_0_0_#E5E7EB]">{bay}</td>
                     {board.weeks.map((w) => {
                       const cell = cellFor(w.key, bay)
                       const key = `${w.key}:${bay}`
@@ -973,6 +1047,7 @@ function LivePlanningBoard() {
                           {cell && cell.job ? (
                             <button
                               onClick={() => setOpenSlot(cell)}
+                              data-testid="slot-cell"
                               draggable={canSchedule}
                               onDragStart={(e) => {
                                 if (!canSchedule) { e.preventDefault(); return }
@@ -1014,10 +1089,11 @@ function LivePlanningBoard() {
               </tbody>
             </table>
           )}
+          </div>
         </Card>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex shrink-0 items-center justify-between">
         <LastUpdated at={lastUpdated} onRefresh={refresh} />
         {!canSchedule && (
           <span className="mt-2 text-[11px] text-muted">Read-only — your role can’t schedule on the board.</span>
@@ -1038,8 +1114,8 @@ function LivePlanningBoard() {
       <PlanningAckPanel
         costing={ackTarget}
         onClose={() => setAckTarget(null)}
-        onAcknowledge={async (c, chassisEta) => {
-          await ackPlanning(c.quote_number, byActor, chassisEta || null)
+        onAcknowledge={async (c, payload) => {
+          await ackPlanning(c.quote_number, byActor, payload)
           await refresh()
           setAckTarget(null)
         }}
@@ -1094,6 +1170,10 @@ function LiveSlotDetail({
 }) {
   const job = slot.job!
   const cs = getChassisState(job)
+  // WO v4.29 D3: receipt date + source from the read-bridge signal (VCL event, else legacy column).
+  const receivedAt = job.chassis_received_signal ?? job.chassis_received_at
+  const receivedVia = job.chassis_received_source === 'vcl' ? 'via VCL'
+    : job.chassis_received_source === 'legacy' ? 'legacy record' : null
   const [busy, setBusy] = useState(false)
   async function tick() {
     setBusy(true)
@@ -1116,7 +1196,9 @@ function LiveSlotDetail({
         {cs === 'received' ? (
           <div className="flex items-center gap-2 text-status-green">
             <CheckCircle2 size={18} />
-            <span className="font-semibold">Chassis received{job.chassis_received_at ? ` ${dmy(job.chassis_received_at)}` : ''}</span>
+            <span className="font-semibold">
+              Chassis received{receivedAt ? ` ${dmy(receivedAt)}` : ''}{receivedVia ? ` · ${receivedVia}` : ''}
+            </span>
           </div>
         ) : (
           <div className="space-y-2">
@@ -1143,7 +1225,12 @@ function LiveSlotDetail({
         )}
       </div>
 
-      <button onClick={onViewProduction} className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark">View job in production</button>
+      {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
+          onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
+      <button onClick={onViewProduction} disabled
+        title="Production Dashboard wire-up is planned for a future release"
+        className="w-full cursor-not-allowed rounded-md bg-primary py-2 font-semibold text-white opacity-50"
+        data-testid="view-in-production">View in Production (coming soon)</button>
     </div>
   )
 }

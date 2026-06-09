@@ -35,6 +35,7 @@ import type {
 export type ApiMode = 'live' | 'mock' | 'loading'
 
 const EMPTY_BOARD: PlanningBoardView = { weeks: [], bays: [], slots: [], pool: [], capacity: [] }
+const WEEKS = 12   // rolling window size (weeks shown at once)
 
 // ── mappers (API → domain) ────────────────────────────────────────────────────
 function addDays(iso: string, days: number): string {
@@ -53,6 +54,8 @@ const apiToJob = (j: ApiPlanningJobRef): PlanningJob => ({
   source: j.source ?? 'quote',
   chassis_eta: j.chassis_eta,
   chassis_received_at: j.chassis_received_at,
+  chassis_received_signal: j.chassis_received_signal ?? null,   // WO v4.29 D3
+  chassis_received_source: j.chassis_received_source ?? null,
 })
 
 const apiToSlot = (s: ApiPlanningSlotItem): PlanningSlot => ({
@@ -89,6 +92,13 @@ interface PlanningValue {
   schedule: (input: ScheduleInput) => Promise<void>
   move: (slotId: number, input: MoveInput) => Promise<void>
   unschedule: (slotId: number) => Promise<void>
+  // WO v4.29 — window navigation. startWeek=null => rolling current week; an ISO date jumps the
+  // 12-week window to that week (server Monday-normalises it).
+  startWeek: string | null
+  jumpTo: (iso: string | null) => void
+  today: () => void
+  nextWindow: () => void
+  prevWindow: () => void
 }
 
 const PlanningContext = createContext<PlanningValue | null>(null)
@@ -99,12 +109,18 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ApiMode>('loading')
   const [board, setBoard] = useState<PlanningBoardView>(EMPTY_BOARD)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [startWeek, setStartWeek] = useState<string | null>(null)   // WO v4.29 jump anchor (null = rolling)
+  const startWeekRef = useRef<string | null>(null)                  // mirror so refetch stays identity-stable
 
-  // refetch() = board read only (no autologin). The server scopes the board to
-  // the session's active branch, so a branch switch needs only a refetch (§3.5).
-  const refetch = useCallback(async () => {
+  // refetch(startArg) = board read only (no autologin). `startArg` undefined => use the current anchor
+  // (startWeekRef); pass an ISO date to jump, or null to clear back to the rolling current week. The
+  // server scopes the board to the session's active branch, so a branch switch needs only a refetch.
+  const refetch = useCallback(async (startArg?: string | null) => {
+    const eff = startArg !== undefined ? startArg : startWeekRef.current
     try {
-      const b = await apiGet<ApiPlanningBoard>('/api/planning-board?weeks=8')
+      const b = await apiGet<ApiPlanningBoard>(
+        `/api/planning-board?weeks=${WEEKS}${eff ? `&start=${eff}` : ''}`,
+      )
       setBoard(apiToBoard(b))
       setMode('live')
     } catch {
@@ -189,9 +205,27 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
     [mode, refetch, toast],
   )
 
+  // ── window navigation (WO v4.29) ──────────────────────────────────────────────
+  const applyStart = useCallback((iso: string | null) => {
+    startWeekRef.current = iso
+    setStartWeek(iso)
+    void refetch(iso)
+  }, [refetch])
+  const jumpTo = useCallback((iso: string | null) => applyStart(iso), [applyStart])
+  const today = useCallback(() => applyStart(null), [applyStart])
+  const stepWindow = useCallback((dir: 1 | -1) => {
+    // step the visible window by its full span, from the first week currently shown (a Monday)
+    const base = board.weeks[0]?.start ?? new Date().toISOString().slice(0, 10)
+    applyStart(addDays(base, dir * WEEKS * 7))
+  }, [applyStart, board])
+  const nextWindow = useCallback(() => stepWindow(1), [stepWindow])
+  const prevWindow = useCallback(() => stepWindow(-1), [stepWindow])
+
   const value = useMemo<PlanningValue>(
-    () => ({ mode, lastUpdated, board, refresh: refetch, schedule, move, unschedule }),
-    [mode, lastUpdated, board, refetch, schedule, move, unschedule],
+    () => ({ mode, lastUpdated, board, refresh: refetch, schedule, move, unschedule,
+             startWeek, jumpTo, today, nextWindow, prevWindow }),
+    [mode, lastUpdated, board, refetch, schedule, move, unschedule,
+     startWeek, jumpTo, today, nextWindow, prevWindow],
   )
 
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>

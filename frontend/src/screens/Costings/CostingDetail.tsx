@@ -166,13 +166,16 @@ export function CostingDetail() {
         </Card>
       </div>
 
-      {c.status === 'Pre-Job Sent' && (
+      {(c.status === 'Pre-Job Sent' || c.pre_job_signoff_sales_at || c.pre_job_signoff_production_at || c.pre_job_confirmed_at) && (
         <Tooltip k="costings_detail.prejob_signoff_section">
-          <Card className="mb-4 border-status-amber">
+          {/* WO v4.29 — keep this section visible AFTER confirmation so the sign-off provenance
+              (who + when, both roles) is retained on the record, not just while awaiting. */}
+          <Card className={`mb-4 ${c.pre_job_signoff_sales_at && c.pre_job_signoff_production_at ? 'border-status-green' : 'border-status-amber'}`}>
             <SectionTitle>Pre-Job Card sign-offs</SectionTitle>
             <p className="mb-3 text-xs text-muted">
-              Two role-gated sign-offs required. When BOTH are confirmed the job auto-moves to Planning status
-              and appears on the Planning Board (Unscheduled lane).
+              {c.pre_job_signoff_sales_at && c.pre_job_signoff_production_at
+                ? 'Both sign-offs confirmed — retained below for the record (who signed off and when).'
+                : 'Two role-gated sign-offs required. When BOTH are confirmed the job auto-moves to Planning status and appears on the Planning Board (Unscheduled lane).'}
             </p>
             <div className="space-y-2">
               <SignoffCheck
@@ -410,12 +413,7 @@ function SignoffCheck({
           </button>
           <div className="flex-1">
             <div className={`text-sm font-semibold ${signed ? 'text-status-green' : 'text-body'}`}>{label}</div>
-            {signed ? (
-              <div className="mt-1 text-xs text-muted">
-                <ShieldCheck size={12} className="mr-1 inline-block text-status-green" />
-                Signed by <strong>{by}</strong> at {dmy(at)} {hhmm(at!)}
-              </div>
-            ) : canSign ? (
+            {!signed && (canSign ? (
               <div className="mt-1 text-xs text-muted">
                 You are signed in as <strong>{userName}</strong> ({userRole}). Click the box to open the formal attestation modal.
               </div>
@@ -423,8 +421,17 @@ function SignoffCheck({
               <div className="mt-1 text-xs text-muted">
                 Disabled — requires <strong>{requiredRole}</strong> role to sign off. You are signed in as {userName} ({userRole}).
               </div>
-            )}
+            ))}
           </div>
+          {/* WO v4.29 — signed-off stamp to the RIGHT of the label (date + time + who) */}
+          {signed && (
+            <div className="shrink-0 self-center text-right text-xs text-muted">
+              <div className="font-semibold text-status-green">
+                <ShieldCheck size={12} className="mr-1 inline-block" /> Signed by {by}
+              </div>
+              <div className="tabular-nums">{dmy(at)} {hhmm(at!)}</div>
+            </div>
+          )}
         </label>
       </div>
     </Tooltip>

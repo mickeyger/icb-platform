@@ -7,12 +7,14 @@ explicitly via `get_with_costing` / `list_jobs` (the §3.4 pattern).
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import Branch, CalculationRecord, Customer
 from app.models.mes import PlanningAck, ProductionJob
 from app.schemas.production_jobs import TimelineEvent
@@ -39,6 +41,11 @@ class WrongStatusForTransitionError(ServiceError):
     """Lifecycle action invalid for the job's current status (-> 422)."""
 
 
+class BranchUnavailableError(ServiceError):
+    """A job can't be created because its source calc has no branch and no default
+    branch is seeded (WO v4.29 D1) (-> 422)."""
+
+
 JobRow = tuple[ProductionJob, CalculationRecord, Optional[Customer], Optional[str]]
 
 
@@ -56,6 +63,22 @@ def _to_dt(d: Optional[date]) -> Optional[datetime]:
 
 def _job_number_from_quote(quote_number: Optional[str]) -> Optional[str]:
     return quote_number.split("-")[-1] if quote_number else None
+
+
+def _resolve_branch_id(db: Session, calc, fallback_branch_id: Optional[int]) -> Optional[int]:
+    """Branch for a new production job. WO v4.29 D1: some MES-native (A-series) calcs
+    were created with a NULL branch_id, but icb_mes.production_jobs.branch_id is NOT
+    NULL (migration 0005) — so `branch_id=calc.branch_id` IntegrityError'd the accept
+    (and the retry pill 500'd). Fall back to the caller's active branch, else the
+    configured default (JHB). Returns None only if the default branch isn't seeded."""
+    if calc.branch_id is not None:
+        return calc.branch_id
+    if fallback_branch_id is not None:
+        return fallback_branch_id
+    row = db.execute(
+        select(Branch).where(Branch.code == settings.DEFAULT_BRANCH_CODE)
+    ).scalar_one_or_none()
+    return row.id if row is not None else None
 
 
 # ── Cross-schema reads (§3.4) ────────────────────────────────────────────────
@@ -98,9 +121,12 @@ def list_jobs(db: Session, *, status: Optional[list[str]] = None, branch_id: Opt
 
 
 # ── Mutations ────────────────────────────────────────────────────────────────
-def accept_calculation(db: Session, calculation_id: int, user) -> tuple[JobRow, bool]:
+def accept_calculation(db: Session, calculation_id: int, user,
+                       fallback_branch_id: Optional[int] = None) -> tuple[JobRow, bool]:
     """Create (or return existing) production job for an accepted calculation.
-    Returns (row, created). Idempotent: existing -> (row, False)."""
+    Returns (row, created). Idempotent: existing -> (row, False).
+    `fallback_branch_id` (the caller's active branch) covers calcs with a NULL
+    branch_id (WO v4.29 D1)."""
     calc = db.get(CalculationRecord, calculation_id)
     if calc is None:
         raise NotFoundError(f"calculation {calculation_id} not found")
@@ -114,9 +140,15 @@ def accept_calculation(db: Session, calculation_id: int, user) -> tuple[JobRow, 
     if existing is not None:
         return get_with_costing(db, existing.id), False
 
+    branch_id = _resolve_branch_id(db, calc, fallback_branch_id)
+    if branch_id is None:
+        raise BranchUnavailableError(
+            f"calculation {calculation_id} has no branch and the default branch "
+            f"'{settings.DEFAULT_BRANCH_CODE}' is not seeded")
+
     job = ProductionJob(
         calculation_record_id=calc.id,
-        branch_id=calc.branch_id,
+        branch_id=branch_id,
         job_number=_job_number_from_quote(calc.quote_number),
         status="accepted",
         accepted_at=_now(),
@@ -168,7 +200,7 @@ def record_signoff(db: Session, job_id: int, role: str, attestation: str, user) 
 
 
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
-                        notes: Optional[str], user) -> JobRow:
+                        notes: Optional[str], user, chassis_data: Optional[dict] = None) -> JobRow:
     job, _, _, _ = get_with_costing(db, job_id)
     if job.status != "pre_job_confirmed":
         raise WrongStatusForTransitionError(
@@ -190,6 +222,17 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
         job.chassis_eta = eta_dt
         job.chassis_eta_captured_at = now
         job.chassis_eta_captured_by = actor
+    # WO v4.29 D2: persist rich chassis data captured at ack (VIN/model/dealer/tail-lift/in-house BOM)
+    # onto the production job — replaces the deadlocked legacy calc /chassis-eta call (ADR 0016).
+    if chassis_data:
+        merged = {}
+        if job.chassis_data_json:
+            try:
+                merged = json.loads(job.chassis_data_json) or {}
+            except (ValueError, TypeError):
+                merged = {}
+        merged.update({k: v for k, v in chassis_data.items() if v is not None})
+        job.chassis_data_json = json.dumps(merged) if merged else None
     job.status = "planning"
     db.commit()
     return get_with_costing(db, job_id)

@@ -46,7 +46,7 @@ interface CostingsValue {
   // Work Order v4 mutators.
   acceptCosting: (quote: string) => Promise<void>
   signoffPreJob: (quote: string, role: 'sales' | 'production', attestation: string, by: string) => Promise<void>
-  ackPlanning: (quote: string, by: string, chassisEta?: string | null, notes?: string | null) => Promise<void>
+  ackPlanning: (quote: string, by: string, payload?: ChassisEtaPayload | null, notes?: string | null) => Promise<void>
   // Work Order v4.2 — chassis ETA capture.
   captureChassisEta: (quote: string, payload: ChassisEtaPayload, by: string) => Promise<void>
   loadChassisCatalogue: () => Promise<ChassisCatalogue | null>
@@ -75,6 +75,13 @@ interface ApiProductionJob {
   job_number: string | null
   status: string
   mes_status: string
+  // WO v4.29 — per-role sign-off timestamps (live on the production_job) so each box ticks + shows
+  // "signed by … at …" the moment that role signs.
+  pre_job_signoff_sales_at?: string | null
+  pre_job_signoff_sales_by?: string | null
+  pre_job_signoff_production_at?: string | null
+  pre_job_signoff_production_by?: string | null
+  pre_job_confirmed_at?: string | null
 }
 
 const CostingsContext = createContext<CostingsValue | null>(null)
@@ -99,6 +106,13 @@ function mergeProductionJob(c: Costing, pj?: ApiProductionJob): Costing {
     production_job_id: pj.id,
     status: (pj.mes_status as StatusName) || c.status,
     job_number_assigned: pj.job_number ?? c.job_number_assigned,
+    // WO v4.29 — surface the pj's sign-off state (the source of truth) so each box reflects signed +
+    // timestamp immediately, not only once BOTH are in.
+    pre_job_signoff_sales_at: pj.pre_job_signoff_sales_at ?? c.pre_job_signoff_sales_at,
+    pre_job_signoff_sales_by: pj.pre_job_signoff_sales_by ?? c.pre_job_signoff_sales_by,
+    pre_job_signoff_production_at: pj.pre_job_signoff_production_at ?? c.pre_job_signoff_production_at,
+    pre_job_signoff_production_by: pj.pre_job_signoff_production_by ?? c.pre_job_signoff_production_by,
+    pre_job_confirmed_at: pj.pre_job_confirmed_at ?? c.pre_job_confirmed_at,
   }
 }
 
@@ -333,9 +347,19 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
   )
 
   const ackPlanning = useCallback(
-    async (quote: string, by: string, chassisEta: string | null = null, notes: string | null = null) => {
+    async (quote: string, by: string, payload: ChassisEtaPayload | null = null, notes: string | null = null) => {
       if (mode === 'live') {
-        await pjPost(quote, 'planning-ack', { chassis_eta: chassisEta, notes })
+        // WO v4.29 D2: planning-ack captures the chassis ETA + rich chassis data in one step,
+        // replacing the deadlocked legacy /api/calculations/{id}/chassis-eta call (ADR 0016).
+        await pjPost(quote, 'planning-ack', {
+          chassis_eta: payload?.chassis_eta || null,
+          notes,
+          chassis_vin: payload?.chassis_vin,
+          chassis_model: payload?.chassis_model,
+          customer_dealer: payload?.customer_dealer,
+          tail_lift_code: payload?.tail_lift_code,
+          chassis_inhouse_bom: payload?.chassis_inhouse_bom,
+        })
         return
       }
       setCostings((prev) =>
