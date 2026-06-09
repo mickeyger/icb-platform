@@ -50,6 +50,21 @@ def _mes_status(status: str, is_repair: bool) -> str:
     return "Repair" if is_repair else _MES_STATUS.get(status, status)
 
 
+def _net_headline(calc, res, fallback):
+    """WO v4.30 §0.2a — the post-discount headline figure for the MES (Costings) revenue views.
+    Prefer the calculations.net_total column, then result_json's mirror, then fall back to the
+    pre-discount selling price (so it equals selling whenever there is no discount, and for legacy
+    rows saved before the discount feature). selling_zar is retained as the pre-discount reference."""
+    if calc is not None:
+        col = getattr(calc, "net_total", None)
+        if col is not None:
+            return col
+        rj = res.get("net_total")
+        if rj is not None:
+            return rj
+    return fallback
+
+
 # ── Requests ─────────────────────────────────────────────────────────────────
 class PreJobSignoffRequest(BaseModel):
     role: Literal["sales", "production"]
@@ -89,7 +104,8 @@ class ProductionJobListItem(BaseModel):
     mes_status: str
     customer: Optional[str] = None
     body_type: Optional[str] = None
-    selling_zar: Optional[float] = None
+    selling_zar: Optional[float] = None              # pre-discount (reference)
+    net_total: Optional[float] = None                # WO v4.30 §0.2a — post-discount headline (== selling when no discount)
     branch_code: Optional[str] = None
     accepted_at: Optional[datetime] = None
     planned_start_date: Optional[datetime] = None
@@ -149,8 +165,9 @@ class ProductionJobDetail(BaseModel):
     requires_chassis: Optional[bool] = None
     chassis_supplied_by: Optional[str] = None
     cost_zar: Optional[float] = None
-    selling_zar: Optional[float] = None
-    grand_total: Optional[float] = None          # alias of selling_zar (React reads grand_total)
+    selling_zar: Optional[float] = None          # pre-discount (reference)
+    net_total: Optional[float] = None            # WO v4.30 §0.2a — post-discount headline (== selling when no discount)
+    grand_total: Optional[float] = None          # headline alias — now net_total (was selling_zar)
     gross_profit_zar: Optional[float] = None
     markup_pct: Optional[float] = None
     extras_count: Optional[int] = None
@@ -175,6 +192,7 @@ def to_list_item(job, calc, customer, branch_code=None) -> ProductionJobListItem
         customer=(customer.name if customer else job.customer_name),
         body_type=(dims.get("body_type") if calc else job.description),
         selling_zar=(res.get("selling_zar") if calc else job.selling_zar),
+        net_total=_net_headline(calc, res, (res.get("selling_zar") if calc else job.selling_zar)),
         branch_code=branch_code,
         accepted_at=job.accepted_at,
         planned_start_date=job.planned_start_date,
@@ -192,6 +210,7 @@ def to_detail(job, calc, customer, branch_code=None) -> ProductionJobDetail:
     res = (_loads(calc.result_json) or {}) if calc else {}
     dims = (_loads(calc.dimensions_json) or {}) if calc else {}
     selling = res.get("selling_zar") if calc else job.selling_zar
+    net = _net_headline(calc, res, selling)   # WO v4.30 §0.2a — post-discount headline
     return ProductionJobDetail(
         id=job.id,
         calculation_record_id=job.calculation_record_id,
@@ -234,7 +253,8 @@ def to_detail(job, calc, customer, branch_code=None) -> ProductionJobDetail:
         chassis_supplied_by=dims.get("chassis_supplied_by"),
         cost_zar=res.get("cost_zar"),
         selling_zar=selling,
-        grand_total=selling,
+        net_total=net,
+        grand_total=net,
         gross_profit_zar=res.get("gross_profit_zar"),
         markup_pct=res.get("markup_pct"),
         extras_count=res.get("extras_count"),
