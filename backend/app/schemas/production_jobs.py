@@ -23,6 +23,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .chassis import ChassisRecordDetail
+
 ProductionJobStatus = Literal[
     "accepted", "pre_job_sent", "pre_job_confirmed", "planning", "in_production", "completed"
 ]
@@ -118,6 +120,38 @@ class ProductionJobListItem(BaseModel):
     pre_job_confirmed_at: Optional[datetime] = None
 
 
+class BomLineOut(BaseModel):
+    """A current-BOM line for the job-card modal (WO v4.31 §3.2). Read-only."""
+    model_config = ConfigDict(from_attributes=True)
+    sap_code: str
+    description: Optional[str] = None
+    qty: float
+    unit_price: Optional[float] = None       # workshop HIDES this column at render time (frontend; NOT gated here)
+    line_total: Optional[float] = None
+    section: Optional[str] = None
+
+
+class GeneratedBomOut(BaseModel):
+    """The job's current generated_bom + its lines (WO v4.31 §3.2). Read-only."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    version: int
+    bom_status: str                          # complete | incomplete | manual
+    grand_total: Optional[float] = None
+    generated_at: Optional[datetime] = None
+    lines: list[BomLineOut] = []
+
+
+def bom_to_out(bom, lines) -> GeneratedBomOut:
+    """Build GeneratedBomOut from a GeneratedBom row + its BomLine rows (WO v4.31 §3.2)."""
+    return GeneratedBomOut(
+        id=bom.id, version=bom.version, bom_status=bom.bom_status,
+        grand_total=float(bom.grand_total) if bom.grand_total is not None else None,
+        generated_at=bom.generated_at,
+        lines=[BomLineOut.model_validate(line) for line in lines],
+    )
+
+
 class ProductionJobDetail(BaseModel):
     """Full shape — production_jobs columns + joined costing + derived UI fields."""
     model_config = ConfigDict(from_attributes=True)
@@ -174,6 +208,12 @@ class ProductionJobDetail(BaseModel):
     extras_list: Optional[list] = None
     dimensions_json: Optional[str] = None         # raw (per WO §3.1)
     result_json: Optional[str] = None             # raw (per WO §3.1)
+
+    # ── WO v4.31 §3.2 — job-card modal enrichment (READ-ONLY; no new write paths) ──
+    current_bom: Optional[GeneratedBomOut] = None        # current generated_bom + lines
+    chassis: Optional[ChassisRecordDetail] = None        # chassis record + events (latest VCL = photos/checklist/notes)
+    current_assembly_bay_code: Optional[str] = None      # resolved bay code for bay context; None if not on a bay
+    assembly_assigned_at: Optional[datetime] = None      # when assigned to the current bay (duration context)
 
 
 # ── Builders (from the service join tuple) ───────────────────────────────────
