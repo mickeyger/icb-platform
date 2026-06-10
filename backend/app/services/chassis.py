@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.mes import ChassisLifecycleEvent, ChassisPhoto, ChassisRecord
+from app.models.mes import AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay
 from app.schemas.chassis import (
     ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut,
 )
@@ -69,11 +69,23 @@ def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> lis
         .group_by(ChassisLifecycleEvent.chassis_record_id)
     ).all()
     agg = {r[0]: (r[1], r[2]) for r in aggs}
+    # Current assembly bay (derived, §0.12) for the in_assembly rows on this page — one batched query.
+    in_assembly_ids = [r.id for r in recs if r.status == "in_assembly"]
+    bay_by_rec: dict = {}
+    if in_assembly_ids:
+        for rec_id, bay_id in db.execute(
+            select(ChassisLifecycleEvent.chassis_record_id, ChassisLifecycleEvent.assembly_bay_id)
+            .where(ChassisLifecycleEvent.chassis_record_id.in_(in_assembly_ids),
+                   ChassisLifecycleEvent.event_type == "assembly_assigned")
+            .order_by(ChassisLifecycleEvent.chassis_record_id, ChassisLifecycleEvent.id.desc())
+        ).all():
+            bay_by_rec.setdefault(rec_id, bay_id)        # first per record = latest (id desc)
     out = []
     for r in recs:
         n, latest = agg.get(r.id, (0, None))
         o = ChassisRecordOut.model_validate(r)
         o.event_count, o.latest_event_date = n, latest
+        o.current_assembly_bay_id = bay_by_rec.get(r.id)
         out.append(o)
     return out
 
@@ -97,6 +109,9 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     detail = ChassisRecordDetail.model_validate(rec)
     detail.event_count = len(events)
     detail.latest_event_date = max((e.event_date for e in events if e.event_date), default=None)
+    if rec.status == "in_assembly":                  # current bay derived from the latest event (§0.12)
+        aa = [e for e in events if e.event_type == "assembly_assigned"]
+        detail.current_assembly_bay_id = max(aa, key=lambda e: e.id).assembly_bay_id if aa else None
     out_events = []
     for e in events:
         eo = ChassisEventOut.model_validate(e)
@@ -168,6 +183,85 @@ def capture_event(db: Session, record_id: int, event_type: str, payload, who: st
     db.commit()
     db.refresh(evt)
     return evt
+
+
+def _current_assembly_bay_id(db: Session, record_id: int):
+    """The assembly bay a chassis is CURRENTLY on — the latest 'assembly_assigned' event's bay
+    (WO v4.31 §0.12: the events log is the single source of truth; no denormalised column). Callers
+    gate on status == 'in_assembly' to tell "on a bay now" from a dispatched chassis's history."""
+    return db.execute(
+        select(ChassisLifecycleEvent.assembly_bay_id)
+        .where(ChassisLifecycleEvent.chassis_record_id == record_id,
+               ChassisLifecycleEvent.event_type == "assembly_assigned")
+        .order_by(ChassisLifecycleEvent.id.desc()).limit(1)
+    ).scalar()
+
+
+def assign_assembly_bay(db: Session, record_id: int, bay_id: int, who: str,
+                        event_date=None, notes=None) -> ChassisLifecycleEvent:
+    """WO v4.31 §0.4/§0.12 — attribute a booked-in chassis to an assembly bay (parking -> assembly).
+
+    UPSERTs the single 'assembly_assigned' event for the chassis's open cycle (the destination bay lives
+    on the EVENT — the single source of truth) and moves chassis_records.status to 'in_assembly'. No
+    denormalised bay column (§0.12). One chassis per bay (occupancy guard, BA lock 2026-06-10);
+    re-assigning moves the chassis to a different (free) bay.
+    """
+    rec = db.get(ChassisRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    bay = db.get(AssemblyBay, bay_id)
+    if bay is None or not bay.is_active:
+        raise HTTPException(status_code=404, detail="assembly bay not found")
+    # Occupancy guard: at most one chassis per assembly bay (Phase-3; yard coordination is Phase 4).
+    # Derived from the events log — a bay is occupied iff another in_assembly chassis's latest
+    # assembly_assigned event points at it (§0.12: no denormalised bay column).
+    for other_id, other_vin in db.execute(
+        select(ChassisRecord.id, ChassisRecord.vin)
+        .where(ChassisRecord.status == "in_assembly", ChassisRecord.id != record_id)
+    ).all():
+        if _current_assembly_bay_id(db, other_id) == bay_id:
+            raise HTTPException(status_code=409,
+                                detail=f"assembly bay {bay.code} is already occupied by {other_vin}")
+    # Must be booked in: assign against the highest open (VCL-without-DCL) cycle.
+    events = db.execute(
+        select(ChassisLifecycleEvent).where(ChassisLifecycleEvent.chassis_record_id == record_id)
+    ).scalars().all()
+    open_cycles = sorted({e.cycle_number for e in events if e.event_type == "VCL"}
+                         - {e.cycle_number for e in events if e.event_type == "DCL"})
+    if not open_cycles:
+        raise HTTPException(status_code=422,
+                            detail="no open workshop cycle — capture a VCL (book-in) first")
+    cycle = open_cycles[-1]
+    # UPSERT the single assembly_assigned event for this cycle (re-assign = move to a different bay).
+    evt = next((e for e in events
+                if e.cycle_number == cycle and e.event_type == "assembly_assigned"), None)
+    if evt is None:
+        evt = ChassisLifecycleEvent(chassis_record_id=record_id, cycle_number=cycle,
+                                    event_type="assembly_assigned", created_by=who)
+        db.add(evt)
+    evt.assembly_bay_id = bay_id
+    evt.event_date = event_date or date.today()
+    if notes is not None:
+        evt.notes = notes
+    rec.status = "in_assembly"                  # §0.12: denormalise STATE onto status (no bay column)
+    rec.updated_by = who
+    db.commit()
+    db.refresh(evt)
+    return evt
+
+
+def list_assembly_bays(db: Session):
+    return db.execute(
+        select(AssemblyBay).where(AssemblyBay.is_active.is_(True))
+        .order_by(AssemblyBay.sort_order, AssemblyBay.id)
+    ).scalars().all()
+
+
+def list_parking_bays(db: Session):
+    return db.execute(
+        select(ParkingBay).where(ParkingBay.is_active.is_(True))
+        .order_by(ParkingBay.sort_order, ParkingBay.id)
+    ).scalars().all()
 
 
 def add_photos(db: Session, record_id: int, event_id: int, files, who: str) -> list[ChassisPhotoOut]:

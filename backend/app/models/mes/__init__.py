@@ -697,7 +697,9 @@ class ChassisRecord(Base):
     model = Column(String(64))
     description = Column(String(255))
     status = Column(String(24), nullable=False, default="received", server_default="received")
-    # received | in_workshop | dispatched | returned (denormalised from the latest event)
+    # received | in_workshop | in_assembly | dispatched | returned (denormalised from the latest
+    # event; 'in_assembly' added WO v4.31 §0.12 — values-in-comments only, NO bay column here:
+    # "which bay" is derived from the latest 'assembly_assigned' lifecycle event.
     submit_status = Column(String(32))                    # legacy register value
     source = Column(String(16), nullable=False, default="register", server_default="register")  # register | vcl_form
     source_register_id = Column(Integer)                   # originating chassis_register.id (traceability)
@@ -726,7 +728,9 @@ class ChassisLifecycleEvent(Base):
         Integer, ForeignKey("icb_mes.chassis_records.id", ondelete="CASCADE"), nullable=False
     )
     cycle_number = Column(Integer, nullable=False, default=1, server_default="1")
-    event_type = Column(String(8), nullable=False)         # 'VCL' (book-in) | 'DCL' (dispatch)
+    event_type = Column(String(24), nullable=False)         # 'VCL' (book-in) | 'DCL' (dispatch) | 'assembly_assigned' (WO v4.31 §0.4)
+    assembly_bay_id = Column(Integer)  # WO v4.31 §0.4 — plain Integer; FK->icb_mes.assembly_bays created
+    # in migration 0016. Set only on 'assembly_assigned' events (the destination bay); NULL for VCL/DCL.
     event_date = Column(Date)                              # date_received_N (VCL) / date_left_N (DCL)
     legacy_reference = Column(String(128))                 # vcl_N / dcl_N free-text carried from the register
     checklist_json = Column(JSONB)                         # structured checklist from the new screens (NULL for legacy)
@@ -758,6 +762,47 @@ class ChassisPhoto(Base):
     uploaded_by = Column(String(128))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 28. parking_bays — the ~24 outside parking slots (WO v4.31 §0.3, ADR 0018).
+#     Reference/master data: one row per physical parking bay; seeded ParkingBay-1..24 in 0016.
+#     Phase-3 scope renders the parking lane; per-chassis parking allocation is Phase 4 (out of scope).
+# ─────────────────────────────────────────────────────────────────────────────
+class ParkingBay(Base):
+    __tablename__ = "parking_bays"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_parking_bays_code"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    code = Column(String(32), nullable=False)              # 'ParkingBay-1' .. 'ParkingBay-24' (UNIQUE)
+    label = Column(String(64))                             # human label, e.g. 'Parking Bay 1'
+    sort_order = Column(Integer)                           # 1..N — natural ordering for the lane
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 29. assembly_bays — the 5 inside assembly bays (WO v4.31 §0.2 — Michael's on-floor count, 10 Jun).
+#     Reference/master data: one row per physical assembly bay; seeded AssemblyBay-1..5 in 0016.
+#     A chassis is attributed here via an 'assembly_assigned' lifecycle event; the denormalised
+#     chassis_records.current_assembly_bay_id carries the latest assignment for cheap lane/modal reads.
+# ─────────────────────────────────────────────────────────────────────────────
+class AssemblyBay(Base):
+    __tablename__ = "assembly_bays"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_assembly_bays_code"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    code = Column(String(32), nullable=False)              # 'AssemblyBay-1' .. 'AssemblyBay-5' (UNIQUE)
+    label = Column(String(64))                             # human label, e.g. 'Assembly Bay 1'
+    sort_order = Column(Integer)                           # 1..5 — natural ordering for the lane
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
@@ -766,5 +811,6 @@ __all__ = [
     "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",
     "GeneratedBom", "BomLine",
     "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
+    "ParkingBay", "AssemblyBay",
     "CROSS_SCHEMA_FKS",
 ]

@@ -22,7 +22,8 @@ class ChassisEventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     cycle_number: int
-    event_type: str                               # 'VCL' | 'DCL'
+    event_type: str                               # 'VCL' | 'DCL' | 'assembly_assigned'
+    assembly_bay_id: Optional[int] = None         # set only on 'assembly_assigned' events
     event_date: Optional[date] = None
     legacy_reference: Optional[str] = None
     checklist_json: Optional[dict] = None
@@ -41,6 +42,7 @@ class ChassisRecordOut(BaseModel):                # list item
     make: Optional[str] = None
     model: Optional[str] = None
     status: str
+    current_assembly_bay_id: Optional[int] = None  # WO v4.31 §0.12 — DERIVED (latest assembly_assigned event), not a column
     source: str
     event_count: int = 0
     latest_event_date: Optional[date] = None
@@ -88,3 +90,20 @@ class ChassisEventCapture(BaseModel):
     event_date: Optional[date] = None
     checklist_json: Optional[dict] = None
     notes: Optional[str] = None
+
+
+class AssemblyAssignRequest(BaseModel):
+    """WO v4.31 §0.4 — assign a booked-in chassis to an assembly bay (parking -> assembly)."""
+    assembly_bay_id: int
+    event_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+class BayOut(BaseModel):
+    """A parking or assembly bay (master reference data, WO v4.31 §0.3)."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    code: str
+    label: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: bool = True
