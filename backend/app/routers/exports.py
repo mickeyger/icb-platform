@@ -146,17 +146,28 @@ async def export_excel(
         if it.get("section_is_optional")
     }
     current_cat = None
+    # Track each section's header row + its detail-row span so we can add a
+    # collapsible outline after all rows are written. Spans are derived
+    # dynamically (item counts vary per report) — never hard-coded.
+    sections: list[dict] = []
+    current_section = None
     for item in result.get("items", []):
         cat = item["category"]
         if cat != current_cat:
-            ws.merge_cells(f"A{row}:I{row}")
+            if current_section is not None:
+                current_section["last"] = row - 1
+                sections.append(current_section)
+            ws.merge_cells(f"A{row}:H{row}")   # leave column I free for the section total
+            _is_opt_cat = cat in optional_cats
             c = ws.cell(row=row, column=1, value=cat.upper())
             c.font = Font(bold=True,
-                          color=("F85149" if cat in optional_cats else "58A6FF"),
+                          color=("F85149" if _is_opt_cat else "58A6FF"),
                           name="Calibri")
             c.fill = cat_fill
             c.alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[row].height = 16
+            current_section = {"header": row, "first": row + 1, "last": None,
+                               "kind": "body", "cat": cat, "optional": _is_opt_cat}
             row += 1
             current_cat = cat
 
@@ -196,6 +207,11 @@ async def export_excel(
         ws.row_dimensions[row].height = 15
         row += 1
 
+    if current_section is not None:
+        current_section["last"] = row - 1
+        sections.append(current_section)
+        current_section = None
+
     chassis = result.get("chassis") or {}
     if chassis.get("items"):
         ws.merge_cells(f"A{row}:I{row}")
@@ -212,7 +228,9 @@ async def export_excel(
         c.fill = cat_fill
         c.alignment = Alignment(horizontal="left", vertical="center")
         ws.row_dimensions[row].height = 16
+        ch_header = row
         row += 1
+        ch_first = row
         for it in chassis["items"]:
             cells_data = [
                 (it.get("kind", ""), "left"), (it.get("label", ""), "left"), ("", "left"),
@@ -230,6 +248,8 @@ async def export_excel(
                     cell.number_format = "#,##0.00"
             ws.row_dimensions[row].height = 15
             row += 1
+        if row > ch_first:
+            sections.append({"header": ch_header, "first": ch_first, "last": row - 1, "kind": "chassis"})
         ws.merge_cells(f"A{row}:H{row}")
         lc = ws.cell(row=row, column=1, value="CHASSIS SUBTOTAL")
         lc.font = Font(bold=True, color="C9D1D9", name="Calibri")
@@ -276,9 +296,15 @@ async def export_excel(
         summary_rows.append(("SELLING PRICE", result.get("selling_price", 0)))
     else:
         summary_rows.append(("TOTAL MANUFACTURING COST", result.get("grand_total", 0)))
+    _disc_amt = float(result.get("discount_amount") or 0)
+    if _disc_amt > 0:
+        _dlabel = (f"Discount ({result.get('discount_input'):g}%)"
+                   if result.get("discount_kind") == "percent" else "Discount")
+        summary_rows.append((_dlabel, -_disc_amt))
+        summary_rows.append(("NET TOTAL", float(result.get("net_total") or 0)))
 
     for label, val in summary_rows:
-        is_grand = label in ("TOTAL MANUFACTURING COST", "SELLING PRICE")
+        is_grand = label in ("TOTAL MANUFACTURING COST", "SELLING PRICE", "NET TOTAL")
         ws.merge_cells(f"A{row}:H{row}")
         lc = ws.cell(row=row, column=1, value=label)
         lc.font = Font(
@@ -361,6 +387,36 @@ async def export_excel(
 
         ws["A2"].value = (ws["A2"].value or "") + "  |  ⬤ Highlighted: price changes colour-coded  →  see Legend tab"
 
+    # ── Collapsible row grouping (outline) — opens EXPANDED ───────────────────
+    # Each section's detail rows form an outline group under its always-visible
+    # header (summaryBelow=False → the +/- sits beside the header). The sheet
+    # opens fully expanded; the user collapses on demand. Headers, the CATEGORY
+    # TOTALS block and the pricing rows are never grouped. Each body-section
+    # header also carries =SUM of its Line Cost column (col I) so a collapsed
+    # section still shows its total (SUM spans hidden rows, so it shows either way).
+    if ws.sheet_properties.outlinePr is None:
+        from openpyxl.worksheet.properties import Outline
+        ws.sheet_properties.outlinePr = Outline()
+    ws.sheet_properties.outlinePr.summaryBelow = False
+    ws.sheet_properties.outlinePr.applyStyles = False
+    ws.sheet_view.showOutlineSymbols = True
+    for sec in sections:
+        first, last, header = sec["first"], sec.get("last"), sec["header"]
+        empty = last is None or last < first
+        if not empty:
+            for r in range(first, last + 1):
+                ws.row_dimensions[r].outline_level = 1   # detail rows only; never hidden
+        if sec.get("kind") == "body":
+            tot = ws.cell(row=header, column=9,
+                          value=(f"=SUM(I{first}:I{last})" if not empty else 0))
+            tot.font = Font(bold=True,
+                            color=("F85149" if sec.get("optional") else "58A6FF"),
+                            name="Calibri")
+            tot.fill = cat_fill
+            tot.number_format = "#,##0.00"
+            tot.alignment = Alignment(horizontal="right", vertical="center")
+            tot.border = thin
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -433,6 +489,10 @@ async def export_pdf(record_id: int, request: Request, db: Session = Depends(get
             "grand_total": result.get("grand_total", 0),
             "chassis": result.get("chassis"),
             "materials_total": result.get("materials_total"),
+            "discount_kind": result.get("discount_kind"),
+            "discount_input": result.get("discount_input"),
+            "discount_amount": result.get("discount_amount", 0),
+            "net_total": result.get("net_total"),
         }
 
         html_str = _env.get_template("cost_breakdown.html").render(**ctx)

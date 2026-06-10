@@ -158,6 +158,24 @@ let allCustomers = [];
 let calcTimer = null;
 let priceOverrides = {};  // bomId (string) → { newPrice, originalPrice, materialId }
 const OVERRIDE_SESSION_KEY = 'bom_price_overrides';
+// MIRROR-TO-MES: needs-review — edit-mode block (this comment + editCalculation/
+// rebuildOverridesFromSaved/showEditBanner/cancelEdit/editSaveAction + the
+// approveCosting & _doApprove edit branches). Port with calculator.html banner+modal.
+// ── Edit mode: set when /calculator?edit=<id> loads a PENDING costing for
+// re-editing. While these are set, the Save button asks the user to overwrite
+// the original record or save a new revision instead of creating a fresh quote.
+let editingRecordId    = null;
+let editingVersion     = 1;
+let editingQuoteNumber = null;
+// While editing, pins the quote's body-variable values (insulation EPS/PU
+// thicknesses, by material name) so the recompute reproduces the saved figures
+// even if a global EPS/PU copy-on-switch changed the BOM since the quote saved.
+let editBodyVarOverrides = null;
+// Edit-replay (legacy records with no UI snapshot): forces the recompute to
+// reproduce the saved result exactly — include only the saved-included rows with
+// their saved formulas + prices. { userExcluded:[], formulaOverrides:{},
+// savedPrices:{}, optionalEnabled:[] }. Null = normal/snapshot editing.
+let editReplay = null;
 let bodyOptionSelections = {};  // bomId (string) → boolean
 let drdSrdEnabled = {};         // groupName → boolean; master ON/OFF toggle for DRD / SRD
 // Settings-page draft flag states (v2 trailers only).
@@ -251,6 +269,8 @@ function saveLastSession() {
       } : null,
       body_options: { ...bodyOptionSelections },
       drd_srd:     { ...drdSrdEnabled },
+      discount_kind:  discountKind,
+      discount_input: discountInput,
     }));
   } catch(_) {}
 }
@@ -306,6 +326,11 @@ async function restoreLastSession() {
     if (ratioSel?.querySelector(`option[value="${session.ratio}"]`))
       ratioSel.value = session.ratio;
   }
+
+  // Restore discount (renderSummary reads these globals on the runCalc below)
+  discountKind  = (session.discount_kind === 'percent' || session.discount_kind === 'amount')
+                  ? session.discount_kind : null;
+  discountInput = discountKind ? (+session.discount_input || 0) : 0;
 
   // Restore customer
   if (session.customer_id) setCustomer(session.customer_id);
@@ -1697,6 +1722,9 @@ async function prefillCalculation(recordId) {
     document.getElementById('trailer-select').value = payload.trailer_type_id;
     await loadBOM({ preserveInputs: true });
     applyCalculationInputs(payload);
+    // WO v4.30 — a copy keeps the SOURCE ratio (applyCalculationInputs doesn't set it); reuse the
+    // edit-ratio restorer so copy matches edit and never falls through to the 55% new-costing default.
+    restoreEditRatio(payload.ratio_value, (payload.ui_snapshot || {}).ratio);
     lastRecordId = null;
     document.getElementById('print-btn').disabled = true;
     document.getElementById('view-btn').disabled = true;
@@ -1707,6 +1735,351 @@ async function prefillCalculation(recordId) {
   } finally {
     doneLoading();
   }
+}
+
+// Rebuild the in-memory priceOverrides map from a saved record's overrides.
+// The saved record stores { bomId: newPrice } + reasons; the original price and
+// material id are looked up from the freshly loaded bomData so the override
+// pills, struck-through originals and revert-detection all behave normally.
+function rebuildOverridesFromSaved(overrides, reasons) {
+  priceOverrides = {};
+  if (!overrides || typeof overrides !== 'object') return 0;
+  let n = 0;
+  Object.entries(overrides).forEach(([bid, price]) => {
+    const key = String(bid);
+    const row = bomData.find(r => String(r.id) === key);
+    priceOverrides[key] = {
+      newPrice:      +price,
+      originalPrice: row ? +(row.price ?? price) : +price,
+      materialId:    row ? row.material_id : null,
+      reason:        (reasons && reasons[bid]) || '',
+    };
+    n++;
+  });
+  return n;
+}
+
+// Open a saved PENDING costing for real editing (prices, dimensions, options),
+// remembering the source record so Save can overwrite it or branch a revision.
+// Anything other than 'pending' falls back to the safe copy-into-new-quote flow.
+async function editCalculation(recordId) {
+  const doneLoading = showLoadingOverlay(`Loading costing #${recordId} for editing…`);
+  try {
+    const payload = await api('GET', `/api/calculations/${recordId}`);
+    if (!payload.trailer_type_id) throw new Error('Stored calculation has no trailer type');
+
+    const status = payload.status || 'pending';
+    if (status !== 'pending') {
+      // Not editable — degrade gracefully to a copy so the user still gets a
+      // usable starting point rather than an error.
+      toast(`Only pending costings can be edited — “${payload.quote_number || ('#'+recordId)}” is ${status}. Opening a copy instead.`, 'warn');
+      clearOverrideSession();
+      document.getElementById('trailer-select').value = payload.trailer_type_id;
+      await loadBOM({ preserveInputs: true });
+      applyCalculationInputs(payload);
+      lastRecordId = null;
+      await runCalc();
+      return;
+    }
+
+    const snap  = payload.ui_snapshot || {};
+    const saved = payload.saved_result || null;
+    const tid   = +payload.trailer_type_id;
+
+    clearOverrideSession();
+    document.getElementById('trailer-select').value = payload.trailer_type_id;
+
+    // 1) Pre-seed per-trailer localStorage + in-memory selection stores BEFORE
+    //    loadBOM so preserveInputs:true keeps the quote's selections instead of
+    //    seeding the trailer's current configurator defaults.
+    try {
+      const bos = snap.body_option_selections || payload.body_option_selections;
+      if (bos) localStorage.setItem(`body_opt_sel_${tid}`, JSON.stringify(bos));
+      if (snap.drd_srd) localStorage.setItem(`drd_srd_${tid}`, JSON.stringify(snap.drd_srd));
+    } catch (_) {}
+    if (window.OptionalSections) {
+      window.OptionalSections.saveEnabled(tid,
+        new Set((snap.optional_sections_enabled || payload.optional_sections_enabled || []).map(Number).filter(Number.isFinite)));
+      window.OptionalSections.saveRowExcl(tid, 'c1',
+        new Set((snap.optional_row_excl || payload.user_excluded_bom_ids || []).map(Number).filter(Number.isFinite)));
+    }
+    bodyOptionSelections = { ...(snap.body_option_selections || payload.body_option_selections || {}) };
+    drdSrdEnabled        = { ...(snap.drd_srd || {}) };
+
+    await loadBOM({ preserveInputs: true });
+    applyCalculationInputs(payload);             // dims, margin, customer, body options
+
+    // 2) Hard-restore ALL configurator draft stores AFTER loadBOM's one-time
+    //    seed, and pin the trailer so runCalc's payload build uses these exact
+    //    values — these drive excluded_categories + flag_overrides server-side.
+    _draftFlagStateTrailer = tid;
+    if (snap.draft_flag_state)       draftFlagState          = { ...snap.draft_flag_state };
+    else if (payload.flag_overrides) Object.assign(draftFlagState, payload.flag_overrides);
+    if (snap.draft_category_radio)   draftCategoryRadioState = { ...snap.draft_category_radio };
+    if (snap.draft_masterless_cat)   draftMasterlessCatState = { ...snap.draft_masterless_cat };
+    if (snap.draft_folder)           draftFolderState        = { ...snap.draft_folder };
+    if (snap.body_option_selections) bodyOptionSelections    = { ...snap.body_option_selections };
+    if (snap.drd_srd)                drdSrdEnabled           = { ...snap.drd_srd };
+    // Pin the saved body-variable values (EPS/PU thicknesses, by name) so the
+    // recompute reproduces them regardless of later global copy-on-switches.
+    editBodyVarOverrides = (saved && saved.body_variables && Object.keys(saved.body_variables).length)
+      ? { ...saved.body_variables } : null;
+    // Legacy records (no UI snapshot) can't have their configurator state
+    // reconstructed reliably — replay the saved result exactly instead. Records
+    // that DO carry a snapshot keep full, interactive editing.
+    const _hasSnapshot = !!(snap && snap.body_option_selections
+                            && Object.keys(snap.body_option_selections).length);
+    editReplay = _hasSnapshot ? null : buildEditReplay(saved && saved.items);
+
+    // Restore the saved discount so the Net Total reproduces on edit.
+    discountKind  = (payload.discount_kind === 'percent' || payload.discount_kind === 'amount')
+                    ? payload.discount_kind : null;
+    discountInput = discountKind ? (+payload.discount_input || 0) : 0;
+
+    // 3) Price overrides — prefer the full snapshot (carries originalPrice +
+    //    reason); else rebuild from the saved by-bom map.
+    if (snap.price_overrides && Object.keys(snap.price_overrides).length) {
+      priceOverrides = JSON.parse(JSON.stringify(snap.price_overrides));
+    } else {
+      rebuildOverridesFromSaved(payload.overrides, payload.override_reasons);
+    }
+    saveOverridesToSession();
+
+    // 4) Profit ratio + chassis selection.
+    restoreEditRatio(payload.ratio_value, snap.ratio);
+    await restoreChassisSelection(snap.chassis || payload.chassis);
+
+    // 4b) Reconstruct EXTRAS (optional sections) from the SAVED RESULT — the
+    //     ground truth for what was actually included. This makes extras
+    //     re-balance even for quotes saved before the UI snapshot existed.
+    restoreOptionalSectionsFromResult(tid, saved && saved.items);
+
+    // 5) Reflect every restored selection in the body-options panel + BOM table.
+    try { renderBodyOptions(bomData); } catch (_) {}
+    refreshBomDisplay();
+
+    editingRecordId    = recordId;
+    editingVersion     = payload.version || 1;
+    editingQuoteNumber = payload.quote_number || null;
+    showEditBanner(payload);
+
+    // 6) Recompute from the fully-restored state, then prove it balances with
+    //    the saved quote (acceptance gate — any drift is surfaced, never silent).
+    await runCalc();
+    verifyEditBalance(saved);
+
+    toast(`Editing ${editingQuoteNumber || ('#'+recordId)} · Rev${editingVersion}`, 'info');
+  } catch (e) {
+    toast('Failed to load costing for editing: ' + e.message, 'error');
+  } finally {
+    doneLoading();
+  }
+}
+
+// Show / refresh the sticky "you are editing" banner at the top of the calculator.
+function showEditBanner(payload) {
+  const bar = document.getElementById('edit-mode-banner');
+  if (!bar) return;
+  const custName = (payload && payload.customer_id && allCustomers.length)
+    ? (allCustomers.find(c => String(c.id) === String(payload.customer_id))?.name || '')
+    : '';
+  const idLabel = editingQuoteNumber || ('#' + editingRecordId);
+  document.getElementById('edit-banner-text').innerHTML =
+    `✏️ Editing <strong>${escHtml(idLabel)}</strong> · Rev${editingVersion}` +
+    (custName ? ` · ${escHtml(custName)}` : '') +
+    ` <span style="color:var(--text-dim)">— saving will ask to overwrite the original or save a new revision</span>`;
+  bar.classList.remove('hidden');
+}
+
+// Leave edit mode and start a clean calculation.
+function cancelEdit() {
+  editingRecordId = null;
+  editReplay = null;
+  editBodyVarOverrides = null;
+  window.location.href = '/calculator';
+}
+
+// Restore the saved profit-ratio dropdown selection. Prefer the exact saved
+// option value; fall back to a numeric match on ratio_value.
+function restoreEditRatio(ratioValue, snapRatio) {
+  const sel = document.getElementById('f-ratio');
+  if (!sel) return;
+  if (snapRatio != null && snapRatio !== '' &&
+      [...sel.options].some(o => o.value === String(snapRatio))) {
+    sel.value = String(snapRatio);
+    return;
+  }
+  if (ratioValue != null) {
+    const m = [...sel.options].find(o => o.value !== '' &&
+      Math.abs(parseFloat(o.value) - Number(ratioValue)) < 1e-6);
+    if (m) sel.value = m.value;
+  }
+}
+
+// WO v4.30 — a brand-new costing opens with the ratio defaulted to 55%. Edit (?edit=) restores the saved
+// ratio and copy (?from=) restores the source ratio (both via restoreEditRatio), so neither uses this.
+// Guarded on an empty selection so a restored last-session draft keeps the ratio already chosen.
+function defaultNewRatio() {
+  const sel = document.getElementById('f-ratio');
+  if (sel && !sel.value) sel.value = '0.55';   // 0.55 = the "55%" option
+}
+
+// Re-open the chassis panel and restore every chassis dropdown from the saved
+// selection (mirrors restoreLastSession's chassis block).
+async function restoreChassisSelection(ch) {
+  if (!ch || !ch.enabled) return;
+  const chOn = document.getElementById('f-chassis-on');
+  const wrap = document.getElementById('chassis-fields');
+  if (chOn) chOn.checked = true;
+  if (wrap) wrap.style.display = '';
+  try { await _loadChassisOptions(); } catch (_) {}
+  const setv = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val != null && val !== '') el.value = val;
+  };
+  setv('f-ch-length',     ch.length);
+  setv('f-ch-axles',      ch.axle_count);
+  setv('f-ch-tyre-style', ch.tyre_style);
+  try { _refreshChassisDropdowns(); } catch (_) {}
+  setv('f-ch-suspension', ch.suspension_id);
+  setv('f-ch-brake',      ch.brake_id);
+  setv('f-ch-tyre',       ch.tyre_id);
+  setv('f-ch-rim',        ch.rim_id);
+  setv('f-ch-lift-type',  ch.lift_type_id);
+  setv('f-ch-lift-count', ch.lift_count);
+  try { _updateChassisCounts(); } catch (_) {}
+}
+
+// Reconstruct the EXTRAS / OPTIONAL EXTRAS state from a saved result's items —
+// the ground truth for what was included. A section is ON if it has any included
+// item; items left out inside an ON section become per-row exclusions. Sections
+// with nothing included stay off (the backend default-excludes them). Works with
+// or without a UI snapshot, so saved extras always re-balance on edit.
+function restoreOptionalSectionsFromResult(tid, items) {
+  if (!window.OptionalSections || !Array.isArray(items) || !tid) return;
+  const enabled = new Set();
+  items.forEach(it => {
+    if (it && it.section_is_optional && !it.excluded && it.bom_section_id != null) {
+      enabled.add(+it.bom_section_id);
+    }
+  });
+  const rowExcl = new Set();
+  items.forEach(it => {
+    if (!it || !it.section_is_optional || it.bom_section_id == null) return;
+    const bid = it.bom_id != null ? it.bom_id : it.id;
+    if (bid == null) return;
+    if (enabled.has(+it.bom_section_id) && it.excluded) rowExcl.add(+bid);
+  });
+  window.OptionalSections.saveEnabled(+tid, enabled);
+  window.OptionalSections.saveRowExcl(+tid, 'c1', rowExcl);
+}
+
+// Build an edit-replay descriptor from a saved result so a legacy (snapshot-less)
+// costing recomputes to exactly its saved figures: include ONLY the saved-included
+// rows (force-exclude every other BOM row), pinning each line's saved formula and
+// unit price. This sidesteps reverse-engineering configurator gating and survives
+// global drift — body-option changes, EPS/PU copy-on-switch (which rewrites BOM
+// formulas), and price changes — by replaying the frozen result.
+function buildEditReplay(savedItems) {
+  if (!Array.isArray(savedItems) || !Array.isArray(bomData)) return null;
+  const inclIds = new Set();
+  savedItems.forEach(it => {
+    if (it && !it.excluded) {
+      const b = it.bom_id != null ? it.bom_id : it.id;
+      if (b != null) inclIds.add(+b);
+    }
+  });
+  const userExcluded = bomData.map(r => r.id).filter(id => !inclIds.has(+id));
+  const formulaOverrides = {}, savedPrices = {}, optionalEnabled = new Set();
+  savedItems.forEach(it => {
+    const b = it && (it.bom_id != null ? it.bom_id : it.id);
+    if (b == null || it.excluded) return;
+    if (it.formula != null)    formulaOverrides[String(b)] = it.formula;
+    if (it.unit_price != null) savedPrices[String(b)]      = it.unit_price;
+    if (it.section_is_optional && it.bom_section_id != null) optionalEnabled.add(+it.bom_section_id);
+  });
+  return { userExcluded, formulaOverrides, savedPrices, optionalEnabled: [...optionalEnabled] };
+}
+
+// Build the complete UI snapshot persisted with a saved costing so a later edit
+// can reconstruct the calculator exactly. Captures every store that feeds the
+// /api/approve payload, plus body-variable values for drift detection.
+function _buildUiSnapshot() {
+  // Legacy replay edits intentionally stay snapshot-less: the live stores weren't
+  // reconstructed (we replay the saved result instead), so a snapshot would be
+  // misleading. Keeping it null means the next edit replays the new result too.
+  if (editReplay) return null;
+  const tidVal = document.getElementById('trailer-select')?.value;
+  if (!tidVal) return null;
+  const tid = +tidVal;
+  const bodyVars = {};
+  (bomData || []).forEach(r => {
+    if (r && r.variable_value != null) bodyVars[String(r.id)] = Number(r.variable_value);
+  });
+  return {
+    body_option_selections:    { ...bodyOptionSelections },
+    drd_srd:                   { ...drdSrdEnabled },
+    draft_flag_state:          { ...draftFlagState },
+    draft_category_radio:      { ...draftCategoryRadioState },
+    draft_masterless_cat:      { ...draftMasterlessCatState },
+    draft_folder:              { ...draftFolderState },
+    optional_sections_enabled: window.OptionalSections ? [...window.OptionalSections.loadEnabled(tid)] : [],
+    optional_row_excl:         window.OptionalSections ? [...window.OptionalSections.loadRowExcl(tid, 'c1')] : [],
+    price_overrides:           JSON.parse(JSON.stringify(priceOverrides || {})),
+    ratio:                     document.getElementById('f-ratio')?.value || '',
+    chassis:                   getChassisSelection(),
+    body_variables:            bodyVars,
+  };
+}
+
+// Acceptance gate: confirm the freshly-recomputed edit matches the saved quote.
+// Compares both the selling price AND the manufacturing (pre-ratio) total. If
+// anything drifts, the original figures are restored to the panel and a clear
+// warning is shown — so the user always sees a balanced load and is told when
+// re-costing moved a number (e.g. a global price or insulation-thickness change
+// since the quote was saved).
+function verifyEditBalance(saved) {
+  const banner = document.getElementById('edit-banner-balance');
+  if (!saved || typeof lastResult === 'undefined' || !lastResult) {
+    if (banner) banner.innerHTML = '';
+    return;
+  }
+  const num = v => Number(v) || 0;
+  // /api/calculate returns selling_price PRE-ratio (the summary panel applies the
+  // profit ratio client-side), whereas the saved record stores it POST-ratio. So
+  // derive the selling price the SAME way for both — (manufacturing + margin) ÷
+  // ratio — instead of trusting the stored field, else we'd compare unlike values.
+  const ratio = parseFloat(document.getElementById('f-ratio')?.value);
+  const useRatio = !isNaN(ratio) && ratio > 0;
+  const sellOf = r => {
+    const withMargin = num(r.grand_total) + num(r.profit_amount);
+    return useRatio ? withMargin / ratio : withMargin;
+  };
+  const savedSell = sellOf(saved);
+  const liveSell  = sellOf(lastResult);
+  const savedMfg  = num(saved.grand_total);
+  const liveMfg   = num(lastResult.grand_total);
+  const TOL = 1.0;  // 1 currency unit — absorbs cent-level rounding only
+  const balanced = Math.abs(savedSell - liveSell) <= TOL &&
+                   Math.abs(savedMfg  - liveMfg)  <= TOL;
+  if (!banner) return;
+  if (balanced) {
+    banner.innerHTML =
+      `<span style="color:#4ade80">✓ Balanced with the saved quote — Total ${fmt(savedSell)}` +
+      (savedMfg ? ` · Mfg ${fmt(savedMfg)}` : '') + `</span>`;
+    return;
+  }
+  // Drift — restore the saved figures so the displayed load matches the quote,
+  // and explain precisely what re-costing changed.
+  lastResult = saved;
+  try { renderSummary(saved); } catch (_) {}
+  try { if (saved.items) renderBOMWithCosts(saved.items, bomData); } catch (_) {}
+  const dSell = liveSell - savedSell;
+  const sign  = dSell >= 0 ? '+' : '−';
+  banner.innerHTML =
+    `<span style="color:#ffb340">⚠ Re-costing with current prices/formulas would change the total by ` +
+    `${sign}${fmt(Math.abs(dSell))} (saved ${fmt(savedSell)} → now ${fmt(liveSell)}). ` +
+    `Showing the saved figures; your next edit switches to the updated ones.</span>`;
 }
 
 // Load trailer defaults then pre-select from URL param
@@ -1736,15 +2109,20 @@ window.addEventListener('DOMContentLoaded', async () => {
   window.addEventListener('beforeunload', saveLastSession);
 
   const params = new URLSearchParams(location.search);
+  const editId = params.get('edit');
   const fromId = params.get('from');
   const tid = params.get('trailer');
-  if (fromId) {
+  if (editId) {
+    await editCalculation(editId);
+  } else if (fromId) {
     await prefillCalculation(fromId);
   } else if (tid) {
     document.getElementById('trailer-select').value = tid;
     loadBOM();
+    defaultNewRatio();              // WO v4.30 — new costing for a trailer: default ratio 55%
   } else {
     await restoreLastSession();
+    defaultNewRatio();              // WO v4.30 — new costing: default ratio 55% (kept only if none restored)
   }
   updateGeo();
 
@@ -1862,6 +2240,9 @@ async function loadBOM(options = {}) {
     priceOverrides = {};
     bodyOptionSelections = {};
     drdSrdEnabled = {};
+    editBodyVarOverrides = null;   // pinned thicknesses only apply within an edit
+    editReplay = null;             // replay state only applies within an edit
+    discountKind = null; discountInput = 0;   // discount is per-costing, reset on a fresh trailer
     // Force the next renderBodyOptionsTree call to re-seed from
     // cfg_user_state_<tid>, since we just cleared bodyOptionSelections.
     _cfgStateSeededForTrailer = null;
@@ -3932,7 +4313,22 @@ async function runCalc() {
     flag_overrides: Object.keys(flagOverridesPayload).length ? flagOverridesPayload : undefined,
     user_excluded_bom_ids: _optExcl,
     optional_sections_enabled: _optEnabledIds,
+    body_variable_overrides: (editBodyVarOverrides && Object.keys(editBodyVarOverrides).length) ? editBodyVarOverrides : undefined,
   };
+
+  // Edit-replay (legacy records with no snapshot): reproduce the saved result
+  // exactly — include only the saved-included rows with their saved formulas, and
+  // use the saved unit prices as the baseline with any user price edits on top.
+  if (editReplay) {
+    lastCalcPayload.include_all_items        = true;
+    lastCalcPayload.user_excluded_bom_ids    = editReplay.userExcluded;
+    lastCalcPayload.optional_sections_enabled = editReplay.optionalEnabled;
+    lastCalcPayload.formula_overrides        = editReplay.formulaOverrides;
+    lastCalcPayload.excluded_categories      = undefined;
+    lastCalcPayload.body_option_selections   = undefined;
+    lastCalcPayload.flag_overrides           = undefined;
+    lastCalcPayload.overrides                = { ...editReplay.savedPrices, ...overridesPayload };
+  }
 
   const status = document.getElementById('calc-status');
   document.getElementById('approve-btn').disabled = true;
@@ -3972,6 +4368,32 @@ async function approveCosting() {
     ...lastCalcPayload,
     customer_id: customerId ? +customerId : null,
   };
+
+  // Editing an existing pending costing → ask whether to overwrite the original
+  // record or save a new revision (the "validate the save" step). This replaces
+  // the new-quote duplicate flow below.
+  if (editingRecordId) {
+    _pendingApproveBase.edit_record_id = editingRecordId;
+    _pendingNextVersion = (editingVersion || 1) + 1;
+    const idLabel = editingQuoteNumber || ('#' + editingRecordId);
+    document.getElementById('edit-save-summary').innerHTML =
+      `You are editing <strong style="color:var(--text-head)">${escHtml(idLabel)}</strong> · Rev${editingVersion}` +
+      (_pendingApproveBase.customer_id ? '' : ' <span style="color:var(--text-dim)">(no customer linked)</span>');
+    document.getElementById('edit-overwrite-ver').textContent = editingVersion;
+    document.getElementById('edit-newver-ver').textContent    = _pendingNextVersion;
+    const reuseWrap = document.getElementById('edit-reuse-qno-wrap');
+    const reuseBox  = document.getElementById('edit-reuse-qno');
+    const reuseVal  = document.getElementById('edit-reuse-qno-val');
+    if (reuseBox) reuseBox.checked = true;            // default: keep the same quote number
+    if (editingQuoteNumber && reuseWrap && reuseVal) {
+      reuseVal.textContent = editingQuoteNumber;
+      reuseWrap.style.display = '';
+    } else if (reuseWrap) {
+      reuseWrap.style.display = 'none';
+    }
+    document.getElementById('modal-edit-save').classList.remove('hidden');
+    return;
+  }
 
   // No customer → warn before saving
   if (!customerId) {
@@ -4017,6 +4439,15 @@ async function approveWithAction(action) {
   await _doApprove(action, action === 'new_version' ? _pendingNextVersion : null, reuseQno);
 }
 
+// Edit-mode Save: 'overwrite' updates the original record in place; 'new_version'
+// branches a fresh revision (reusing the quote number if the box is ticked).
+async function editSaveAction(action) {
+  const reuseQno = action === 'new_version'
+    && !!document.getElementById('edit-reuse-qno')?.checked;
+  closeModal('modal-edit-save');
+  await _doApprove(action, action === 'new_version' ? _pendingNextVersion : null, reuseQno);
+}
+
 async function _doApprove(versionAction, nextVersion, reuseQno) {
   const btn      = document.getElementById('approve-btn');
   const doneBusy = showBusy(btn, 'Saving...');
@@ -4031,6 +4462,9 @@ async function _doApprove(versionAction, nextVersion, reuseQno) {
       reuse_quote_number: versionAction === 'new_version' ? !!reuseQno : false,
       ratio_value: (!isNaN(_ratioRaw) && _ratioRaw > 0) ? _ratioRaw : null,
       ratio_label: _ratioLbl || null,
+      ui_snapshot: _buildUiSnapshot(),
+      discount_kind:  discountKind,
+      discount_input: discountKind ? discountInput : null,
     });
     lastRecordId   = result.record_id;
     lastResult     = result;
@@ -4044,7 +4478,19 @@ async function _doApprove(versionAction, nextVersion, reuseQno) {
     clearOverrideSession();
     const custName    = result.customer_name ? ` for ${result.customer_name}` : '';
     const verLabel    = result.version && result.version > 1 ? ` · Rev${result.version}` : '';
-    toast(`Costing approved${custName}${verLabel} — saved as #${result.record_id}`, 'success');
+    const wasEditing  = !!_pendingApproveBase?.edit_record_id;
+    if (wasEditing) {
+      // Keep editing the saved record so a follow-up Save overwrites the right
+      // revision (overwrite → same id; new_version → the freshly created one).
+      editingRecordId    = result.record_id;
+      editingVersion     = result.version || editingVersion;
+      editingQuoteNumber = result.quote_number || editingQuoteNumber;
+      showEditBanner({ customer_id: result.customer_id ?? _pendingApproveBase.customer_id });
+      const verbed = versionAction === 'overwrite' ? 'Overwrote' : 'Saved new revision';
+      toast(`${verbed} ${editingQuoteNumber || ('#'+result.record_id)}${custName}${verLabel}`, 'success');
+    } else {
+      toast(`Costing approved${custName}${verLabel} — saved as #${result.record_id}`, 'success');
+    }
   } catch(e) {
     toast('Approve failed: ' + e.message, 'error');
     btn.disabled = false;
@@ -4625,32 +5071,126 @@ function renderSummary(result) {
     <span>TOTAL COST</span>
     <span class="s-val">${fmt(totalCost)}</span>
   </div>`;
+
+  // ── Discount → Net Total rows (always rendered; hidden when no discount).
+  //    They carry stable IDs so the discount handlers update them IN PLACE —
+  //    typing in the inputs must never re-render the <input> (that resets the
+  //    caret to the start and reverses the digits). ──
+  html += `<div class="summary-row highlight-green" id="disc-row" style="display:none">
+    <span class="s-label" id="disc-label">Discount</span>
+    <span class="s-val" id="disc-val">− ${fmt(0)}</span>
+  </div>
+  <div class="summary-row total" id="net-row" style="color:var(--blue-hi);display:none">
+    <span>NET TOTAL</span>
+    <span class="s-val" id="net-val">${fmt(0)}</span>
+  </div>`;
   html += '</div>';
 
   if (hasFullCostAccess) {
-    // ── Geometry grid ──────────────────────────────────────
+    // ── Discount entry (% OR amount — entering one zeroes the other) ─────────
+    const _pctVal = (discountKind === 'percent' && discountInput) ? (+discountInput) : '';
+    const _amtVal = (discountKind === 'amount'  && discountInput) ? (+discountInput) : '';
+    html += `<div style="margin-top:14px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-panel)">
+      <div style="font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px">Discount</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1">
+          <label for="disc-pct" style="font-size:10px;color:var(--text-dim)">Percent %</label>
+          <input id="disc-pct" type="number" min="0" max="100" step="0.1" class="form-control" placeholder="0"
+                 value="${_pctVal}" oninput="applyDiscountInput('percent', this)"
+                 style="font-size:12px;padding:4px 6px;width:100%">
+        </div>
+        <div style="flex:1">
+          <label for="disc-amt" style="font-size:10px;color:var(--text-dim)">Amount R</label>
+          <input id="disc-amt" type="number" min="0" step="0.01" class="form-control" placeholder="0"
+                 value="${_amtVal}" oninput="applyDiscountInput('amount', this)"
+                 style="font-size:12px;padding:4px 6px;width:100%">
+        </div>
+      </div>
+    </div>`;
+
+    // ── Geometry grid — two paired boxes ───────────────────
     const g = result.geometry;
     html += `<div class="geo-grid" style="margin-top:14px">
-      <div class="geo-item"><div class="geo-label">Wall Area</div><div class="geo-value">${fmtNum(g.wall_area,1)} m²</div></div>
-      <div class="geo-item"><div class="geo-label">Roof Area</div><div class="geo-value">${fmtNum(g.roof_area,1)} m²</div></div>
-      <div class="geo-item"><div class="geo-label">Floor Area</div><div class="geo-value">${fmtNum(g.floor_area,1)} m²</div></div>
-      <div class="geo-item"><div class="geo-label">Surface Area</div><div class="geo-value">${fmtNum(g.surface_area,1)} m²</div></div>
+      <div class="geo-item"><div class="geo-label">Floor / Surface Area</div>
+        <div class="geo-value">${fmtNum(g.floor_area,1)} / ${fmtNum(g.surface_area,1)} m²</div></div>
+      <div class="geo-item"><div class="geo-label">Wall / Roof Area</div>
+        <div class="geo-value">${fmtNum(g.wall_area,1)} / ${fmtNum(g.roof_area,1)} m²</div></div>
     </div>`;
   }
 
   area.innerHTML = html;
-  grand.textContent = fmt(totalCost);
 
-  // Sub-line: cost/m² when no ratio; selling price (= withMargin / ratio) when ratio applied
-  const sub = document.getElementById('grand-total-sub');
+  // Remember the gross total + default sub-line so the discount handlers can
+  // refresh the display without a full re-render.
+  lastGrossTotal = totalCost;
   const ratioValFinal = parseFloat(document.getElementById('f-ratio').value);
-  if (!isNaN(ratioValFinal) && ratioValFinal > 0) {
-    sub.textContent = `Selling Price: ${fmt(withMargin / ratioValFinal)}`;
-  } else if (result.cost_per_sqm) {
-    sub.textContent = `${fmt(result.cost_per_sqm)} / m²`;
-  } else {
-    sub.textContent = '';
+  if (!isNaN(ratioValFinal) && ratioValFinal > 0) _defaultSubText = `Selling Price: ${fmt(withMargin / ratioValFinal)}`;
+  else if (result.cost_per_sqm)                   _defaultSubText = `${fmt(result.cost_per_sqm)} / m²`;
+  else                                            _defaultSubText = '';
+
+  refreshDiscountDisplay();   // sets grand-total + sub + disc/net rows from the globals
+}
+
+// ── Discount state (entered in the Cost Summary, applied to the Total Cost) ───
+let discountKind   = null;   // 'percent' | 'amount' | null
+let discountInput  = 0;      // raw value the user typed
+let lastGrossTotal = 0;      // last rendered gross Total Cost (for in-place refresh)
+let _defaultSubText = '';    // non-discount sub-line text
+
+// Compute the discount + net for a given gross total, honouring the clamps the
+// server also applies (percent 0–100, amount ≤ total). Pure — reads the globals.
+function computeDiscount(base) {
+  base = +base || 0;
+  let amount = 0;
+  if (discountKind === 'percent' && discountInput > 0) {
+    amount = base * Math.min(Math.max(discountInput, 0), 100) / 100;
+  } else if (discountKind === 'amount' && discountInput > 0) {
+    amount = Math.min(discountInput, base);
   }
+  amount = Math.round(amount * 100) / 100;
+  return { amount, net: Math.round((base - amount) * 100) / 100 };
+}
+
+// Update the Discount / Net Total rows, the headline and the sub-line IN PLACE
+// (no innerHTML re-render), so the discount inputs keep their caret while typing.
+function refreshDiscountDisplay() {
+  const d = computeDiscount(lastGrossTotal);
+  const show = d.amount > 0;
+  const discRow = document.getElementById('disc-row');
+  const netRow  = document.getElementById('net-row');
+  const grand   = document.getElementById('grand-total');
+  const sub     = document.getElementById('grand-total-sub');
+  if (discRow) {
+    discRow.style.display = show ? '' : 'none';
+    const lbl = document.getElementById('disc-label');
+    if (lbl) lbl.textContent = discountKind === 'percent' ? `Discount (${+discountInput}%)` : 'Discount';
+    const dv = document.getElementById('disc-val');
+    if (dv) dv.textContent = `− ${fmt(d.amount)}`;
+  }
+  if (netRow) {
+    netRow.style.display = show ? '' : 'none';
+    const nv = document.getElementById('net-val');
+    if (nv) nv.textContent = fmt(d.net);
+  }
+  if (grand) grand.textContent = fmt(show ? d.net : lastGrossTotal);
+  if (sub) sub.textContent = show ? `Was ${fmt(lastGrossTotal)} · less ${fmt(d.amount)} discount` : _defaultSubText;
+}
+
+// Typing in either discount box: entering a value in one zeroes the other. Only
+// the OTHER input is touched (cleared) — never the one being typed in — and the
+// figures refresh in place, so the caret and digit order are preserved.
+function applyDiscountInput(kind, el) {
+  const v = parseFloat(el.value);
+  if (isNaN(v) || v <= 0) {
+    if (discountKind === kind) { discountKind = null; discountInput = 0; }
+  } else {
+    discountKind = kind;
+    discountInput = v;
+    const other = document.getElementById(kind === 'percent' ? 'disc-amt' : 'disc-pct');
+    if (other) other.value = '';
+  }
+  refreshDiscountDisplay();
+  try { saveLastSession(); } catch (_) {}
 }
 
 function viewFullResults() {

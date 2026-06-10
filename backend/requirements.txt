@@ -3,10 +3,10 @@
 # pydantic-settings added for Phase 1 (WO v4.12).
 # Intentionally excluded vs. the legacy app:
 #   - PyMySQL   -> PostgreSQL-only in the monorepo
-#   - a2wsgi    -> Passenger/WSGI bridge (legacy cPanel prod only)
-#   - gunicorn  -> uvicorn is the server here
+#   - gunicorn  -> uvicorn locally; Passenger runs the WSGI app directly on cPanel
 #   - weasyprint-> not present in the working local venv; reportlab/pypdf is the
 #                  active PDF path. (Re-add with GTK libs if HTML->PDF is needed.)
+# (a2wsgi was excluded at v4.12; RE-ADDED below for the faje.co.za cPanel/Passenger deploy — WO v4.30 §3.2.)
 
 # --- Web framework ---
 fastapi==0.115.12
@@ -39,10 +39,19 @@ reportlab==4.4.10
 pypdf==4.0.1
 pypdfium2==5.8.0
 pillow==12.2.0
-svglib==1.6.0
+# svglib REMOVED (WO v4.30 §3.2): unused by any backend code (no svg2rlg/renderPM/reportlab.graphics import),
+# and svglib 1.6.0 pulls rlPyCairo -> pycairo, which compiles from source and FAILS on HostAfrica's cPanel
+# CageFS (no Cairo system dev libs). If SVG->PDF is ever needed, add it to a wheel-only extras file — NOT this
+# prod requirements file — and confirm wheels exist for the target Linux. See ADR 0017.
 
 # --- AI Help assistant ---
 anthropic==0.104.1
 
 # --- Utilities ---
 python-dotenv==1.2.2
+
+# --- Deploy: cPanel/Passenger WSGI bridge (faje.co.za only; WO v4.30 §3.2) ---
+# Passenger speaks WSGI; backend/passenger_wsgi.py wraps the ASGI app via a2wsgi.ASGIMiddleware.
+# Pinned to the version the legacy GRP-Costing-System ran (its app/requirements.txt). Not used by the
+# local uvicorn dev server or CI's test run — only the cPanel deploy imports passenger_wsgi.
+a2wsgi==1.10.7

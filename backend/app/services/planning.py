@@ -130,6 +130,8 @@ def _job_ref(job: ProductionJob, calc, customer, vcl_date=None) -> PlanningJobRe
         # carrier fallback for workbook-imported jobs (no calc/customer join), v4.21
         customer=(customer.name if customer is not None else job.customer_name),
         body_type=(dims.get("body_type") or job.description),
+        # Workload metric — pre-discount selling intentional (capacity != revenue). The Planning Board is a
+        # workload view; discounted quotes don't reduce production load. Costings views use net_total. (WO v4.30 §0.2a)
         selling_zar=(result.get("selling_zar") if calc else job.selling_zar),
         branch_id=job.branch_id, chassis_eta=job.chassis_eta,
         chassis_received_at=job.chassis_received_at,
@@ -213,6 +215,7 @@ def build_board(db: Session, *, branch_id=None, weeks_count=12, lane=None, start
     for w in weeks_sorted:
         wk = [it for it in slots if it.week == w]
         filled = sum(1 for it in wk if it.production_job is not None)
+        # Workload metric — pre-discount selling intentional (capacity != revenue). (WO v4.30 §0.2a)
         value = sum((it.production_job.selling_zar or 0) for it in wk if it.production_job is not None)
         capacity.append(CapacityCell(week_iso=_iso(w), filled=filled,
                                       empty=max(0, grid - filled), value_zar=value))

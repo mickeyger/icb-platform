@@ -159,7 +159,18 @@ export function CostingDetail() {
           <SectionTitle>Totals</SectionTitle>
           <dl className="space-y-2 text-sm">
             <TotalRow label="Cost" value={c.cost_zar} />
-            <TotalRow label="Selling price" value={c.selling_zar} highlight />
+            {/* WO v4.30 §0.2a — net_total is the headline; when a discount exists, show the pre-discount
+                selling as "before discount" + the discount, then the highlighted Net total. No decoration
+                when there's no discount (net == selling). */}
+            {(c.discount_amount ?? 0) > 0 ? (
+              <>
+                <TotalRow label="Before discount" value={c.gross_selling_zar ?? c.selling_zar} muted />
+                <TotalRow label="Discount" valueText={`- ${zar(c.discount_amount ?? 0)}`} muted />
+                <TotalRow label="Net total" value={c.selling_zar} highlight />
+              </>
+            ) : (
+              <TotalRow label="Selling price" value={c.selling_zar} highlight />
+            )}
             <TotalRow label="Gross profit" value={c.gross_profit_zar} muted />
             <TotalRow label="Markup" valueText={`${c.markup_pct}%`} muted />
           </dl>

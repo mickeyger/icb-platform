@@ -15,6 +15,20 @@
 
 {% block content %}
 <script type="application/json" id="help-page-context">{"page":"calculator","description":"The Cost Calculator — pick a body, pick a chassis, set dimensions, toggle optional extras, see line items and grand total."}</script>
+<!-- MIRROR-TO-MES: needs-review — edit-mode banner for /calculator?edit=<id>. Pairs with the edit-save modal + calculator.js edit logic. Port together at cutover. -->
+<!-- Edit-mode banner — visible only when /calculator?edit=<id> loads a pending costing -->
+<div id="edit-mode-banner" class="hidden"
+     style="display:flex;flex-direction:column;gap:6px;
+            margin:0 0 10px;padding:8px 14px;border-radius:var(--radius);
+            background:rgba(255,179,64,.12);border:1px solid rgba(255,179,64,.4);
+            color:var(--text);font-size:13px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span id="edit-banner-text" style="flex:1;min-width:200px"></span>
+    <button class="btn btn-outline btn-sm" onclick="cancelEdit()"
+            style="color:var(--text-dim)">✕ Cancel edit</button>
+  </div>
+  <div id="edit-banner-balance" style="font-size:12px"></div>
+</div>
 <div class="calc-shell">
   <!-- LEFT: Parts bin / config -->
   <div class="calc-panel calc-panel--config">
@@ -361,6 +375,40 @@
       </button>
       <button class="btn btn-outline" style="width:100%;justify-content:center"
         onclick="closeModal('modal-duplicate')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- MIRROR-TO-MES: needs-review — edit-save validation modal (overwrite vs new revision). Depends on POST /api/approve accepting edit_record_id + version_action:"overwrite". -->
+<!-- Edit-save modal — overwrite the original pending costing or branch a revision -->
+<div class="modal-backdrop hidden" id="modal-edit-save">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--orange)">✏️ Save Edited Costing</span>
+      <button class="btn btn-icon" onclick="closeModal('modal-edit-save')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text);margin-bottom:12px" id="edit-save-summary"></p>
+      <label id="edit-reuse-qno-wrap" style="display:none;font-size:12px;margin-top:4px;margin-bottom:6px;cursor:pointer;user-select:none">
+        <input type="checkbox" id="edit-reuse-qno" style="vertical-align:middle" checked> Reuse quote number
+        <span id="edit-reuse-qno-val" style="font-family:var(--font-mono);color:var(--blue-hi)"></span>
+        <span style="color:var(--text-dim)"> for the new revision</span>
+      </label>
+      <p style="font-size:11px;color:var(--text-dim);margin-top:10px">
+        Choose how to save your changes:
+      </p>
+    </div>
+    <div class="modal-footer" style="flex-direction:column;gap:8px;align-items:stretch">
+      <button class="btn btn-primary" style="width:100%;justify-content:center"
+        onclick="editSaveAction('overwrite')">
+        💾 Overwrite original — keep Rev<span id="edit-overwrite-ver"></span>
+      </button>
+      <button class="btn btn-outline" style="width:100%;justify-content:center"
+        onclick="editSaveAction('new_version')">
+        ⊞ Save as new Revision <span id="edit-newver-ver"></span>
+      </button>
+      <button class="btn btn-outline" style="width:100%;justify-content:center;color:var(--text-dim)"
+        onclick="closeModal('modal-edit-save')">Cancel</button>
     </div>
   </div>
 </div>
@@ -1068,7 +1116,7 @@ const canEditRecipes    = {{ 'true' if user_can(user, 'recipes.edit_inline') els
 const CURRENT_USER_ID   = {{ user.id }};
 </script>
 <script defer src="/static/js/optional_sections.js?v=3"></script>
-<script defer src="/static/js/calculator.js?v=112"></script>
+<script defer src="/static/js/calculator.js?v=121"></script>
 <script>
 // ── Body Type Parameters accordion ──────────────────────────────────────────
 function toggleBTP() {
