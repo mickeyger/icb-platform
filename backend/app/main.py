@@ -77,7 +77,6 @@ from .routers import dashboard as _r_dashboard
 from .routers import trailer_designer as _r_trailer_designer
 from .routers import admin_settings as _r_admin_settings
 from .routers import import_excel as _r_import_excel
-from .routers import devtools as _r_devtools
 from .routers import performance as _r_performance
 from .routers import pdf_templates as _r_pdf_templates
 from .routers import exports as _r_exports
@@ -153,7 +152,6 @@ app.include_router(_r_dashboard.router)
 app.include_router(_r_trailer_designer.router)
 app.include_router(_r_admin_settings.router)
 app.include_router(_r_import_excel.router)
-app.include_router(_r_devtools.router)
 app.include_router(_r_performance.router)
 app.include_router(_r_pdf_templates.router)
 app.include_router(_r_exports.router)
