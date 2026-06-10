@@ -33,6 +33,7 @@ const SERVER_KEYS = new Set<string>([
   'stores.count', 'stores.raise_discrepancy',
   'buying.resolve_discrepancy', 'buying.raise_pr', 'buying.defer_pr',
   'buying.override_supplier', 'buying.bulk_raise',
+  'chassis.assembly_assign',       // WO v4.31 — true per-role gating for the parking->assembly assign
 ])
 const KEY_ALIAS: Record<string, string> = {
   'materials.count': 'stores.count',

@@ -42,6 +42,7 @@ export type PermissionKey =
   | 'chassis.update'
   | 'chassis.vcl'
   | 'chassis.dcl'
+  | 'chassis.assembly_assign'      // WO v4.31 — assign a chassis parking -> assembly bay
 
 export type RoleId =
   | 'rep_burt'
