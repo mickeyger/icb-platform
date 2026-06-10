@@ -1,10 +1,10 @@
 # faje.co.za deploy runbook — Cost Calculator cutover to icb-platform (WO v4.30)
 
-> **Status: §3.2 DONE; deploy mechanics finalised.** §A (env) + §C (path (c) + the `passenger_wsgi.py`
-> ASGI→WSGI bridge) complete; §D/§E cover BOTH cutover/rollback approaches (parallel-app vs mutate-in-place).
-> Still pending: §B (env-var VALUES from Michael), HostAfrica's **parallel-app** answer (picks the §D/§E
-> variant), and §D **execution** in the paired §3.4 session (~30–45 min). Single runbook for WO §0.4 (deploy),
-> §0.5 (env), §0.7 (rollback), §3.2–§3.4.
+> **Status: §3.2 + deploy plan COMPLETE.** §A (env) + §C (path (c), `passenger_wsgi.py` ASGI→WSGI bridge,
+> parallel-app confirmed) done; §D is the finalised **two-phase parallel-app** cutover (Phase 1 staging async →
+> Phase 2 URL swap ~5–10 min), §E the per-phase rollback. Pending only EXECUTION: §B (env-var VALUES), Phase 1
+> by Michael (async, no prod risk — incl. the URL-editable-vs-recreate finding), Phase 2 paired, then §3.5
+> cleanup after ~48 h stable. Single runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
 
 Post-cutover, `faje.co.za` is served by **`mickeyger/icb-platform`** (was `GRP-Costing-System`). The Cost
 Calculator (Jinja at `/`, `/calculator`, `/results/...`) is unchanged for users; the underlying repo changes.
@@ -80,46 +80,53 @@ enhancement.)*
 > - **Rollback is heavier** for the in-place path — reverting Root = a new venv + a full re-pip-install + restart
 >   (~10–15 min), not an instant flip. See §E for the safer parallel-app option.
 >
-> **⚠ OPEN (Michael → HostAfrica):** can we run a **SECOND "Setup Python App"** pointing at `icb-platform/backend`
-> **alongside** the existing `icecoldgrp` app, and switch faje.co.za URL routing between them once verified?
-> **If yes →** parallel-app cutover with **instant rollback** (route back to the old app, untouched). **If no →**
-> the mutate-in-place path. Record the answer + pick the §D/§E variant.
+> **✅ RESOLVED (ticket #2462727, final — parallel-app):** multiple Python apps ARE supported, but **one domain
+> per app**. We can't bind both apps to faje.co.za at once — the workaround is a **subdomain** (e.g.
+> `staging.faje.co.za`) for the new app, verify there, then **switch the URL** to the main domain. This makes
+> the cutover a **two-phase** flow (§D): Phase 1 builds + verifies the new app on the subdomain (**zero
+> production risk**); Phase 2 swaps the URLs (~5–10 min). **Parallel-app is the chosen path; the mutate-in-place
+> steps are retained below only as a deep last-resort fallback.**
 
-## §D — Cutover steps (paired session, WO §3.4) — allow ~30–45 min
+## §D — Cutover (paired with Michael, WO §3.4) — parallel-app, two phases
 
-**Two approaches** — pick on the day per the parallel-app answer (§C):
-- **(D1) Parallel-app — PREFERRED (pending HostAfrica "yes"):** stand up a SECOND "Setup Python App" at
-  `icb-platform/backend` (its own new venv → Run Pip Install → Restart → verify on a test URL/route), THEN
-  switch faje.co.za routing to it. The old `icecoldgrp` app stays running + untouched → rollback = flip routing back.
-- **(D2) Mutate-in-place — FALLBACK:** repoint the existing app's Git source + Application Root (steps below).
-  A new venv is created in the process; rollback re-points + rebuilds (~10–15 min; §E).
+**Constraint:** HostAfrica supports multiple Python apps but **one domain per app** → build/verify on a
+subdomain, then switch URLs.
 
-**Mutate-in-place steps (D2):**
-1. **Pre-cutover snapshot** — record (a) the current `GRP-Costing-System` commit deployed, and (b) ALL current
-   Python Setup field values (table above) = the rollback target.
-2. **Switch Git source** — cPanel Git deploy: repo `mickeyger/GRP-Costing-System` → `mickeyger/icb-platform`,
-   branch `main` (post-merge); pull.
-3. **Update Application Root** — Python Setup: `…/icecoldgrp` → `…/<icb-platform>/backend` (confirm the on-disk
-   path). **A NEW venv is created here — the next Pip Install runs from scratch (several minutes).**
-4. **Run Pip Install** — installs `backend/requirements.txt` (incl. `a2wsgi`) into the fresh venv. *(Not automatic on Git pull.)*
-5. **Restart** — click Restart (required after code/config change).
-6. **Verify** — `faje.co.za/calculator`: log in, walk a costing, save a **discounted** quote + confirm **Net
-   Total**, export Excel/PDF, check the dashboard. Zero behavioural diff. *(Run `alembic upgrade head` via the
-   venv if not wired to the deploy — applies 0015, a no-op on the shared DB.)*
-7. **Notify UAT testers** — "Cost Calculator now served from the unified codebase; behaviour unchanged; report issues."
+### Phase 1 — build + verify the new app on a subdomain (ASYNCHRONOUS; faje.co.za UNAFFECTED)
+Michael can do this solo — it doesn't touch production.
+1. Create a **subdomain** (e.g. `staging.faje.co.za`).
+2. Create a **new "Setup Python App"**: subdomain + Application Root `…/<icb-platform>/backend` + Python 3.11.14
+   + startup `passenger_wsgi.py` + entry point `application`.
+3. Configure **Git deploy** for `mickeyger/icb-platform` (branch `main`, post-merge) → the new app's directory; pull.
+4. **Run Pip Install** — installs `backend/requirements.txt` (incl. `a2wsgi`) into the new app's fresh venv (several minutes).
+5. **Restart + verify the subdomain** — `staging.faje.co.za/calculator`: log in, walk a costing, save a
+   **discounted** quote + confirm **Net Total**, export Excel/PDF, check the dashboard. *(Run `alembic upgrade
+   head` via the new venv if not wired to the deploy — 0015 is a no-op on the shared DB.)*
+6. **Discover the URL mechanics** — in cPanel, find whether an existing app's domain/URL is **editable in place**
+   or needs **delete + recreate**; this decides the Phase 2 swap. **Record the finding here.**
 
-For **parallel-app (D1)**: do steps 2–5 on the NEW second app first (verify on a test route), then the only
-"switch" is the URL routing — §D.1's snapshot still applies for the routing revert.
+### Phase 2 — the actual cutover (PAIRED, ~5–10 min)
+1. **Pre-cutover snapshot** — record the old `icecoldgrp` app's full config (§C table) = the rollback target.
+2. **Release faje.co.za** from the old `icecoldgrp` app (URL edit or app delete, per the Phase 1 finding).
+3. **Point the new app's URL** `staging.faje.co.za` → `faje.co.za`.
+4. **Verify** on `faje.co.za/calculator` (same checks as Phase 1.5).
+5. **Notify UAT testers** — "Cost Calculator now served from the unified codebase; behaviour unchanged; report issues."
+6. **Park the old app ~48 h** as the safety net (don't delete its files) before §3.5 cleanup.
 
-## §E — Rollback (WO §0.7) — path depends on the cutover approach
+### Deep fallback — mutate-in-place (only if parallel-app is somehow unavailable on the day)
+Repoint the existing app's Git source + Application Root in place (new venv → Run Pip Install → Restart). Window
+~30–45 min; rollback ~10–15 min (revert both + re-pip-install — the original venv is not auto-restored). Avoid
+unless forced; the parallel-app path keeps production on the old app until the URL swap.
 
-- **Parallel-app (D1) — instant:** switch faje.co.za URL routing **back to the original `icecoldgrp` app**
-  (it stayed running + untouched). No rebuild. Preferred — pending HostAfrica's parallel-app answer.
-- **Mutate-in-place (D2) — ~10–15 min:** in cPanel: **(1)** revert the **Git source** to
-  `mickeyger/GRP-Costing-System` + pull the pre-cutover commit (§D.1); **(2)** revert the **Application Root**
-  to `/home/fajecoza/icecoldgrp` — **this creates ANOTHER new venv; it does NOT restore the original**;
-  **(3) Run Pip Install** to rebuild the legacy deps into that fresh venv (several minutes); **(4) Restart**.
-  The original dormant venv is not auto-reused, so the re-pip-install is mandatory.
+## §E — Rollback (WO §0.7) — by phase
 
-**No DB rollback** in either path — the only schema change (0015) is additive + guarded; the discount columns
-are shared/faje-owned. Document the failure; iterate offline.
+- **During Phase 1:** **no production risk** — faje.co.za is untouched. To abort, just delete the staging app +
+  subdomain; nothing to revert.
+- **During/after Phase 2 (~5–10 min):** **revert the URLs** — release `faje.co.za` from the new app and
+  re-assign it to the **old `icecoldgrp` app**, which stays **parked + intact for ~48 h** (its venv + files
+  unchanged → no rebuild). Re-point the new app to `staging.faje.co.za` if keeping it for a retry.
+- **Deep-fallback (mutate-in-place) rollback:** revert Git source + Application Root + **re-pip-install** the
+  fresh venv + restart (~10–15 min; the original venv is not auto-restored).
+
+**No DB rollback** in any path — the only schema change (0015) is additive + guarded; the discount columns are
+shared/faje-owned. Document the failure; iterate offline.
