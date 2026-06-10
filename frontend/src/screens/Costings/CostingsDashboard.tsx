@@ -20,6 +20,7 @@ import { ALL_STATUSES, type Costing, type StatusName } from '../../data/costings
 import { Tooltip } from '../../components/ui/Tooltip'
 import { Card } from '../../components/ui/primitives'
 import { STATUS_STYLES, StatusPillCosting, statusFilterTooltipKey } from './statusPalette'
+import { CostingsKpiStrip } from './CostingsKpiStrip'
 import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
 import { AcceptModal } from './AcceptModal'
@@ -145,6 +146,9 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
           )}
         </div>
       </div>
+
+      {/* WO v4.31 §3.4 — the 5 metric KPI tiles (dashboard top; both embed contexts inherit). */}
+      <CostingsKpiStrip />
 
       {/* Status filter chips */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
