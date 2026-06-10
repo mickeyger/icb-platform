@@ -76,14 +76,31 @@ The discount means MES reads of `calculations.selling_zar` must pick a meaning p
 Mechanism: the calculator + the `/api/calculations`/`/api/production-jobs` responses surface `net_total` (and
 mirror it into `result_json`); `grand_total` becomes the net headline; `selling_zar` stays pre-discount.
 
-### 6. Cutover = a single Git-source switch, with a rollback runbook
+### 6. Cutover = cPanel "Setup Python App" + a WSGI bridge, two-phase parallel-app
 
-The deploy itself is one HostAfrica panel change (repo `GRP-Costing-System` → `icb-platform`) + a Git pull;
-the work is all in the prep (drift audit + port + deploy-compatibility + env transcription). Steps, the
-env-var contract, the deploy-path choice (subdir vs thin `deploy/faje/` wrapper) and the rollback drill live
-in **`docs/runbooks/faje-deploy.md`**. Rollback = revert the Git source + pull the pre-cutover commit; **no DB
-rollback** (the only schema change is additive + guarded). Post-cutover: archive `GRP-Costing-System`
+HostAfrica is cPanel + **Phusion Passenger (WSGI-only)**; FastAPI is ASGI, so the deploy needs a thin
+`backend/passenger_wsgi.py` wrapping `app.main:app` via `a2wsgi.ASGIMiddleware` as the WSGI callable
+`application` (mirrors the legacy). Git deploy can't target a subdirectory, but cPanel's "Setup Python App"
+can point the Application **root** at `backend/` — so icb-platform stays as-is (no wrapper repo). Because
+HostAfrica binds **one domain per app**, the cutover is **two-phase**: Phase 1 builds + verifies a NEW app on
+a **subdomain** (zero production risk; faje.co.za untouched), Phase 2 swaps the URL (~5–10 min) with the old
+app **parked ~48 h** as an instant-rollback safety net. All mechanics, the env-var contract, the
+URL-editable-vs-recreate finding, and the per-phase rollback live in **`docs/runbooks/faje-deploy.md`**.
+**No DB rollback** (the only schema change is additive + guarded). Post-cutover: archive `GRP-Costing-System`
 (don't delete), retire the local `Costing model` folder, mark `ICB_UAT_Agent_Constraints_v1.0.md` SUPERSEDED.
+
+### 7. Production requirements must be wheel-only on shared-hosting CageFS
+
+HostAfrica's cPanel CageFS has **no system dev libraries** (no Cairo headers / build toolchain wired up), so a
+Python dep that **compiles from source** fails `pip install` there. The staging deploy hit this on `pycairo`,
+pulled transitively by `svglib==1.6.0 → rlPyCairo → pycairo` — and `svglib` turned out to be **unused by any
+backend code** (no `svg2rlg`/`renderPM` import), so it was simply **removed** from `backend/requirements.txt`
+(the legacy's looser `svglib>=1.5` had resolved an older, cairo-free build, which is why it never surfaced there).
+
+> **Pattern:** *Compile-from-source Python deps fail on shared-hosting CageFS without system dev libs. Keep the
+> production requirements file **wheel-only**; move any source-build or dev-only dep to a separate
+> `requirements-extras.txt` the cPanel deploy doesn't install, and confirm wheels exist for the target Linux
+> before pinning.* Audit **transitive** deps too — the offender here was two levels below the pinned package.
 
 ## Consequences
 

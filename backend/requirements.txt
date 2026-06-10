@@ -39,7 +39,10 @@ reportlab==4.4.10
 pypdf==4.0.1
 pypdfium2==5.8.0
 pillow==12.2.0
-svglib==1.6.0
+# svglib REMOVED (WO v4.30 §3.2): unused by any backend code (no svg2rlg/renderPM/reportlab.graphics import),
+# and svglib 1.6.0 pulls rlPyCairo -> pycairo, which compiles from source and FAILS on HostAfrica's cPanel
+# CageFS (no Cairo system dev libs). If SVG->PDF is ever needed, add it to a wheel-only extras file — NOT this
+# prod requirements file — and confirm wheels exist for the target Linux. See ADR 0017.
 
 # --- AI Help assistant ---
 anthropic==0.104.1
