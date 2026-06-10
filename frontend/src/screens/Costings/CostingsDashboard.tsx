@@ -20,6 +20,7 @@ import { ALL_STATUSES, type Costing, type StatusName } from '../../data/costings
 import { Tooltip } from '../../components/ui/Tooltip'
 import { Card } from '../../components/ui/primitives'
 import { STATUS_STYLES, StatusPillCosting, statusFilterTooltipKey } from './statusPalette'
+import { CostingsKpiStrip } from './CostingsKpiStrip'
 import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
 import { AcceptModal } from './AcceptModal'
@@ -27,7 +28,11 @@ import { BottleneckIndicator } from './BottleneckIndicator'
 import { zarShort, dmy } from '../../lib/format'
 import { Spinner } from '../../components/ui/feedback'
 
-export function CostingsDashboard() {
+// WO v4.31 §3.3 (§0.6/§0.13) — ONE component, two embed contexts: full-page on /costings (default),
+// and `embedded` (compressed chrome) below the calculator iframe on /costings/new. The embedded
+// variant keeps ALL actions + modals live (permission-gated, NOT display-only); compression is
+// chrome-only: smaller title, no New-Costing self-link, distinct root testid.
+export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) {
   const nav = useNavigate()
   const { mode, costings, statusCounts, acceptStage, firePreJobCard, scheduleRepairPhases, acceptCosting } = useCostings()
   const { profile, hasPermission } = useAppData()
@@ -99,11 +104,11 @@ export function CostingsDashboard() {
   }
 
   return (
-    <div className="p-4" data-testid="costings-dashboard">
+    <div className="p-4" data-testid={embedded ? 'costings-dashboard-embedded' : 'costings-dashboard'}>
       {/* Header */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className={`${embedded ? 'mb-3' : 'mb-4'} flex flex-wrap items-center justify-between gap-2`}>
         <Tooltip k="costings_dashboard.header_title">
-          <h1 className="flex items-center gap-2 text-xl font-bold text-body">
+          <h1 className={`flex items-center gap-2 font-bold text-body ${embedded ? 'text-base' : 'text-xl'}`}>
             Costings
             <ModePill mode={mode} />
           </h1>
@@ -129,7 +134,7 @@ export function CostingsDashboard() {
               </button>
             </div>
           )}
-          {canCreate && (
+          {canCreate && !embedded && (   /* on /costings/new the link would self-navigate — omit */
             <Tooltip k="costings_dashboard.create_new_costing_button">
               <Link
                 to="/costings/new"
@@ -141,6 +146,9 @@ export function CostingsDashboard() {
           )}
         </div>
       </div>
+
+      {/* WO v4.31 §3.4 — the 5 metric KPI tiles (dashboard top; both embed contexts inherit). */}
+      <CostingsKpiStrip />
 
       {/* Status filter chips */}
       <div className="mb-3 flex flex-wrap items-center gap-2">

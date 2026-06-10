@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    ChassisEventCapture, ChassisEventOut, ChassisPhotoOut, ChassisRecordCreate,
-    ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
+    AssemblyAssignRequest, BayOut, ChassisEventCapture, ChassisEventOut, ChassisPhotoOut,
+    ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
 )
 from ..services import chassis as svc
 
@@ -31,6 +31,18 @@ def list_records(q: Optional[str] = Query(None), status: Optional[str] = Query(N
 def checklists(user: User = Depends(require_user)):
     """VCL/DCL checklist templates (DATA, not UI-hard-coded — Workshop-refine placeholder, v4.28)."""
     return svc.CHASSIS_CHECKLIST_TEMPLATES
+
+
+@router.get("/bays/assembly", response_model=List[BayOut])
+def bays_assembly(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """WO v4.31 §0.3 — the 5 inside assembly bays (Planning Board assembly lane)."""
+    return svc.list_assembly_bays(db)
+
+
+@router.get("/bays/parking", response_model=List[BayOut])
+def bays_parking(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """WO v4.31 §0.3 — the ~24 outside parking bays (Planning Board parking lane)."""
+    return svc.list_parking_bays(db)
 
 
 @router.get("/photos/{photo_id}")
@@ -69,6 +81,14 @@ def capture_vcl(record_id: int, payload: ChassisEventCapture, db: Session = Depe
 def capture_dcl(record_id: int, payload: ChassisEventCapture, db: Session = Depends(get_db),
                 user: User = Depends(require_permission("chassis.dcl"))):
     return svc.capture_event(db, record_id, "DCL", payload, who=user.username)
+
+
+@router.post("/{record_id}/assembly", response_model=ChassisEventOut, status_code=201)
+def assign_assembly(record_id: int, payload: AssemblyAssignRequest, db: Session = Depends(get_db),
+                    user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v4.31 §0.4 — assign a booked-in chassis to an assembly bay (parking -> assembly)."""
+    return svc.assign_assembly_bay(db, record_id, payload.assembly_bay_id, who=user.username,
+                                   event_date=payload.event_date, notes=payload.notes)
 
 
 @router.post("/{record_id}/events/{event_id}/photos", response_model=List[ChassisPhotoOut],

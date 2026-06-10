@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Branch, CalculationRecord, Customer
-from app.models.mes import PlanningAck, ProductionJob
+from app.models.mes import BomLine, GeneratedBom, PlanningAck, ProductionJob
 from app.schemas.production_jobs import TimelineEvent
 
 
@@ -104,6 +104,22 @@ def get_with_costing(db: Session, job_id: int) -> JobRow:
     if row is None:
         raise NotFoundError(f"production job {job_id} not found")
     return _row(row)
+
+
+def load_current_bom(db: Session, job) -> Optional[tuple]:
+    """The job's current generated_bom + its lines (WO v4.31 §3.2 — read-only). None if no current BOM.
+    Returns (GeneratedBom, list[BomLine]); lines ordered by line_order."""
+    bom_id = getattr(job, "current_bom_id", None)
+    if not bom_id:
+        return None
+    bom = db.get(GeneratedBom, bom_id)
+    if bom is None:
+        return None
+    lines = db.execute(
+        select(BomLine).where(BomLine.generated_bom_id == bom_id)
+        .order_by(BomLine.line_order, BomLine.id)
+    ).scalars().all()
+    return bom, lines
 
 
 def list_jobs(db: Session, *, status: Optional[list[str]] = None, branch_id: Optional[int] = None,

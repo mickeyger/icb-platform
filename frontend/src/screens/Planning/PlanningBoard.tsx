@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Truck, PackageX, GripVertical, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { data } from '../../data/mockData'
@@ -11,6 +11,8 @@ import { CalendarDays, Wrench } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
 import { useAppData } from '../../store/AppDataContext'
 import { PlanningAckPanel } from './PlanningAckPanel'
+import { BayModelLanes } from './BayModelLanes'
+import { JobCardSections } from './JobCardSections'
 import type { Costing } from '../../data/costingsData'
 import type { SlotAssignment, UnscheduledJob } from '../../data/types'
 import { usePlanning } from '../../store/PlanningContext'
@@ -1022,8 +1024,19 @@ function LivePlanningBoard() {
                 </tr>
               </thead>
               <tbody>
-                {bays.map((bay) => (
-                  <tr key={bay} className="border-b border-line">
+                {bays.map((bay, bayIdx) => {
+                  const lane = laneForBay(bay)
+                  const showLane = bayIdx === 0 || laneForBay(bays[bayIdx - 1]) !== lane
+                  return (
+                  <Fragment key={bay}>
+                    {showLane && (
+                      <tr className="border-b border-line">
+                        <td colSpan={board.weeks.length + 1} className="sticky left-0 bg-surface-alt px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                          {lane === 'panelshop' ? 'Press' : 'Vacuum'}
+                        </td>
+                      </tr>
+                    )}
+                  <tr className="border-b border-line">
                     <td className="sticky left-0 z-10 bg-surface-alt px-2 py-1.5 font-mono text-xs font-semibold shadow-[inset_-1px_0_0_#E5E7EB]">{bay}</td>
                     {board.weeks.map((w) => {
                       const cell = cellFor(w.key, bay)
@@ -1073,7 +1086,9 @@ function LivePlanningBoard() {
                       )
                     })}
                   </tr>
-                ))}
+                  </Fragment>
+                  )
+                })}
                 <FooterRow
                   label="Filled"
                   cells={board.weeks.map((w) => `${capFor(w.key)?.filled ?? 0}`)}
@@ -1092,6 +1107,8 @@ function LivePlanningBoard() {
           </div>
         </Card>
       </div>
+
+      <BayModelLanes />
 
       <div className="flex shrink-0 items-center justify-between">
         <LastUpdated at={lastUpdated} onRefresh={refresh} />
@@ -1224,6 +1241,9 @@ function LiveSlotDetail({
           </div>
         )}
       </div>
+
+      {/* WO v4.31 §3.2 — job-card enrichment: chassis (latest VCL) + BOM lines + bay context. Read-only. */}
+      <JobCardSections jobId={job.id} />
 
       {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
           onClick kept (prop stays referenced) but `disabled` prevents navigation. */}

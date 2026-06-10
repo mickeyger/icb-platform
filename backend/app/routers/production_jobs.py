@@ -14,10 +14,12 @@ from sqlalchemy.orm import Session
 
 from ..database import Branch, User, get_db
 from ..deps import active_branch, require_permission, require_user, user_can
+from ..models.mes import AssemblyBay
 from ..schemas.production_jobs import (
     PlanningAckRequest, PreJobSignoffRequest, ProductionJobDetail,
-    ProductionJobListItem, TimelineEvent, to_detail, to_list_item,
+    ProductionJobListItem, TimelineEvent, bom_to_out, to_detail, to_list_item,
 )
+from ..services import chassis as chassis_svc
 from ..services import production_jobs as svc
 
 router = APIRouter(prefix="/api/production-jobs", tags=["production-jobs"])
@@ -50,11 +52,31 @@ def list_production_jobs(
 
 @router.get("/{job_id}", response_model=ProductionJobDetail)
 def get_production_job(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """Full detail for one job, including joined costing data (customer, body, money)."""
+    """Full detail for one job + WO v4.31 §3.2 read-only enrichment: current BOM lines, chassis
+    (latest VCL photos/checklist/notes), and bay context. All additive + read-only (no write paths)."""
     try:
-        return _detail(svc.get_with_costing(db, job_id))
+        job, calc, customer, branch_code = svc.get_with_costing(db, job_id)
     except svc.NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    detail = to_detail(job, calc, customer, branch_code)
+    # §3.2 enrichment — current generated_bom + chassis-with-latest-VCL + bay context.
+    bom = svc.load_current_bom(db, job)
+    if bom is not None:
+        detail.current_bom = bom_to_out(*bom)
+    if job.chassis_record_id:
+        try:
+            chassis = chassis_svc.get_detail(db, job.chassis_record_id)
+        except HTTPException:
+            chassis = None                  # dangling FK -> frontend renders the "Chassis pending" placeholder
+        if chassis is not None:
+            detail.chassis = chassis
+            if chassis.current_assembly_bay_id:
+                bay = db.get(AssemblyBay, chassis.current_assembly_bay_id)
+                detail.current_assembly_bay_code = bay.code if bay else None
+                aa = [e for e in chassis.events if e.event_type == "assembly_assigned"]
+                if aa:
+                    detail.assembly_assigned_at = max(aa, key=lambda e: e.id).created_at
+    return detail
 
 
 @router.post("/from-calculation/{calculation_id}", response_model=ProductionJobDetail)
