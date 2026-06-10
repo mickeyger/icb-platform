@@ -4,8 +4,9 @@
 > (path (c), `passenger_wsgi.py` bridge, two-phase parallel-app, per-phase rollback). Staging surfaced two infra
 > blockers: **icb is Postgres but faje is MySQL** (needs a Postgres + a MySQL→Postgres migration), and HostAfrica's
 > **egress firewall blocks outbound external DB ports** (external Postgres unreachable; a cPanel-LOCAL Postgres
-> would sidestep it). Both in §F — gated on HostAfrica's local-PG / whitelist / upgrade reply. Pending: §F (DB +
-> egress), §B env VALUES, Phase 1 finish, Phase 2 paired, §3.5. Runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
+> would sidestep it). Both in §F — gated on HostAfrica's local-PG / whitelist / upgrade reply. The MySQL→Postgres
+> data migration is drafted in **§G** (needs a dry run before Phase 2). Pending: §F resolution + §G dry run, §B
+> env VALUES, Phase 1 finish, Phase 2 paired, §3.5. Runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
 
 Post-cutover, `faje.co.za` is served by **`mickeyger/icb-platform`** (was `GRP-Costing-System`). The Cost
 Calculator (Jinja at `/`, `/calculator`, `/results/...`) is unchanged for users; the underlying repo changes.
@@ -196,4 +197,78 @@ Three outcomes from the egress ticket, by increasing disruption:
 
 The MySQL→Postgres data migration (F.3) is **target-agnostic** — the same pgloader/dump approach applies
 whether the Postgres ends up cPanel-local, whitelisted-external, or on a new host; only the connection string
-changes. *(A fuller "hosting alternatives" comparison can be drafted if (c) becomes likely.)*
+changes. *(A fuller "hosting alternatives" comparison can be drafted if (c) becomes likely.)* Full plan in §G.
+
+## §G — MySQL → PostgreSQL data migration plan (target-agnostic)  [WO §3.4 prerequisite]
+
+Moves the live calculator data from faje's **MySQL** into the **PostgreSQL** the new app uses. Written so the
+**target is a single connection string** — identical steps for §F.5 (a) cPanel-local / (b) whitelisted-external
+/ (c) new-host; only `TARGET_PG_URL` changes.
+
+### G.0 — Principle: Alembic owns the schema; pgloader moves DATA only
+icb's schema (the `icb_costings` + `icb_mes` Postgres schemas, custom types, the `v_calculation_records_legacy`
+view, the MES tables, constraints) is **owned by Alembic** — it must NOT be auto-created from MySQL's shape. So:
+**(1)** build the exact schema with `alembic upgrade head`, then **(2)** load **data only** from MySQL into the
+pre-created `icb_costings` tables with type casts. The `icb_mes.*` tables are calculator-irrelevant and stay
+empty except the perm/branch rows migrations 0005/0013 seed.
+
+### G.1 — Prerequisites
+- A **read-only** MySQL user on faje's DB (pgloader only reads the source).
+- The **target Postgres** from §F.1 (`TARGET_PG_URL`, `postgresql+psycopg://…`).
+- **pgloader** on a host that can reach BOTH the MySQL and the target Postgres. ⚠ Mind the egress block (§F):
+  if the target is **cPanel-local**, run pgloader **on the cPanel box** (localhost→localhost); if external, run
+  from a host that can reach both.
+- A **quiet window** or a consistent MySQL snapshot (no mid-write skew during the load).
+
+### G.2 — Build the schema (target-agnostic), with `TARGET_PG_URL` in backend/.env
+```
+cd backend && <venv>/bin/python -m alembic upgrade head
+```
+→ creates `icb_costings` + `icb_mes` + all tables (0001→0015) AND writes `alembic_version` = head (the DB is
+correctly stamped; no separate `stamp` in this flow — see G.5).
+
+### G.3 — Load the data (pgloader, data-only)
+pgloader `.load` file — **template; finalize the table list + casts against the live MySQL, then dry-run (G.7)**:
+```
+LOAD DATABASE
+  FROM     mysql://RO_USER:PASS@MYSQL_HOST:3306/FAJE_DB
+  INTO     postgresql://PG_USER:PASS@PG_HOST:5432/PG_DB   -- the ONE thing that changes per (a)/(b)/(c)
+  WITH     data only, truncate, disable triggers, reset sequences, preserve index names
+  SET      search_path to 'icb_costings'
+  CAST     type datetime to timestamptz drop default using zero-dates-to-null,
+           type tinyint  to boolean     using tinyint-to-boolean,
+           type longtext to text
+  INCLUDING ONLY TABLE NAMES MATCHING ~/^(calculations|customers|trailer_types|materials|formulas|bom_)/
+  ALTER SCHEMA 'FAJE_DB' RENAME TO 'icb_costings'
+;
+```
+Notes:
+- `data only` + `truncate` → idempotent reruns into the Alembic-built tables (never clobbers the schema).
+- `INCLUDING ONLY` the **calculator** tables — exclude any MySQL-only/legacy tables not in icb.
+- icb-only columns absent in MySQL (e.g. `calculations.branch_id`, an MES-era addition) load as their PG
+  default/NULL — `branch_id` NULL is expected + handled by the v4.29 **D1** fix on accept.
+- `reset sequences` fixes the identity counters to `max(id)+1`.
+- Fallback if pgloader can't be placed where both DBs are reachable: a Python ETL (SQLAlchemy reflect MySQL →
+  insert via icb's models) — slower, no extra binary.
+
+### G.4 — Verify (gate before Phase 2)
+- **Row-count parity** per migrated table: MySQL `COUNT(*)` == Postgres `COUNT(*)`.
+- **Spot-check** a recent quote end-to-end: dimensions, totals, **and `net_total` / `discount_*`** (proves the
+  d2da5bf columns came across).
+- **App smoke** on the new app: dashboard lists costings, open one, run a calculate, save a discounted quote.
+
+### G.5 — `alembic stamp head` — when it's needed
+**Not** needed here (G.2 `upgrade head` already stamped the DB). `alembic stamp head` is only for the
+**alternative** where the schema arrives via `pg_restore` / pgloader-create (no migrations run) — then stamp so
+Alembic knows the DB is at head without re-running. Never stamp a DB you built with `upgrade head`.
+
+### G.6 — Rollback
+- The **source MySQL is never written** (read-only) — it's the standing rollback for the whole cutover (the §E
+  parallel-app URL revert keeps faje on the old MySQL app).
+- The **target Postgres** is fresh/disposable: to redo, `DROP SCHEMA icb_costings CASCADE` (+ `icb_mes` if
+  needed) and re-run G.2–G.3. No data is at risk — the authoritative copy stays in MySQL until Phase 2 + 48 h.
+
+### G.7 — Dry run BEFORE Phase 2 (required)
+Rehearse G.2–G.4 against the **staging** Postgres (or any throwaway target) on a recent MySQL copy. Confirm:
+pgloader completes, **row counts match**, the discount spot-check passes, the calculator smoke passes — and
+record the **wall-clock** (it sizes the Phase-2 window). Only schedule Phase 2 once a dry run is green.
