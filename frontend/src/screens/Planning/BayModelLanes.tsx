@@ -32,10 +32,12 @@ export function BayModelLanes() {
       setBusyBay(bayId)
       await assign(chassis.id, bayId)
     } catch (e) {
-      // 409 = bay already occupied → inline reject (toast already raised by the hook for other codes).
+      // 409 = bay already occupied → inline reject + amber toast, mirroring the schedule grid's
+      // cellOccupied pattern. Other codes are already toasted by the hook's handleApiError.
       if (e instanceof ApiError && e.status === 409) {
         setRejectBay(bayId)
         setTimeout(() => setRejectBay(null), 1800)
+        toast.push({ kind: 'warn', message: e.detail || 'That bay is already occupied.' })
       }
     } finally {
       setBusyBay(null)
