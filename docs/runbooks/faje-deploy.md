@@ -1,10 +1,10 @@
 # faje.co.za deploy runbook — Cost Calculator cutover to icb-platform (WO v4.30)
 
-> **Status: §3.2 + deploy plan COMPLETE.** §A (env) + §C (path (c), `passenger_wsgi.py` ASGI→WSGI bridge,
-> parallel-app confirmed) done; §D is the finalised **two-phase parallel-app** cutover (Phase 1 staging async →
-> Phase 2 URL swap ~5–10 min), §E the per-phase rollback. Pending only EXECUTION: §B (env-var VALUES), Phase 1
-> by Michael (async, no prod risk — incl. the URL-editable-vs-recreate finding), Phase 2 paired, then §3.5
-> cleanup after ~48 h stable. Single runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
+> **Status: §3.2 + deploy mechanics done; DB provisioning + data migration are now the critical open item (§F).**
+> §A/§C/§D/§E complete (path (c), `passenger_wsgi.py` bridge, two-phase parallel-app, per-phase rollback).
+> Staging surfaced that **icb is Postgres but faje is MySQL** — a PostgreSQL DB **and** a MySQL→Postgres data
+> migration are required (§F). Pending: §F (DB + data), §B env VALUES, Phase 1 finish, Phase 2 paired, §3.5
+> after ~48 h. Single runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
 
 Post-cutover, `faje.co.za` is served by **`mickeyger/icb-platform`** (was `GRP-Costing-System`). The Cost
 Calculator (Jinja at `/`, `/calculator`, `/results/...`) is unchanged for users; the underlying repo changes.
@@ -18,7 +18,7 @@ refuses to boot without them); everything else has a safe default. Source of tru
 
 | Key | Required | Default | faje cutover note |
 |---|---|---|---|
-| `DATABASE_URL` | **YES** | — | The **shared** Postgres (`postgresql+psycopg://…/icb`, schemas `icb_costings` + `icb_mes`). Re-use HostAfrica's existing calculations DB connection — the discount columns already exist there (faje's d2da5bf deploy + migration 0015 is a no-op on it). |
+| `DATABASE_URL` | **YES** | — | **PostgreSQL with the `+psycopg` driver:** `postgresql+psycopg://USER:PASS@HOST:PORT/DBNAME`. **Do NOT reuse the legacy `mysql+…` URL** — icb is Postgres-only (no PyMySQL → "No module named 'pymysql'"); plain `postgresql://` also fails (psycopg3 only). A Postgres DB reachable from HostAfrica must be provisioned + populated — **see §F**. |
 | `SESSION_SECRET` | **YES** | — | Cookie/session signing key. **Re-use HostAfrica's current value** so existing UAT sessions don't all invalidate at cutover. |
 | `DEPLOYMENT_MODE` | no | `cloud` | `cloud` for faje (surfaces in the UI footer). |
 | `APP_PORT` | no | `8000` | Match HostAfrica's expected app port. |
@@ -32,8 +32,8 @@ refuses to boot without them); everything else has a safe default. Source of tru
 | `ANTHROPIC_API_KEY` | no | `""` (Help hidden) | Set it to keep the AI Help assistant the legacy app shipped; leave empty to hide it. |
 | `ALLOWED_ORIGINS` | no | localhost set | Set to `https://faje.co.za` (+ any UAT host). Comma-separated or JSON array. |
 
-**Pre-cutover task:** transcribe HostAfrica's current `GRP-Costing-System` env values into this contract
-(§B) — most map 1:1 (`DATABASE_URL`, `SESSION_SECRET`); the rest take icb defaults.
+**Pre-cutover task:** transcribe HostAfrica's current `GRP-Costing-System` env values into this contract (§B).
+`SESSION_SECRET` maps 1:1; **`DATABASE_URL` does NOT** (legacy is MySQL, icb is Postgres — §F); rest take icb defaults.
 
 ## §B — HostAfrica env mapping  ⛔ PENDING ticket #2462727
 
@@ -41,8 +41,8 @@ Fill once Michael provides HostAfrica's current env panel (screenshot/copy-paste
 
 | HostAfrica current var | value (do NOT paste secrets here) | → icb key |
 |---|---|---|
-| _(pending)_ | _(pending)_ | `DATABASE_URL` |
-| _(pending)_ | _(pending)_ | `SESSION_SECRET` |
+| `mysql+pymysql://…` (legacy) | **NOT reusable** | `DATABASE_URL` → **new Postgres**, see §F |
+| _(current value)_ | reuse as-is | `SESSION_SECRET` |
 | _(pending)_ | _(pending)_ | … |
 
 ## §C — Deploy path: (c) cPanel "Setup Python App" root-pointing  ✅ CONFIRMED (ticket #2462727)
@@ -130,3 +130,48 @@ unless forced; the parallel-app path keeps production on the old app until the U
 
 **No DB rollback** in any path — the only schema change (0015) is additive + guarded; the discount columns are
 shared/faje-owned. Document the failure; iterate offline.
+
+## §F — DATABASE: icb is Postgres, faje is MySQL — provisioning + data migration  ⚠ CUTOVER-CRITICAL
+
+Surfaced at staging (Blocker 1): the live faje.co.za app runs **MySQL**; icb-platform is **PostgreSQL-only**
+(the v4.12 migration). So the cutover is not just code+deploy — icb needs a **PostgreSQL DB, reachable from
+HostAfrica, holding the calculator data.** The legacy `.env`'s `mysql+…` URL cannot be reused (→ "No module
+named 'pymysql'").
+
+### F.1 — Provision a Postgres reachable from HostAfrica
+- **Check cPanel for a "PostgreSQL Databases" tool** (many cPanel hosts are MySQL-only — confirm with HostAfrica).
+  - **If yes:** create a DB + user there (grant the user full privileges so Alembic can create the
+    `icb_mes`/`icb_costings` schemas). Same box, so host = `localhost`; cPanel prefixes names with the account:
+    `postgresql+psycopg://fajecoza_icbapp:PASSWORD@localhost:5432/fajecoza_icbstaging`
+  - **If no:** use an **external managed Postgres** (Supabase / Neon / RDS) reachable over the network +
+    allow HostAfrica's outbound IP: `postgresql+psycopg://USER:PASS@<host>:5432/DBNAME`. (Decision for Michael.)
+- The URL **must** carry `+psycopg` (psycopg3); plain `postgresql://` fails.
+
+### F.2 — Create the schema (staging + prod), with the new DATABASE_URL in backend/.env
+```
+cd /home/fajecoza/icb-platform/backend && <venv>/bin/python -m alembic upgrade head
+```
+Creates the `icb_mes` + `icb_costings` schemas + all tables (0001→0015, incl. the discount columns via 0015).
+An empty-but-migrated DB lets the app **boot** + the calculator **page** load, but with no
+trailers/BOM/materials/formulas you can't actually cost.
+
+### F.3 — Populate the data
+- **Staging (fastest):** dump Michael's **local dev `icb` Postgres** (already a complete working dataset),
+  restore to the staging DB, then `alembic stamp head`:
+  ```
+  # local:  pg_dump -Fc -h localhost -U icb_app -d icb -f icb.dump
+  # server: pg_restore --no-owner --no-privileges -h localhost -U fajecoza_icbapp -d fajecoza_icbstaging icb.dump
+  #         then:  <venv>/bin/python -m alembic stamp head
+  ```
+  (Dev data, not the latest live UAT — fine for the Phase-1 "boots + calculator loads" check.)
+- **Prod cutover (the real migration — NEW WORKSTREAM):** the live data is in faje's **MySQL** and must be
+  migrated **MySQL → Postgres** at cutover. ⚠ `migrate_to_postgres.py` in the legacy is **NOT** the tool (it
+  reads SQLite). Use **pgloader** (MySQL→Postgres ETL, as v4.21 did for the catalogue) or a dump+transform,
+  then `alembic stamp head`. **Needs its own mini-plan + a dry run before Phase 2** — the largest open cutover
+  item. (Agent can draft it on request.)
+
+### F.4 — Correction to earlier assumptions
+The §A / ADR-0017 "shared DB; 0015 is a no-op on prod" framing held only for **local dev** (one Postgres for
+calc + MES). In **prod** there is no shared Postgres yet: faje is MySQL, and the new prod Postgres is built by
+Alembic — so **0015 CREATES the discount columns there** (not a no-op). The columns faje's MySQL got from the
+d2da5bf deploy arrive in Postgres via the F.3 data migration + 0015.
