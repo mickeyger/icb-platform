@@ -67,6 +67,7 @@ interface AppDataValue {
   // Live session (WO v4.17).
   apiMode: ApiMode
   isAdmin: boolean              // WO v4.25 — live session user.role === 'admin' (admin inspection gate)
+  sessionRole: string | null    // WO v4.31 §3.2 — live session user.role (render-time choices, e.g. workshop price hide)
   activeBranch: BranchRef | null
   // Branch picker (WO v4.18).
   accessibleBranches: BranchRef[]
@@ -167,6 +168,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       permissions: mockPermissions,
       apiMode,
       isAdmin: apiMode === 'live' && sessionRole === 'admin',
+      sessionRole: apiMode === 'live' ? sessionRole : null,
       activeBranch,
       accessibleBranches,
       switchBranch,

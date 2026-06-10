@@ -12,6 +12,7 @@ import { useCostings } from '../../store/CostingsContext'
 import { useAppData } from '../../store/AppDataContext'
 import { PlanningAckPanel } from './PlanningAckPanel'
 import { BayModelLanes } from './BayModelLanes'
+import { JobCardSections } from './JobCardSections'
 import type { Costing } from '../../data/costingsData'
 import type { SlotAssignment, UnscheduledJob } from '../../data/types'
 import { usePlanning } from '../../store/PlanningContext'
@@ -1240,6 +1241,9 @@ function LiveSlotDetail({
           </div>
         )}
       </div>
+
+      {/* WO v4.31 §3.2 — job-card enrichment: chassis (latest VCL) + BOM lines + bay context. Read-only. */}
+      <JobCardSections jobId={job.id} />
 
       {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
           onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
