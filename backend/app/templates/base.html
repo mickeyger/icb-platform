@@ -254,11 +254,6 @@
           <span class="nav-icon">#</span> Quote Numbering
         </a>
         {% endif %}
-        {% if is_dev_mode() and is_admin %}
-        <a href="/admin/devtools" class="nav-item {% if '/admin/devtools' in request.url.path %}active{% endif %}" style="margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
-          <span class="nav-icon">🛠</span> Dev Tools
-        </a>
-        {% endif %}
         {% if user and (user.username or '')|lower == 'admin' %}
         <a href="/admin/performance" class="nav-item {% if '/admin/performance' in request.url.path %}active{% endif %}" style="margin-top:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
           <span class="nav-icon">⚡</span> Performance
