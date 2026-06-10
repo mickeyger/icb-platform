@@ -122,6 +122,16 @@ front**, so they surfaced at the most expensive moment (deploy), not the cheapes
 > question would have caught.* If the host can neither offer a local instance nor allow egress to a managed
 > one, the decision escalates to **changing hosting** — a budget/lead-time call, not a code one.
 
+> **Resolution (10 Jun 2026 PM):** HostAfrica shared hosting was the wrong infrastructure — PostgreSQL isn't
+> offered on the shared plan, and outbound TCP to external PostgreSQL ports is actively blocked at the egress
+> firewall, so neither a local nor a managed external Postgres was viable. The engagement pivoted to an **ICB
+> intranet single-VM** deployment (Ubuntu 22.04 / Debian 12 — PostgreSQL 16 + uvicorn + Nginx talking over
+> localhost, Nginx reverse-proxying the intranet IP, VPN access; provisioning tracked in **WO v4.35**). The
+> hosting-preflight lesson stands unchanged: **validate database-engine availability + outbound network rules
+> before scheduling any cutover.** The vendor questionnaire (`ICB_WebHost_Vendor_Questionnaire_v1.0.md`)
+> captures the 44 questions to put to any future host before committing. The HostAfrica cutover runbook
+> (`docs/runbooks/faje-deploy.md`) is retained but marked **SUPERSEDED**.
+
 ## Consequences
 
 - **One source of truth.** No more dual-codebase coordination; UAT releases land directly in icb-platform.

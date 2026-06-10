@@ -1,5 +1,15 @@
 # faje.co.za deploy runbook — Cost Calculator cutover to icb-platform (WO v4.30)
 
+> ## ⛔ SUPERSEDED — 10 Jun 2026 — DO NOT EXECUTE
+> The HostAfrica cutover described below was **abandoned**. Root cause (see §F.1 + ADR 0017 §8): the shared
+> plan offers no PostgreSQL, and the egress firewall blocks outbound TCP to external DB ports — so neither a
+> local nor an external managed Postgres was workable. The strategic deploy target is now the **ICB intranet
+> single-VM** (Ubuntu 22.04 / Debian 12 — PostgreSQL 16 + uvicorn + Nginx on localhost, VPN access) — see
+> **ADR 0017 §8 (Resolution)** and **WO v4.35**. This runbook is retained only as a historical record of the
+> egress-block lesson and the target-agnostic MySQL→PostgreSQL data-migration plan (§G), which may inform a
+> future hosting move; the pre-commit questions for any future vendor live in
+> `ICB_WebHost_Vendor_Questionnaire_v1.0.md`.
+
 > **Status: code + deploy mechanics done; BLOCKED on a hosting DB-access constraint (§F).** §A/§C/§D/§E complete
 > (path (c), `passenger_wsgi.py` bridge, two-phase parallel-app, per-phase rollback). Staging surfaced two infra
 > blockers: **icb is Postgres but faje is MySQL** (needs a Postgres + a MySQL→Postgres migration), and HostAfrica's
