@@ -1,10 +1,11 @@
 # faje.co.za deploy runbook — Cost Calculator cutover to icb-platform (WO v4.30)
 
-> **Status: §3.2 + deploy mechanics done; DB provisioning + data migration are now the critical open item (§F).**
-> §A/§C/§D/§E complete (path (c), `passenger_wsgi.py` bridge, two-phase parallel-app, per-phase rollback).
-> Staging surfaced that **icb is Postgres but faje is MySQL** — a PostgreSQL DB **and** a MySQL→Postgres data
-> migration are required (§F). Pending: §F (DB + data), §B env VALUES, Phase 1 finish, Phase 2 paired, §3.5
-> after ~48 h. Single runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
+> **Status: code + deploy mechanics done; BLOCKED on a hosting DB-access constraint (§F).** §A/§C/§D/§E complete
+> (path (c), `passenger_wsgi.py` bridge, two-phase parallel-app, per-phase rollback). Staging surfaced two infra
+> blockers: **icb is Postgres but faje is MySQL** (needs a Postgres + a MySQL→Postgres migration), and HostAfrica's
+> **egress firewall blocks outbound external DB ports** (external Postgres unreachable; a cPanel-LOCAL Postgres
+> would sidestep it). Both in §F — gated on HostAfrica's local-PG / whitelist / upgrade reply. Pending: §F (DB +
+> egress), §B env VALUES, Phase 1 finish, Phase 2 paired, §3.5. Runbook for WO §0.4 / §0.5 / §0.7 / §3.2–§3.4.
 
 Post-cutover, `faje.co.za` is served by **`mickeyger/icb-platform`** (was `GRP-Costing-System`). The Cost
 Calculator (Jinja at `/`, `/calculator`, `/results/...`) is unchanged for users; the underlying repo changes.
@@ -139,12 +140,20 @@ HostAfrica, holding the calculator data.** The legacy `.env`'s `mysql+…` URL c
 named 'pymysql'").
 
 ### F.1 — Provision a Postgres reachable from HostAfrica
-- **Check cPanel for a "PostgreSQL Databases" tool** (many cPanel hosts are MySQL-only — confirm with HostAfrica).
-  - **If yes:** create a DB + user there (grant the user full privileges so Alembic can create the
-    `icb_mes`/`icb_costings` schemas). Same box, so host = `localhost`; cPanel prefixes names with the account:
-    `postgresql+psycopg://fajecoza_icbapp:PASSWORD@localhost:5432/fajecoza_icbstaging`
-  - **If no:** use an **external managed Postgres** (Supabase / Neon / RDS) reachable over the network +
-    allow HostAfrica's outbound IP: `postgresql+psycopg://USER:PASS@<host>:5432/DBNAME`. (Decision for Michael.)
+> **⚠ EGRESS BLOCK (confirmed at staging):** HostAfrica shared hosting **refuses outbound TCP to external DB
+> ports** (`google.com:443` works; Supabase `5432`/`6543` → connection refused / RST). So an **external**
+> managed Postgres is **unreachable** unless HostAfrica whitelists it / upgrades the plan. **A cPanel-LOCAL
+> Postgres (`localhost`) is NOT subject to egress filtering** → it's the preferred path.
+
+Order of preference:
+1. **LOCAL cPanel PostgreSQL — PREFERRED (sidesteps egress entirely).** Ask HostAfrica: *"does this plan offer a
+   local PostgreSQL (cPanel 'PostgreSQL Databases')?"* If yes, create a DB + user (full privileges so Alembic
+   can make the `icb_mes`/`icb_costings` schemas); same box → host `localhost`, account-prefixed names:
+   `postgresql+psycopg://fajecoza_icbapp:PASSWORD@localhost:5432/fajecoza_icbstaging`
+2. **External managed Postgres** (Supabase/Neon/RDS) — only if HostAfrica **whitelists egress / upgrades**.
+   `postgresql+psycopg://USER:PASS@<host>:5432/DBNAME` — currently **BLOCKED** by the egress firewall.
+3. **Move hosting** to a Postgres-friendly provider — budget/lead-time decision (§F.5).
+
 - The URL **must** carry `+psycopg` (psycopg3); plain `postgresql://` fails.
 
 ### F.2 — Create the schema (staging + prod), with the new DATABASE_URL in backend/.env
@@ -175,3 +184,16 @@ The §A / ADR-0017 "shared DB; 0015 is a no-op on prod" framing held only for **
 calc + MES). In **prod** there is no shared Postgres yet: faje is MySQL, and the new prod Postgres is built by
 Alembic — so **0015 CREATES the discount columns there** (not a no-op). The columns faje's MySQL got from the
 d2da5bf deploy arrive in Postgres via the F.3 data migration + 0015.
+
+### F.5 — If HostAfrica can't allow DB access: hosting options (decision for Burt)  ⛔ PENDING HostAfrica reply
+Three outcomes from the egress ticket, by increasing disruption:
+
+| Outcome | Unblocks | Cost / effort | Notes |
+|---|---|---|---|
+| **(a) LOCAL cPanel Postgres offered** | everything, no egress needed | lowest | **best case — confirm this FIRST** |
+| **(b) Whitelist / plan upgrade for egress** | external managed Postgres (Supabase…) | low–med (paid upgrade → Burt budget) | depends on HostAfrica policy |
+| **(c) Move hosting** (faje **+** MES) to a Postgres-friendly host | everything | highest (migrate site + DB + DNS) | last resort; longest lead time |
+
+The MySQL→Postgres data migration (F.3) is **target-agnostic** — the same pgloader/dump approach applies
+whether the Postgres ends up cPanel-local, whitelisted-external, or on a new host; only the connection string
+changes. *(A fuller "hosting alternatives" comparison can be drafted if (c) becomes likely.)*

@@ -102,6 +102,26 @@ backend code** (no `svg2rlg`/`renderPM` import), so it was simply **removed** fr
 > `requirements-extras.txt` the cPanel deploy doesn't install, and confirm wheels exist for the target Linux
 > before pinning.* Audit **transitive** deps too — the offender here was two levels below the pinned package.
 
+### 8. Confirm the host's DB-access + runtime constraints BEFORE the drift audit
+
+Two staging-time surprises shared one root cause — **the target runtime's constraints weren't validated up
+front**, so they surfaced at the most expensive moment (deploy), not the cheapest (planning):
+- **DB engine mismatch:** the cutover assumed a "shared PostgreSQL", but the live faje app runs **MySQL** and
+  icb is Postgres-only — so the cutover actually needs a Postgres DB **plus a MySQL→Postgres data migration**
+  (runbook §F).
+- **Egress firewall:** HostAfrica shared hosting **actively refuses outbound TCP to external DB ports**
+  (confirmed: `google.com:443` works; Supabase `5432`/`6543` → connection refused / RST) as abuse-prevention.
+  So an **external** managed Postgres (Supabase/Neon/RDS) is unreachable from the app. **A cPanel-LOCAL Postgres
+  (host `localhost`) is NOT subject to egress filtering** — so *"does the plan offer a local PostgreSQL?"* is the
+  first question to ask, ahead of any whitelist or upgrade.
+
+> **Pattern:** *Before the drift audit (not at staging), confirm the hosting provider's: (1) supported DB
+> engines + whether a **local** instance of the needed engine is offered; (2) **outbound** network policy
+> (shared hosting commonly blocks egress to external DB/SMTP ports); (3) build toolchain (§7). A code-level
+> cutover can be fully correct yet still blocked by a runtime/network constraint a 10-minute pre-flight
+> question would have caught.* If the host can neither offer a local instance nor allow egress to a managed
+> one, the decision escalates to **changing hosting** — a budget/lead-time call, not a code one.
+
 ## Consequences
 
 - **One source of truth.** No more dual-codebase coordination; UAT releases land directly in icb-platform.
