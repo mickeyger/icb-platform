@@ -211,7 +211,8 @@ def admin_session(page: "Page") -> "Page":
 # The journey server boots with MES_DEMO_AUTOLOGIN_USER=admin, but the autologin endpoint accepts an
 # optional `username` (demo-mode only, origin-guarded) so a single server boot can mint any role per
 # browser context — the prerequisite for per-role coverage (the v4.29 prevention shift).
-ROLE_USERS = {"sales": "journey_sales", "production": "journey_production", "planner": "journey_planner"}
+ROLE_USERS = {"sales": "journey_sales", "production": "journey_production", "planner": "journey_planner",
+              "workshop": "journey_workshop"}   # WO v4.31 §3.5 — bay-model/job-card per-role coverage
 
 
 @pytest.fixture(scope="session")
