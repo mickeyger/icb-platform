@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ExternalLink, RadioTower, RefreshCw, AlertCircle, Loader2 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
+import { CostingsDashboard } from './CostingsDashboard'
 
 // WO v4.7 — point at the MES-skin fork (/mes/calculator) instead of /calculator.
 // The live /calculator route now serves the original dark-Icecold styling and
@@ -27,6 +28,7 @@ export function LiveCalculator() {
   const { mode } = useCostings()
 
   return (
+    <>
     <div className="flex h-[calc(100vh-96px)] flex-col">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface-alt px-4 py-2 text-sm">
         <div className="flex items-center gap-2">
@@ -85,5 +87,13 @@ export function LiveCalculator() {
         </span>
       </div>
     </div>
+
+    {/* WO v4.31 §3.3 (§0.13) — the SAME CostingsDashboard component, compressed embed BELOW the
+        calculator (iframe keeps the full viewport on load; scroll down for the dashboard).
+        Actions + modals stay live here (permission-gated) — NOT display-only. */}
+    <div className="border-t border-line">
+      <CostingsDashboard embedded />
+    </div>
+    </>
   )
 }
