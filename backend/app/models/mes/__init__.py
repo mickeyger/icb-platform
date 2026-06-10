@@ -785,8 +785,9 @@ class ParkingBay(Base):
 # ─────────────────────────────────────────────────────────────────────────────
 # 29. assembly_bays — the 5 inside assembly bays (WO v4.31 §0.2 — Michael's on-floor count, 10 Jun).
 #     Reference/master data: one row per physical assembly bay; seeded AssemblyBay-1..5 in 0016.
-#     A chassis is attributed here via an 'assembly_assigned' lifecycle event; the denormalised
-#     chassis_records.current_assembly_bay_id carries the latest assignment for cheap lane/modal reads.
+#     A chassis is attributed here via an 'assembly_assigned' lifecycle event; its CURRENT bay is
+#     DERIVED from that latest event (§0.12 — no denormalised column on chassis_records; see
+#     services/chassis.py:_current_assembly_bay_id).
 # ─────────────────────────────────────────────────────────────────────────────
 class AssemblyBay(Base):
     __tablename__ = "assembly_bays"
