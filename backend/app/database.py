@@ -399,6 +399,10 @@ class CalculationRecord(Base):
     discount_input  = Column(Float, nullable=True)        # raw value typed (the % or the flat amount)
     discount_amount = Column(Float, nullable=True)        # computed currency discount
     net_total       = Column(Float, nullable=True)        # selling_price - discount_amount (headline)
+    # WO v4.33 §0.13 (migration 0017): the sales rep this quote is being done FOR, captured at
+    # quote time when Nadie knows it (nullable — may be unknown). Defaults the Pre-Job Card's
+    # Sales Rep dropdown; user_id above (the creator) is the soft fallback when this is NULL.
+    sales_rep_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     # MES Pre-Job Card flow (Step 3 of the Icecold Bodies process).
     pre_job_sent_at      = Column(DateTime, nullable=True)
     pre_job_confirmed_at = Column(DateTime, nullable=True)

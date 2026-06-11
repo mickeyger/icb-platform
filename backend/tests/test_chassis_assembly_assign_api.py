@@ -108,10 +108,19 @@ def fresh_chassis(app_mod):
 
 
 def _bay_ids(n=2):
+    """The first n FREE assembly bays (WO v4.33 hardening): positional bays 1..n broke whenever
+    an interactive dev session left a chassis on a low bay — occupancy 409s aren't this suite's
+    subject, so select unoccupied bays (event-derived, §0.12) and skip if too few are free."""
     from app.database import SessionLocal
     from app.models.mes import AssemblyBay
+    from app.services.chassis import current_occupants
     with SessionLocal() as db:
-        return [b.id for b in db.query(AssemblyBay).order_by(AssemblyBay.sort_order).limit(n).all()]
+        occupied = set(current_occupants(db))
+        free = [b.id for b in db.query(AssemblyBay).filter_by(is_active=True)
+                .order_by(AssemblyBay.sort_order).all() if b.id not in occupied]
+    if len(free) < n:
+        pytest.skip(f"only {len(free)} free assembly bays on this DB (need {n})")
+    return free[:n]
 
 
 # ── service unit tests ──────────────────────────────────────────────────────

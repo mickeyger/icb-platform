@@ -33,6 +33,10 @@ CHASSIS_CHECKLIST_TEMPLATES = {
         {"key": "mileage", "label": "Mileage / hours", "type": "text"},
         {"key": "keys", "label": "Keys received", "type": "bool"},
         {"key": "documents", "label": "Documents received", "type": "bool"},
+        # WO v4.33 §0.8 — the customer's specified cab-to-body gap; Simeon enters/verifies it
+        # here. capture_event lifts a numeric value through to chassis_records.body_gap_mm so
+        # Pre-Job Cards can pre-populate (template-driven field: no UI change needed).
+        {"key": "body_gap_mm", "label": "Body gap (mm) — customer spec", "type": "text"},
     ],
     "DCL": [
         {"key": "workmanship", "label": "Workmanship / finish OK", "type": "bool"},
@@ -181,6 +185,13 @@ def capture_event(db: Session, record_id: int, event_type: str, payload, who: st
         notes=payload.notes, created_by=who)
     db.add(evt)
     rec.status = _STATUS_FOR[event_type]
+    # WO v4.33 §0.8 — lift Simeon's Body Gap entry from the VCL checklist through to the
+    # record column (Pre-Job Cards pre-populate from chassis_records.body_gap_mm).
+    if event_type == "VCL" and payload.checklist_json:
+        raw = str(payload.checklist_json.get("body_gap_mm", "") or "")
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if digits:
+            rec.body_gap_mm = int(digits)
     rec.updated_by = who
     db.commit()
     db.refresh(evt)

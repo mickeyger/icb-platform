@@ -700,6 +700,11 @@ class ChassisRecord(Base):
     # received | in_workshop | in_assembly | dispatched | returned (denormalised from the latest
     # event; 'in_assembly' added WO v4.31 §0.12 — values-in-comments only, NO bay column here:
     # "which bay" is derived from the latest 'assembly_assigned' lifecycle event.
+    # WO v4.33 §0.8 (migration 0017): the customer's specified cab-to-body gap. Captured from the
+    # quote when known; Simeon enters/verifies it during the chassis VCL (the VCL checklist's
+    # body_gap_mm field write-through in services/chassis.capture_event). Pre-Job Cards
+    # pre-populate from here and render "Pending — awaiting chassis VCL" while NULL.
+    body_gap_mm = Column(Integer)
     submit_status = Column(String(32))                    # legacy register value
     source = Column(String(16), nullable=False, default="register", server_default="register")  # register | vcl_form
     source_register_id = Column(Integer)                   # originating chassis_register.id (traceability)
@@ -804,6 +809,91 @@ class AssemblyBay(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 30. prejob_templates — Nadie's Pre-Job Card template library (WO v4.33 §0.5/§0.15, ADR 0020).
+#     One row per template (23 migrated from the Word originals via review-and-normalize: imported
+#     is_active=False, BA/Nadie approve via the admin screen). `sections` is the §0.5 JSONB shape:
+#     [{name: "GRP SECTION", items: [{text, note?, sub_items?[], sap_item_code?}]}, ...] — section
+#     names/counts vary by product class (SUB FRAME vs STEEL SECTION vs CHASSIS MODIFICATIONS);
+#     sap_item_code is the §0.10 stub (lookup mechanism is v4.33.1).
+# ─────────────────────────────────────────────────────────────────────────────
+class PrejobTemplate(Base):
+    __tablename__ = "prejob_templates"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_prejob_templates_name"),
+        Index("ix_prejob_templates_body_size", "body_type", "size_category", "is_active"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    body_type = Column(String(32), nullable=False)
+    # chiller | freezer | meathanger | bakery | dry_freight | icecream | explosive | medical_waste | trailer
+    size_category = Column(String(32))                     # '2.3m' | '3.2m' | 'mid' | 'big' | '15.5m' | ...
+    name = Column(String(255), nullable=False)
+    product_line = Column(String(24), nullable=False, default="standard", server_default="standard")
+    # standard | rhinorange_legacy | rhinorange_2_0  (§0.6: default selector to rhinorange_2_0)
+    header_format = Column(String(255))                    # "{size}mm GRP {body_type} Chassis: ..."
+    sections = Column(JSONB, nullable=False)
+    default_fridge_note = Column(String(255))
+    is_active = Column(Boolean, nullable=False, default=False, server_default=sa_text("false"))
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))                       # admin CRUD audit (v4.26 pattern)
+    updated_by = Column(String(128))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 31. prejob_cards — per-costing Pre-Job Card instance (WO v4.33 §0.1-§0.14, ADR 0020).
+#     The 3-role workflow record: Internal Sales creates (created_by_user_id) → Sales Rep +
+#     Planner check-sign (either may reject → status back to 'draft' + reject_reason) → both
+#     signoffs auto-flip status to 'pre_job_confirmed' (§0.21: ALSO drives the production_jobs
+#     pre_job_* status flips — prejob_cards is the source of truth; the legacy job-level signoff
+#     columns are NOT written by this flow). Cross-schema *_user_id / calculation_id columns are
+#     plain Integers here; their FKs to icb_costings are created in migration 0017 (the 0003/0012
+#     idiom). Costing reference is canonical (§0.7) — no separate Pre-Job Card number.
+# ─────────────────────────────────────────────────────────────────────────────
+class PrejobCard(Base):
+    __tablename__ = "prejob_cards"
+    __table_args__ = (
+        Index("ix_prejob_cards_calculation", "calculation_id"),
+        Index("ix_prejob_cards_status", "status"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    calculation_id = Column(Integer, nullable=False)       # cross-schema -> icb_costings.calculations (FK in 0017, RESTRICT)
+    template_id = Column(Integer,
+                         ForeignKey("icb_mes.prejob_templates.id", ondelete="RESTRICT"),
+                         nullable=True)                    # NULL = started from blank (edge case)
+    body_description = Column(String(255))
+    chassis_make_model = Column(String(128))
+    vin_number = Column(String(64))                        # nullable until chassis VCL (or TBD for complete-build trailers)
+    body_gap_mm = Column(Integer)                          # §0.8 — from quote spec / chassis VCL
+    body_gap_pending = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    sections = Column(JSONB, nullable=False)               # mutated copy of template.sections (§0.5 shape)
+    fridge_ordering_mode = Column(String(24))              # icb_orders | customer_supplies | none
+    fridge_model = Column(String(128))
+    customer_notes = Column(Text)
+    # ── Stage A: Internal Sales creates ──
+    created_by_user_id = Column(Integer)                   # cross-schema -> users (FK in 0017, SET NULL)
+    # ── Stage B: Sales Rep check ──
+    sales_rep_user_id = Column(Integer)                    # cross-schema -> users (FK in 0017, SET NULL)
+    sales_rep_signoff_at = Column(DateTime(timezone=True))
+    sales_rep_attestation = Column(Text)
+    # ── Stage C: Planner check (hasRole('planner') || isAdmin — §0.3; production excluded) ──
+    planner_user_id = Column(Integer)                      # cross-schema -> users (FK in 0017, SET NULL)
+    planner_signoff_at = Column(DateTime(timezone=True))
+    planner_attestation = Column(Text)
+    # ── Stage D: lifecycle ──
+    status = Column(String(24), nullable=False, default="draft", server_default="draft")
+    # draft | sent_for_check | pre_job_confirmed  (§0.14: reject returns to 'draft')
+    sent_for_check_at = Column(DateTime(timezone=True))
+    reject_reason = Column(Text)                           # captured on reject; cleared on re-submit
+    pdf_file_id = Column(String(512))                      # file-store relative path of the generated PDF (§3.6)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
@@ -813,5 +903,6 @@ __all__ = [
     "GeneratedBom", "BomLine",
     "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
     "ParkingBay", "AssemblyBay",
+    "PrejobTemplate", "PrejobCard",
     "CROSS_SCHEMA_FKS",
 ]
