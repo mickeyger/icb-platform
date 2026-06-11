@@ -86,6 +86,7 @@ from .routers import pre_job_card as _r_pre_job_card
 from .routers import chassis_catalogue as _r_chassis_catalogue
 from .routers import mes_views as _r_mes_views  # WO v4.7 — MES skin fork at /mes/*
 from .routers import production_jobs as _r_production_jobs  # WO v4.14 — /api/production-jobs/*
+from .routers import production as _r_production  # WO v4.32 — /api/production/* aggregations
 # WO v4.15 — Materials / Buying / Stores APIs
 from .routers import mes_materials as _r_mes_materials
 from .routers import stock_counts as _r_stock_counts
@@ -164,6 +165,7 @@ app.include_router(_r_chassis_register.router)  # WO v4.22 — chassis register 
 app.include_router(_r_chassis_records.router)  # WO v4.28 — chassis lifecycle API
 app.include_router(_r_mes_views.router)  # WO v4.7 — /mes/dashboard + /mes/calculator
 app.include_router(_r_production_jobs.router)  # WO v4.14 — production-jobs API
+app.include_router(_r_production.router)  # WO v4.32 — team-worksheet aggregation
 # WO v4.15 — Materials / Buying / Stores APIs (12 endpoints across 6 routers)
 app.include_router(_r_mes_materials.router)
 app.include_router(_r_stock_counts.router)

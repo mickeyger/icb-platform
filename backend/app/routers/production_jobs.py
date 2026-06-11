@@ -5,7 +5,7 @@ MES handlers are untouched and retire in Phase 4. Thin handlers: each delegates
 to `app.services.production_jobs` and maps the typed service errors to HTTP.
 All endpoints require an authenticated session (`require_user` -> 401 for /api).
 """
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -17,7 +17,8 @@ from ..deps import active_branch, require_permission, require_user, user_can
 from ..models.mes import AssemblyBay
 from ..schemas.production_jobs import (
     PlanningAckRequest, PreJobSignoffRequest, ProductionJobDetail,
-    ProductionJobListItem, TimelineEvent, bom_to_out, to_detail, to_list_item,
+    ProductionJobInProgressItem, ProductionJobListItem, TimelineEvent,
+    bom_to_out, to_detail, to_list_item,
 )
 from ..services import chassis as chassis_svc
 from ..services import production_jobs as svc
@@ -48,6 +49,48 @@ def list_production_jobs(
     rows = svc.list_jobs(db, status=statuses, branch_id=eff_branch,
                          accepted_since=accepted_since, limit=limit, offset=offset)
     return [to_list_item(job, calc, customer, bc) for (job, calc, customer, bc) in rows]
+
+
+# WO v4.32 §0.4 — the two dashboard aggregations. Both are literal paths and MUST be declared
+# BEFORE the /{job_id} catch-all below (FastAPI matches in declaration order; after it they
+# would 422 as failed int-parses of "in-progress"/"kpis").
+@router.get("/in-progress", response_model=list[ProductionJobInProgressItem])
+def list_in_progress_jobs(
+    branch_id: Optional[int] = Query(None, description="Override the session's active branch"),
+    branch: Optional[Branch] = Depends(active_branch),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """In-flight jobs (status planning / in_production — §0.6) + chassis/bay context for the
+    Production Dashboard (WO v4.32). Read-only."""
+    eff_branch = branch_id if branch_id is not None else (branch.id if branch is not None else None)
+    out = []
+    for (row, vin, ch_status, bay_code, days) in svc.list_in_progress(db, branch_id=eff_branch):
+        job, calc, customer, bc = row
+        item = ProductionJobInProgressItem(**to_list_item(job, calc, customer, bc).model_dump())
+        item.chassis_vin = vin
+        item.chassis_status = ch_status
+        item.current_assembly_bay_code = bay_code
+        item.days_in_stage = days
+        out.append(item)
+    return out
+
+
+@router.get("/kpis")
+def production_kpis(
+    branch_id: Optional[int] = Query(None, description="Override the session's active branch"),
+    branch: Optional[Branch] = Depends(active_branch),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """WO v4.32 §0.4/§0.6 — the Production Dashboard metric values. ONE computation
+    (compute_production_kpis — §0.5 parity-by-construction; Management Dashboard v4.33+ becomes
+    the second caller). Plain dict + as_of, mirroring /api/dashboard/kpis (v4.31). Read-only;
+    refreshed by the dashboard's 30s tick (§0.3)."""
+    eff_branch = branch_id if branch_id is not None else (branch.id if branch is not None else None)
+    now = datetime.now(timezone.utc)
+    return {**svc.compute_production_kpis(db, branch_id=eff_branch, now=now),
+            "as_of": now.isoformat()}
 
 
 @router.get("/{job_id}", response_model=ProductionJobDetail)
