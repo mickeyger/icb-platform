@@ -13,8 +13,8 @@ from ..database import CalculationRecord, Customer, User, get_db
 from ..deps import require_permission, require_user
 from ..models.mes import PrejobCard, PrejobTemplate
 from ..schemas.prejob import (
-    PrejobCardCreate, PrejobCardOut, PrejobCardUpdate, SubmitForCheck,
-    TemplateOption, UserOption,
+    PrejobCardCreate, PrejobCardOut, PrejobCardUpdate, RejectRequest, SignOffRequest,
+    SubmitForCheck, TemplateOption, UserOption,
 )
 from ..services import prejob_cards as svc
 
@@ -91,3 +91,28 @@ def submit_for_check(card_id: int, payload: SubmitForCheck, db: Session = Depend
                      user: User = Depends(require_permission("prejob.create"))):
     return _out(db, svc.submit_for_check(db, card_id, user,
                                          waive_body_gap=payload.waive_body_gap))
+
+
+# ── §3.5 — check sign-off + reject (per-role gates; admin passes via the wildcard — Q4) ──
+@router.post("/{card_id}/signoff/sales", response_model=PrejobCardOut)
+def signoff_sales(card_id: int, payload: SignOffRequest, db: Session = Depends(get_db),
+                  user: User = Depends(require_permission("prejob.signoff_sales"))):
+    return _out(db, svc.sign_off(db, card_id, "sales", payload.attestation, user))
+
+
+@router.post("/{card_id}/signoff/planner", response_model=PrejobCardOut)
+def signoff_planner(card_id: int, payload: SignOffRequest, db: Session = Depends(get_db),
+                    user: User = Depends(require_permission("prejob.signoff_planner"))):
+    return _out(db, svc.sign_off(db, card_id, "planner", payload.attestation, user))
+
+
+@router.post("/{card_id}/reject/sales", response_model=PrejobCardOut)
+def reject_sales(card_id: int, payload: RejectRequest, db: Session = Depends(get_db),
+                 user: User = Depends(require_permission("prejob.signoff_sales"))):
+    return _out(db, svc.reject(db, card_id, "sales", payload.reason, user))
+
+
+@router.post("/{card_id}/reject/planner", response_model=PrejobCardOut)
+def reject_planner(card_id: int, payload: RejectRequest, db: Session = Depends(get_db),
+                   user: User = Depends(require_permission("prejob.signoff_planner"))):
+    return _out(db, svc.reject(db, card_id, "planner", payload.reason, user))

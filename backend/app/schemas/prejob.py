@@ -103,6 +103,14 @@ class SubmitForCheck(BaseModel):
     waive_body_gap: bool = False                       # §0.8 explicit waiver
 
 
+class SignOffRequest(BaseModel):
+    attestation: str = Field(..., min_length=1)        # §0.12 — free-text attestation
+
+
+class RejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1)             # §0.14 — captured onto the card
+
+
 class PrejobCardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

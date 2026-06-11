@@ -227,3 +227,74 @@ def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = Fal
     db.commit()
     db.refresh(card)
     return card
+
+
+# ── §3.5 — check sign-offs + reject (Stages B/C/D) ───────────────────────────
+def sign_off(db: Session, card_id: int, role: str, attestation: str, user) -> PrejobCard:
+    """§0.12 in-system digital sign-off. The {role}_user_id is overwritten with the ACTUAL
+    signer (audit honesty — Burt signing as planner backup must show Burt, not Simeon). Both
+    sign-offs present → status auto-flips to pre_job_confirmed AND drives the legacy
+    production_jobs status/pre_job_confirmed_at (§0.21 — the job's signoff columns are NEVER
+    written; pre_job_confirmed_at is a status timestamp, BA-sanctioned)."""
+    if role not in ("sales", "planner"):
+        raise HTTPException(status_code=422, detail="role must be 'sales' or 'planner'")
+    if not (attestation or "").strip():
+        raise HTTPException(status_code=422, detail="attestation text is required")
+    card = db.get(PrejobCard, card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="pre-job card not found")
+    if card.status != "sent_for_check":
+        raise HTTPException(status_code=409,
+                            detail=f"card is '{card.status}' — sign-off needs sent_for_check")
+    now = _now()
+    if role == "sales":
+        if card.sales_rep_signoff_at is not None:
+            raise HTTPException(status_code=409, detail="Sales Rep has already signed off")
+        card.sales_rep_user_id = getattr(user, "id", card.sales_rep_user_id)
+        card.sales_rep_signoff_at = now
+        card.sales_rep_attestation = attestation.strip()
+    else:
+        if card.planner_signoff_at is not None:
+            raise HTTPException(status_code=409, detail="Planner has already signed off")
+        card.planner_user_id = getattr(user, "id", card.planner_user_id)
+        card.planner_signoff_at = now
+        card.planner_attestation = attestation.strip()
+
+    if card.sales_rep_signoff_at is not None and card.planner_signoff_at is not None:
+        card.status = "pre_job_confirmed"              # Stage D — auto on the second sign-off
+        job = _job_for_calc(db, card.calculation_id)
+        if job is not None and job.status in ("accepted", "pre_job_sent"):
+            job.status = "pre_job_confirmed"
+            if job.pre_job_confirmed_at is None:
+                job.pre_job_confirmed_at = now
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+def reject(db: Session, card_id: int, role: str, reason: str, user) -> PrejobCard:
+    """§0.14 — either checker can reject; status returns to draft with the reason captured
+    (prefixed with who rejected). Existing sign-offs reset — the re-submitted card is
+    re-checked by BOTH roles. The production job stays pre_job_sent (Planning still gates on
+    pre_job_confirmed, so nothing downstream unlocks)."""
+    if role not in ("sales", "planner"):
+        raise HTTPException(status_code=422, detail="role must be 'sales' or 'planner'")
+    if not (reason or "").strip():
+        raise HTTPException(status_code=422, detail="a reject reason is required")
+    card = db.get(PrejobCard, card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="pre-job card not found")
+    if card.status != "sent_for_check":
+        raise HTTPException(status_code=409,
+                            detail=f"card is '{card.status}' — reject needs sent_for_check")
+    who = getattr(user, "username", "unknown")
+    card.status = "draft"
+    card.reject_reason = f"[{role} check — {who}] {reason.strip()}"
+    card.sales_rep_signoff_at = None
+    card.sales_rep_attestation = None
+    card.planner_signoff_at = None
+    card.planner_attestation = None
+    card.sent_for_check_at = None
+    db.commit()
+    db.refresh(card)
+    return card
