@@ -17,6 +17,7 @@ import { JobCardSections } from '../Planning/JobCardSections'
 import { useCostings } from '../../store/CostingsContext'
 import { hhmm, dmy } from '../../lib/format'
 import { useProductionDashboard, type UtilisedBay } from './useProductionDashboard'
+import { TeamWorksheetTabs } from './TeamWorksheetTabs'
 
 export function ProductionDashboard() {
   const nav = useNavigate()
@@ -159,6 +160,9 @@ export function ProductionDashboard() {
           </div>
         </Card>
       </Tooltip>
+
+      {/* Per-team daily worksheet — §0.1 surface (b); tabs + date selector + per-role render (§3.3) */}
+      <TeamWorksheetTabs />
 
       {/* §0.15 replacement panels — honest signals only */}
       <div className="mb-4 grid gap-4 lg:grid-cols-2">
