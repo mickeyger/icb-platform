@@ -61,3 +61,79 @@ class PrejobTemplateUpdate(BaseModel):
     header_format: Optional[str] = None
     default_fridge_note: Optional[str] = None
     sections: Optional[List[Section]] = None
+
+
+# ── §3.4 — Pre-Job Card instances ─────────────────────────────────────────────
+class TemplateOption(BaseModel):
+    id: int
+    name: str
+    body_type: str
+    size_category: Optional[str] = None
+    product_line: str
+    suggested: bool = False
+
+
+class UserOption(BaseModel):
+    id: int
+    username: str
+    role: str
+
+
+class PrejobCardCreate(BaseModel):
+    calculation_id: int
+    template_id: int
+
+
+class PrejobCardUpdate(BaseModel):
+    """Draft-only edits (the service 409s otherwise). Switching template_id re-seeds sections."""
+    body_description: Optional[str] = None
+    chassis_make_model: Optional[str] = None
+    vin_number: Optional[str] = None
+    body_gap_mm: Optional[int] = None
+    sections: Optional[List[Section]] = None
+    fridge_ordering_mode: Optional[str] = Field(None, pattern="^(icb_orders|customer_supplies|none)$")
+    fridge_model: Optional[str] = None
+    customer_notes: Optional[str] = None
+    sales_rep_user_id: Optional[int] = None
+    planner_user_id: Optional[int] = None
+    template_id: Optional[int] = None
+
+
+class SubmitForCheck(BaseModel):
+    waive_body_gap: bool = False                       # §0.8 explicit waiver
+
+
+class PrejobCardOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    calculation_id: int
+    template_id: Optional[int] = None
+    body_description: Optional[str] = None
+    chassis_make_model: Optional[str] = None
+    vin_number: Optional[str] = None
+    body_gap_mm: Optional[int] = None
+    body_gap_pending: bool
+    sections: List[Section] = []
+    fridge_ordering_mode: Optional[str] = None
+    fridge_model: Optional[str] = None
+    customer_notes: Optional[str] = None
+    created_by_user_id: Optional[int] = None
+    sales_rep_user_id: Optional[int] = None
+    sales_rep_signoff_at: Optional[datetime] = None
+    sales_rep_attestation: Optional[str] = None
+    planner_user_id: Optional[int] = None
+    planner_signoff_at: Optional[datetime] = None
+    planner_attestation: Optional[str] = None
+    status: str                                        # draft | sent_for_check | pre_job_confirmed
+    sent_for_check_at: Optional[datetime] = None
+    reject_reason: Optional[str] = None
+    version: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    # resolved display fields (router fills)
+    quote_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    template_name: Optional[str] = None
+    sales_rep_username: Optional[str] = None
+    planner_username: Optional[str] = None
+    created_by_username: Optional[str] = None

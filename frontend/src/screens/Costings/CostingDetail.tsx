@@ -31,7 +31,7 @@ import type { Costing } from '../../data/costingsData'
 export function CostingDetail() {
   const { quote = '' } = useParams<{ quote: string }>()
   const nav = useNavigate()
-  const { mode, costings, firePreJobCard, scheduleRepairPhases, signoffPreJob, markChassisReceived } = useCostings()
+  const { mode, costings, refresh, scheduleRepairPhases, signoffPreJob, markChassisReceived } = useCostings()
   const { hasPermission, profile } = useAppData()
   const [toast, setToast] = useState('')
   const [preJobOpen, setPreJobOpen] = useState(false)
@@ -339,10 +339,11 @@ export function CostingDetail() {
       <PreJobCardModal
         costing={preJobOpen ? c : null}
         onClose={() => setPreJobOpen(false)}
-        onConfirm={async (target) => {
-          await firePreJobCard(target.quote_number)
+        onConfirm={async () => {
+          // WO v4.33 §0.21 — submit drives pre_job_sent server-side; just refresh + navigate.
+          await refresh()
           setPreJobOpen(false)
-          setToast(`Pre-Job Card sent — awaiting confirmation`)
+          setToast(`Pre-Job Card sent for check`)
           nav('/costings')
         }}
       />

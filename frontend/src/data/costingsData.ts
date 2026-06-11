@@ -43,6 +43,10 @@ export type PermissionKey =
   | 'chassis.vcl'
   | 'chassis.dcl'
   | 'chassis.assembly_assign'      // WO v4.31 — assign a chassis parking -> assembly bay
+  // Work Order v4.33 — Pre-Job Card workflow (§0.3 three-role chain).
+  | 'prejob.create'                // create + submit Pre-Job Cards (Internal Sales)
+  | 'prejob.signoff_sales'         // Sales Rep check sign-off
+  | 'prejob.signoff_planner'       // Planner check sign-off
 
 export type RoleId =
   | 'rep_burt'
@@ -70,6 +74,9 @@ export interface LoggedInUser {
 }
 
 export interface Costing {
+  // WO v4.33 — live calculation id (undefined on mock rows; the Pre-Job Card modal is
+  // live-only and FKs prejob_cards.calculation_id to it, §0.7).
+  calculation_id?: number
   quote_number: string
   customer_id: number
   customer_name: string
@@ -323,6 +330,7 @@ export interface LiveCalculation {
 export function liveToCosting(r: LiveCalculation): Costing {
   const status = (r.mes_status as StatusName) || 'Pending'
   return {
+    calculation_id: r.id,            // WO v4.33 — the Pre-Job Card FK anchor (§0.7)
     quote_number: r.quote_number || `#${r.id}`,
     customer_id: 0,
     customer_name: r.customer || '—',
