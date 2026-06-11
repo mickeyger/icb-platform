@@ -17,6 +17,7 @@ export interface ResourceConfig {
   basePath: string                          // e.g. /api/admin/bom-rules
   columns: { key: string; label: string }[] // table display columns
   fields: FieldDef[]                          // create/edit form fields
+  custom?: boolean                            // WO v4.33 — rendered by a dedicated component, not AdminCrudTable
 }
 
 export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
@@ -97,6 +98,16 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
       { name: 'reason', label: 'Reason', type: 'textarea' },
     ],
   },
+  // WO v4.33 §3.3 — Nadie's Pre-Job Card template library (nested section editor, so a
+  // dedicated screen renders instead of the generic AdminCrudTable; see PrejobTemplatesAdmin).
+  'prejob-templates': {
+    key: 'prejob-templates',
+    title: 'Pre-Job templates',
+    basePath: '/api/admin/prejob-templates',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
 }
 
-export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides']
+export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates']
