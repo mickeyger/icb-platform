@@ -568,7 +568,11 @@ function MockPlanningBoard() {
             canTick={hasPermission('planning.acknowledge')}
             onMarkReceived={(iso) => markCellReceived(openSlot, iso)}
             onUnmark={() => markCellReceived(openSlot, null)}
-            onViewProduction={() => { setOpenSlot(null); nav('/production') }}
+            onViewProduction={() => {
+              // WO v4.32 §3.5 — D7 re-enabled: carry the job into the wired dashboard.
+              setOpenSlot(null)
+              nav(`/production?jobId=${encodeURIComponent(openSlot.job_number)}`)
+            }}
             onOpenJob={() => { setJobNum(openSlot.job_number); setOpenSlot(null) }}
           />
         )}
@@ -735,12 +739,12 @@ function SlotDetail({
       </Tooltip>
 
       <button onClick={onOpenJob} className="w-full rounded-md border border-line py-2 font-semibold text-primary hover:bg-surface-alt">Open full job</button>
-      {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
-          onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
-      <button onClick={onViewProduction} disabled
-        title="Production Dashboard wire-up is planned for a future release"
-        className="w-full cursor-not-allowed rounded-md bg-primary py-2 font-semibold text-white opacity-50"
-        data-testid="view-in-production">View in Production (coming soon)</button>
+      {/* WO v4.32 §3.5: D7 RE-ENABLED — the Production Dashboard is wired (v4.32); deep-links
+          with ?jobId= → bay scroll + highlight + side-panel (stale jobId → toast). */}
+      <button onClick={onViewProduction}
+        title="Open the Production Dashboard focused on this job"
+        className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark"
+        data-testid="view-in-production">View in Production</button>
     </div>
   )
 }
@@ -1123,7 +1127,12 @@ function LivePlanningBoard() {
             slot={openSlot}
             canTick={canTickChassis}
             onMarkReceived={() => markSlotChassisReceived(openSlot)}
-            onViewProduction={() => { setOpenSlot(null); nav('/production') }}
+            onViewProduction={() => {
+              // WO v4.32 §3.5 — D7 re-enabled: carry the job into the wired dashboard.
+              const jn = openSlot.job?.job_number
+              setOpenSlot(null)
+              nav(jn ? `/production?jobId=${encodeURIComponent(jn)}` : '/production')
+            }}
           />
         )}
       </SidePanel>
@@ -1245,12 +1254,12 @@ function LiveSlotDetail({
       {/* WO v4.31 §3.2 — job-card enrichment: chassis (latest VCL) + BOM lines + bay context. Read-only. */}
       <JobCardSections jobId={job.id} />
 
-      {/* WO v4.29 D7 (P2): Production Dashboard is still the Phase-0 mock — disabled until its wire-up.
-          onClick kept (prop stays referenced) but `disabled` prevents navigation. */}
-      <button onClick={onViewProduction} disabled
-        title="Production Dashboard wire-up is planned for a future release"
-        className="w-full cursor-not-allowed rounded-md bg-primary py-2 font-semibold text-white opacity-50"
-        data-testid="view-in-production">View in Production (coming soon)</button>
+      {/* WO v4.32 §3.5: D7 RE-ENABLED — the Production Dashboard is wired (v4.32); deep-links
+          with ?jobId= → bay scroll + highlight + side-panel (stale jobId → toast). */}
+      <button onClick={onViewProduction}
+        title="Open the Production Dashboard focused on this job"
+        className="w-full rounded-md bg-primary py-2 font-semibold text-white hover:bg-primary-dark"
+        data-testid="view-in-production">View in Production</button>
     </div>
   )
 }

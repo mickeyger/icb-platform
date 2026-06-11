@@ -7,12 +7,13 @@
 // (detailed lists land with the §3.3 team-worksheet tabs), and a labour placeholder (no labour
 // booking source until SAP-read, v4.33+). Live-only surface (the BayModelLanes rule): in mock
 // mode renders an offline card. 30s tick refetches the real APIs (§0.3).
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AlertCircle, ArrowRightCircle, Package, RefreshCw, Wrench } from 'lucide-react'
 import { KpiTile, Card, SectionTitle } from '../../components/ui/primitives'
 import { SidePanel } from '../../components/ui/overlays'
 import { Tooltip } from '../../components/ui/Tooltip'
+import { useToast } from '../../components/ui/toast'
 import { JobCardSections } from '../Planning/JobCardSections'
 import { useCostings } from '../../store/CostingsContext'
 import { hhmm, dmy } from '../../lib/format'
@@ -21,10 +22,36 @@ import { TeamWorksheetTabs } from './TeamWorksheetTabs'
 
 export function ProductionDashboard() {
   const nav = useNavigate()
+  const toast = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { costings } = useCostings()
   const repairs = costings.filter((c) => c.quote_type === 'Repair')
   const { mode, kpis, bays, refreshedAt } = useProductionDashboard()
   const [bay, setBay] = useState<UtilisedBay | null>(null)
+  const [highlightBayId, setHighlightBayId] = useState<number | null>(null)
+
+  // WO v4.32 §3.5 — the Planning Board deep-link (?jobId=, the v4.29 D7 carry-forward).
+  // Runs once the live bays have loaded; the param is CLEARED after handling either way
+  // (param hygiene — no 404, no silent ignore). Found → scroll + highlight + open the bay
+  // panel; not found (dispatched / dropped / not on a bay) → toast per the §3.5 locked copy.
+  const jobIdParam = searchParams.get('jobId')
+  useEffect(() => {
+    if (!jobIdParam || mode !== 'live') return
+    const target = bays.find((b) => b.occupied && b.occupant_job_number === jobIdParam)
+    setSearchParams({}, { replace: true })
+    if (target) {
+      setBay(target)
+      setHighlightBayId(target.id)
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`[data-bay-code="${target.code}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+      window.setTimeout(() => setHighlightBayId(null), 4000)
+    } else {
+      toast.push({ kind: 'warn', message: `Job ${jobIdParam} is no longer in production` })
+    }
+  }, [jobIdParam, mode, bays, setSearchParams, toast])
 
   if (mode === 'mock') {
     return (
@@ -139,7 +166,7 @@ export function ProductionDashboard() {
                   b.occupied
                     ? 'border border-line border-l-4 border-l-status-green bg-white hover:border-primary'
                     : 'cursor-default border border-dashed border-line bg-surface-alt/40'
-                }`}
+                } ${highlightBayId === b.id ? 'ring-2 ring-primary ring-offset-2' : ''}`}
               >
                 <span className="text-xs font-bold text-body">{b.code}</span>
                 {b.occupied ? (
