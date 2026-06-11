@@ -1,82 +1,108 @@
-import { useEffect, useState } from 'react'
+// ProductionDashboard.tsx — WO v4.32 §3.2: wired to REAL data (zero data/mockData imports).
+// KPI strip = /api/production-jobs/kpis (compute_production_kpis — §0.6 schema-aligned
+// defaults); bay heat-map = the 5 real assembly bays with event-derived occupancy (§0.1 shape
+// change vs the 8-bay mock); repairs tile = CostingsContext (already live-capable). The mock
+// material-alerts / rework-list / labour-efficiency panels are replaced per §0.15: a Materials
+// link-card (shortage signals live in Materials → Suggestions), an open-rework KPI tile
+// (detailed lists land with the §3.3 team-worksheet tabs), and a labour placeholder (no labour
+// booking source until SAP-read, v4.33+). Live-only surface (the BayModelLanes rule): in mock
+// mode renders an offline card. 30s tick refetches the real APIs (§0.3).
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip as RechartsTooltip,
-  Legend,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts'
-import { AlertCircle, RefreshCw, ArrowRightCircle, Wrench } from 'lucide-react'
-import { data, labourEfficiency } from '../../data/mockData'
-import { useAppData } from '../../store/AppDataContext'
-import { findBottleneck, statusBg, severityToStatus, statusText } from '../../lib/status'
-import { KpiTile, Card, StatusPill, SectionTitle } from '../../components/ui/primitives'
+import { AlertCircle, ArrowRightCircle, Package, RefreshCw, Wrench } from 'lucide-react'
+import { KpiTile, Card, SectionTitle } from '../../components/ui/primitives'
 import { SidePanel } from '../../components/ui/overlays'
-import { JobDetailStub } from '../../components/JobDetailStub'
 import { Tooltip } from '../../components/ui/Tooltip'
+import { JobCardSections } from '../Planning/JobCardSections'
 import { useCostings } from '../../store/CostingsContext'
-import { hhmm } from '../../lib/format'
-import type { Bay, MaterialAlert } from '../../data/types'
+import { hhmm, dmy } from '../../lib/format'
+import { useProductionDashboard, type UtilisedBay } from './useProductionDashboard'
 
 export function ProductionDashboard() {
   const nav = useNavigate()
-  const { unitsInProduction, reworkTickets } = useAppData()
   const { costings } = useCostings()
   const repairs = costings.filter((c) => c.quote_type === 'Repair')
-  const [refreshed, setRefreshed] = useState(new Date())
-  const [bay, setBay] = useState<Bay | null>(null)
-  const [alert, setAlert] = useState<MaterialAlert | null>(null)
-  const [jobNum, setJobNum] = useState<string | null>(null)
+  const { mode, kpis, bays, refreshedAt } = useProductionDashboard()
+  const [bay, setBay] = useState<UtilisedBay | null>(null)
 
-  useEffect(() => {
-    const t = setInterval(() => setRefreshed(new Date()), 30000)
-    return () => clearInterval(t)
-  }, [])
+  if (mode === 'mock') {
+    return (
+      <div className="p-4">
+        <h1 className="mb-4 text-xl font-bold text-body">Production</h1>
+        <Card data-testid="production-offline">
+          <div className="flex items-start gap-2 text-sm text-muted">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            <span>
+              The Production Dashboard is wired to live data (WO v4.32) and needs the FastAPI
+              backend. Start the API and reload — there is no mock fallback for this screen.
+            </span>
+          </div>
+        </Card>
+      </div>
+    )
+  }
 
-  const bays = data.bays
-  const delayed = data.jobs.filter((j) => j.is_late).length
-  const bottleneck = findBottleneck(bays)
-  const k = data.kpis
+  const delayed = kpis?.delayed
+  const bottleneck = kpis?.bottleneck ?? null
+  const occupiedCount = bays.filter((b) => b.occupied).length
 
   return (
     <div className="p-4">
       {/* Banner */}
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-body">
-          Production · {hhmm(refreshed)} · JHB Plant
-        </h1>
-        <div className="flex items-center gap-1.5 text-xs text-muted">
-          <RefreshCw size={13} /> Auto-refresh 30s · last {hhmm(refreshed)}
+        <h1 className="text-xl font-bold text-body">Production</h1>
+        <div
+          className="flex items-center gap-1.5 text-xs text-muted"
+          data-testid="dashboard-refreshed-at"
+          data-refreshed={refreshedAt?.toISOString() ?? ''}
+        >
+          <RefreshCw size={13} /> Auto-refresh 30s · last {refreshedAt ? hhmm(refreshedAt) : '—'}
         </div>
       </div>
 
-      {/* KPI strip */}
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-6">
+      {/* KPI strip — real values from compute_production_kpis (§0.6 defaults) */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-7" data-testid="production-kpis">
         <Tooltip k="production_dashboard.units_in_production_tile">
-          <KpiTile label="Units in production" value={unitsInProduction} />
+          <KpiTile label="Units in production" value={kpis?.units_in_production ?? '—'} />
         </Tooltip>
         <Tooltip k="production_dashboard.delayed_units_tile">
-          <KpiTile label="Delayed units" value={delayed} status={delayed ? 'RED' : 'GREEN'} />
+          <KpiTile
+            label="Delayed units"
+            value={delayed?.total ?? '—'}
+            status={delayed && delayed.total > 0 ? 'RED' : 'GREEN'}
+            sub={delayed ? `${delayed.start_slipped} start · ${delayed.chassis_slipped} chassis` : undefined}
+          />
         </Tooltip>
         <Tooltip k="production_dashboard.bottleneck_tile">
-          <KpiTile label="Bottleneck" value={<span className="text-lg">{bottleneck?.name ?? '—'}</span>} />
+          <KpiTile
+            label="Bottleneck"
+            value={<span className="text-lg">{bottleneck?.job_number ?? '—'}</span>}
+            sub={bottleneck ? `${bottleneck.days_in_stage}d · ${bottleneck.status.replace(/_/g, ' ')}` : 'nothing stuck > 2d'}
+          />
         </Tooltip>
         <Tooltip k="production_dashboard.daily_output_tile">
-          <KpiTile label="Daily output" value={k.completed_today} sub={`Target ${k.target_today}`} />
-        </Tooltip>
-        <Tooltip k="production_dashboard.today_vs_target_tile">
+          {/* §0.6 no-target-line branch: no target is seeded, so no "Target N" sub renders. */}
           <KpiTile
-            label="Today vs target"
-            value={`${k.completed_today} / ${k.target_today}`}
-            status={k.completed_today >= k.target_today ? 'GREEN' : 'AMBER'}
+            label="Completed today"
+            value={kpis?.completed_today ?? '—'}
+            sub={kpis?.target_today != null ? `Target ${kpis.target_today}` : undefined}
           />
         </Tooltip>
         <Tooltip k="production_dashboard.critical_chassis_tile">
-          <KpiTile label="Critical chassis" value={k.critical_chassis} status={k.critical_chassis > 0 ? 'AMBER' : 'GREEN'} />
+          <KpiTile
+            label="Critical chassis"
+            value={kpis?.critical_chassis ?? '—'}
+            status={kpis && kpis.critical_chassis > 0 ? 'AMBER' : 'GREEN'}
+            sub="ETA passed, not received"
+          />
+        </Tooltip>
+        <Tooltip k="production_dashboard.open_rework_tile">
+          <KpiTile
+            label="Open rework"
+            value={kpis?.open_rework ?? '—'}
+            status={kpis && kpis.open_rework > 0 ? 'AMBER' : 'GREEN'}
+            sub="details on team worksheets"
+          />
         </Tooltip>
         <Tooltip k="production_dashboard.repair_jobs_tile">
           <KpiTile
@@ -86,204 +112,106 @@ export function ProductionDashboard() {
                 <Wrench size={18} /> {repairs.length}
               </span>
             }
-            sub={repairs.length ? `Across ${Math.min(repairs.length, 5)} customers` : 'None in flight'}
+            sub={repairs.length ? 'from Costings' : 'None in flight'}
           />
         </Tooltip>
       </div>
 
-      {/* Heat-map */}
+      {/* Bay heat-map — the 5 REAL assembly bays (§0.1; occupancy event-derived per §0.12) */}
       <Tooltip k="production_dashboard.bay_utilisation_heatmap">
         <Card className="mb-4">
-          <SectionTitle>Bay utilisation</SectionTitle>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-8">
+          <div className="flex items-center justify-between">
+            <SectionTitle>Assembly bay utilisation</SectionTitle>
+            <span className="text-[11px] text-muted">
+              {bays.length} bays · {bays.length - occupiedCount} free
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             {bays.map((b) => (
-              <Tooltip key={b.id} k="production_dashboard.bay_tile_click_drilldown">
-                <button
-                  onClick={() => setBay(b)}
-                  className={`flex flex-col items-start rounded-md px-2.5 py-2 text-left text-white transition hover:opacity-90 ${statusBg[b.status]} ${
-                    b.status === 'RED' ? 'animate-pulseRed' : ''
-                  }`}
-                >
-                  <span className="text-xs font-bold">{b.id}</span>
-                  <span className="text-[10px] leading-tight opacity-90">{b.name}</span>
-                  <span className="mt-1 text-[10px] font-semibold">
-                    {b.wip_count}/{b.wip_limit} WIP
-                  </span>
-                </button>
-              </Tooltip>
+              <button
+                key={b.id}
+                data-testid="production-bay-tile"
+                data-bay-code={b.code}
+                data-occupied={b.occupied}
+                onClick={() => b.occupied && setBay(b)}
+                className={`flex min-h-[84px] flex-col items-start rounded-md p-2.5 text-left transition ${
+                  b.occupied
+                    ? 'border border-line border-l-4 border-l-status-green bg-white hover:border-primary'
+                    : 'cursor-default border border-dashed border-line bg-surface-alt/40'
+                }`}
+              >
+                <span className="text-xs font-bold text-body">{b.code}</span>
+                {b.occupied ? (
+                  <>
+                    <span className="mt-1 font-mono text-xs font-semibold text-body">{b.occupant_vin}</span>
+                    <span className="truncate text-[11px] text-muted">{b.occupant_customer || '—'}</span>
+                    <span className="mt-auto text-[10px] text-muted">
+                      {b.occupant_job_number ? `J${b.occupant_job_number} · ` : ''}
+                      since {b.since ? dmy(b.since) : '—'}
+                    </span>
+                  </>
+                ) : (
+                  <span className="m-auto text-[11px] text-muted">Free</span>
+                )}
+              </button>
             ))}
+            {bays.length === 0 && <div className="text-sm text-muted">No assembly bays configured.</div>}
           </div>
         </Card>
       </Tooltip>
 
-      {/* Materials + rework */}
+      {/* §0.15 replacement panels — honest signals only */}
       <div className="mb-4 grid gap-4 lg:grid-cols-2">
-        <Tooltip k="production_dashboard.material_shortage_alerts">
-        <Card>
-          <SectionTitle>Material shortage alerts</SectionTitle>
-          <ul className="space-y-2">
-            {data.material_alerts.map((m) => (
-              <li key={m.sap_item_code}>
-                <button
-                  onClick={() => setAlert(m)}
-                  className="flex w-full items-start gap-2 rounded-md p-2 text-left hover:bg-surface-alt"
-                >
-                  <span className={`mt-1 h-2.5 w-2.5 rounded-full ${statusBg[severityToStatus(m.severity)]}`} />
-                  <div className="flex-1">
-                    <div className="font-mono text-sm font-semibold text-body">{m.sap_item_code}</div>
-                    <div className="text-xs text-muted">
-                      {m.shortage} short · {m.affecting_jobs.map((j) => 'J' + j).join(', ')}
-                    </div>
-                  </div>
-                  <StatusPill status={severityToStatus(m.severity)} label={m.severity} />
-                </button>
-              </li>
-            ))}
-          </ul>
+        <Card data-testid="dashboard-materials-link">
+          <SectionTitle>Material shortages</SectionTitle>
+          <p className="mb-3 text-sm text-muted">
+            Shortage signals are owned by the Materials module (live PO suggestions + demand vs.
+            stock), not duplicated here.
+          </p>
+          <button
+            onClick={() => nav('/materials/suggestions')}
+            className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm font-semibold text-primary hover:bg-surface-alt"
+          >
+            <Package size={15} /> Open Materials → Suggestions <ArrowRightCircle size={15} />
+          </button>
         </Card>
-        </Tooltip>
-
-        <Tooltip k="production_dashboard.rework_queue_panel">
-        <Card>
-          <SectionTitle>Rework queue</SectionTitle>
-          {reworkTickets.length === 0 ? (
-            <p className="text-sm text-muted">No critical reworks today.</p>
-          ) : (
-            <ul className="space-y-2">
-              {reworkTickets.map((r) => (
-                <li key={r.ticket}>
-                  <button
-                    onClick={() => setJobNum(r.job_number)}
-                    className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-surface-alt"
-                  >
-                    <Wrench size={15} className={statusText[severityToStatus(r.severity)]} />
-                    <div className="flex-1">
-                      <span className="font-mono text-sm font-semibold">{r.ticket}</span>{' '}
-                      <span className="text-sm">J{r.job_number}</span>
-                      <div className="text-xs text-muted">
-                        {r.from_bay} → {r.to_bay} · {r.reason}
-                      </div>
-                    </div>
-                    <StatusPill status={severityToStatus(r.severity)} label={r.severity} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <Card data-testid="dashboard-labour-placeholder">
+          <SectionTitle>Labour efficiency</SectionTitle>
+          <p className="text-sm text-muted">
+            Labour booking data lands with the SAP integration (v4.33+). This panel stays empty
+            rather than rendering illustrative numbers.
+          </p>
         </Card>
-        </Tooltip>
       </div>
 
-      {/* Labour efficiency */}
-      <Tooltip k="production_dashboard.labour_efficiency_chart">
-      <Card>
-        <SectionTitle>Labour efficiency — today by team (hours)</SectionTitle>
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={labourEfficiency} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="team" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <RechartsTooltip />
-              <Legend />
-              <Bar dataKey="planned" name="Planned" fill="#94A3B8" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="booked" name="Booked" fill="#0E4D8C" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
-      </Tooltip>
-
-      {/* Bay side panel */}
-      <SidePanel title={bay ? `${bay.id} · ${bay.name}` : ''} open={!!bay} onClose={() => setBay(null)}>
+      {/* Bay side panel — occupant + the v4.31 job card (consume-only; §3.5 deep-link target) */}
+      <SidePanel
+        title={bay ? `${bay.code}${bay.occupant_vin ? ` · ${bay.occupant_vin}` : ''}` : ''}
+        open={!!bay}
+        onClose={() => setBay(null)}
+      >
         {bay && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <StatusPill status={bay.status} />
-              <span className="text-sm text-muted">{bay.team}</span>
+          <div className="space-y-4" data-testid="production-bay-panel">
+            <div className="grid grid-cols-2 gap-3 rounded-md bg-surface-alt p-3 text-sm">
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted">Customer</div>
+                <div className="font-semibold text-body">{bay.occupant_customer || '—'}</div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-wide text-muted">On bay since</div>
+                <div className="font-semibold text-body">{bay.since ? dmy(bay.since) : '—'}</div>
+              </div>
             </div>
-            {(bay.amber_reason || bay.red_reason) && (
-              <div className="flex items-start gap-2 rounded-md bg-surface-alt p-3 text-sm">
-                <AlertCircle size={16} className={statusText[bay.status]} />
-                <span>{bay.red_reason ?? bay.amber_reason}</span>
+            {bay.occupant_job_id != null ? (
+              <JobCardSections jobId={bay.occupant_job_id} />
+            ) : (
+              <div className="rounded-md border border-dashed border-line p-3 text-sm text-muted">
+                No production job linked to this chassis yet.
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <Stat label="WIP" value={`${bay.wip_count} / ${bay.wip_limit}`} />
-              <Stat label="Throughput" value={`${bay.throughput_today} / ${bay.target_today}`} />
-            </div>
-            <PanelList title="Current jobs" jobs={bay.current_jobs} onPick={setJobNum} />
-            <PanelList title="Queue" jobs={bay.queue} onPick={setJobNum} />
-            <button
-              onClick={() => nav('/kanban/pre-assy')}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2.5 text-sm font-semibold text-white hover:bg-primary-dark"
-            >
-              <ArrowRightCircle size={16} /> Open bay Kanban
-            </button>
           </div>
         )}
       </SidePanel>
-
-      {/* Material alert side panel */}
-      <SidePanel title={alert ? alert.sap_item_code : ''} open={!!alert} onClose={() => setAlert(null)}>
-        {alert && (
-          <div className="space-y-3 text-sm">
-            <div className="text-body">{alert.description}</div>
-            <div className="flex items-center gap-2">
-              <StatusPill status={severityToStatus(alert.severity)} label={alert.severity} />
-            </div>
-            <div className="grid grid-cols-3 gap-2 rounded-md bg-surface-alt p-3 text-center">
-              <Stat label="Needed" value={String(alert.qty_needed)} />
-              <Stat label="Available" value={String(alert.qty_available)} />
-              <Stat label="Short" value={String(alert.shortage)} />
-            </div>
-            <Stat label="PO status" value={alert.po_status} />
-            <PanelList title="Affecting jobs" jobs={alert.affecting_jobs} onPick={setJobNum} />
-          </div>
-        )}
-      </SidePanel>
-
-      <JobDetailStub jobNumber={jobNum} onClose={() => setJobNum(null)} />
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
-      <div className="font-semibold text-body">{value}</div>
-    </div>
-  )
-}
-
-function PanelList({
-  title,
-  jobs,
-  onPick,
-}: {
-  title: string
-  jobs: string[]
-  onPick: (j: string) => void
-}) {
-  return (
-    <div>
-      <div className="mb-1 text-xs uppercase tracking-wide text-muted">{title}</div>
-      {jobs.length === 0 ? (
-        <div className="text-sm text-muted">—</div>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {jobs.map((j) => (
-            <button
-              key={j}
-              onClick={() => onPick(j)}
-              className="rounded-md border border-line px-2 py-1 font-mono text-xs hover:border-primary hover:text-primary"
-            >
-              {j}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
