@@ -44,9 +44,11 @@ def test_planning_board_sales_is_readonly(page: Page, live_server: str, role_use
     shot(page, "03-board-sales-readonly", journey="planning_drag")
 
 
-def test_planning_view_in_production_disabled_d7(page: Page) -> None:
-    # WO v4.29 D7: the slot-detail "View in Production" button is relabelled + disabled (no navigation
-    # to the still-mocked Production Dashboard).
+def test_planning_view_in_production_enabled_d7_closed(page: Page) -> None:
+    # WO v4.29 D7 — CLOSED by WO v4.32 §3.5: the slot-detail "View in Production" button is LIVE
+    # again and deep-links the wired Production Dashboard with ?jobId= (the full e2e depth lives in
+    # test_production_dashboard_journey). This guards the enabled contract so a regression back to
+    # the disabled stub fails loudly.
     admin_session(page)
     _open_board(page)
     # the grid fetches + renders its slots after mount — wait for a scheduled cell before asserting
@@ -57,6 +59,6 @@ def test_planning_view_in_production_disabled_d7(page: Page) -> None:
     page.get_by_test_id("slot-cell").first.click()
     btn = page.get_by_test_id("view-in-production")
     expect(btn).to_be_visible(timeout=T)
-    expect(btn).to_be_disabled()                                        # greyed + cannot navigate
-    expect(btn).to_have_text("View in Production (coming soon)")
-    shot(page, "04-view-in-production-disabled", journey="planning_drag")
+    expect(btn).to_be_enabled()                                         # §3.5: navigates with jobId
+    expect(btn).to_have_text("View in Production")
+    shot(page, "04-view-in-production-enabled", journey="planning_drag")

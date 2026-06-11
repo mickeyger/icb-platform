@@ -35,8 +35,10 @@ def checklists(user: User = Depends(require_user)):
 
 @router.get("/bays/assembly", response_model=List[BayOut])
 def bays_assembly(db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """WO v4.31 §0.3 — the 5 inside assembly bays (Planning Board assembly lane)."""
-    return svc.list_assembly_bays(db)
+    """WO v4.31 §0.3 — the 5 inside assembly bays (Planning Board assembly lane).
+    WO v4.32 §0.4 extends the response with per-bay utilisation (occupant chassis/job + since,
+    event-derived per §0.12) — additive fields; v4.31 consumers are unaffected."""
+    return svc.assembly_bays_utilisation(db)
 
 
 @router.get("/bays/parking", response_model=List[BayOut])

@@ -1,24 +1,28 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import type { Status } from '../../data/types'
 import { statusBg } from '../../lib/status'
 import { zar } from '../../lib/format'
 
 // Card -----------------------------------------------------------------------
+// WO v4.32: forwards rest props (data-testid etc.) — Card-level testids silently
+// vanished before this; journeys select on them.
 export function Card({
   children,
   className = '',
   onClick,
+  ...rest
 }: {
   children: ReactNode
   className?: string
   onClick?: () => void
-}) {
+} & HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       onClick={onClick}
       className={`rounded-lg border border-line bg-white p-4 ${
         onClick ? 'cursor-pointer hover:border-primary/40' : ''
       } ${className}`}
+      {...rest}
     >
       {children}
     </div>

@@ -120,6 +120,17 @@ class ProductionJobListItem(BaseModel):
     pre_job_confirmed_at: Optional[datetime] = None
 
 
+class ProductionJobInProgressItem(ProductionJobListItem):
+    """WO v4.32 §0.4 — list item + chassis/bay context for the Production Dashboard.
+    Chassis fields are None for jobs without a linked chassis_record; bay code only while the
+    chassis is in_assembly (event-derived, §0.12). days_in_stage per the §0.6 default (time
+    since the latest lifecycle timestamp on the job row)."""
+    chassis_vin: Optional[str] = None
+    chassis_status: Optional[str] = None             # received | in_workshop | in_assembly | dispatched | returned
+    current_assembly_bay_code: Optional[str] = None
+    days_in_stage: Optional[int] = None
+
+
 class BomLineOut(BaseModel):
     """A current-BOM line for the job-card modal (WO v4.31 §3.2). Read-only."""
     model_config = ConfigDict(from_attributes=True)

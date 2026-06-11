@@ -13,7 +13,9 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.mes import AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay
+from app.models.mes import (
+    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, ProductionJob,
+)
 from app.schemas.chassis import (
     ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut,
 )
@@ -262,6 +264,64 @@ def list_parking_bays(db: Session):
         select(ParkingBay).where(ParkingBay.is_active.is_(True))
         .order_by(ParkingBay.sort_order, ParkingBay.id)
     ).scalars().all()
+
+
+def current_occupants(db: Session) -> dict:
+    """WO v4.32 §0.4 — {assembly_bay_id: occupant} for every occupied assembly bay, derived from
+    the latest 'assembly_assigned' event of each in_assembly chassis (§0.12 — events are the
+    single source of truth; this is the batched form of _current_assembly_bay_id). Occupant =
+    {chassis_id, vin, customer_name, since, job_id, job_number} (job fields None when no
+    production job links the chassis)."""
+    rows = db.execute(
+        select(ChassisRecord.id, ChassisRecord.vin, ChassisRecord.customer_name,
+               ChassisLifecycleEvent.assembly_bay_id, ChassisLifecycleEvent.event_date,
+               ChassisLifecycleEvent.created_at)
+        .join(ChassisLifecycleEvent, ChassisLifecycleEvent.chassis_record_id == ChassisRecord.id)
+        .where(ChassisRecord.status == "in_assembly",
+               ChassisLifecycleEvent.event_type == "assembly_assigned")
+        .order_by(ChassisRecord.id, ChassisLifecycleEvent.id.desc())
+    ).all()
+    latest_by_chassis: dict = {}
+    for cid, vin, cust, bay_id, ev_date, created in rows:
+        latest_by_chassis.setdefault(cid, (vin, cust, bay_id, ev_date, created))  # first = latest (id desc)
+    job_by_chassis: dict = {}
+    if latest_by_chassis:
+        for jid, jnum, crid in db.execute(
+            select(ProductionJob.id, ProductionJob.job_number, ProductionJob.chassis_record_id)
+            .where(ProductionJob.chassis_record_id.in_(list(latest_by_chassis)))
+        ).all():
+            job_by_chassis.setdefault(crid, (jid, jnum))
+    occupants: dict = {}
+    for cid, (vin, cust, bay_id, ev_date, created) in latest_by_chassis.items():
+        jid, jnum = job_by_chassis.get(cid, (None, None))
+        occupants[bay_id] = {
+            "chassis_id": cid, "vin": vin, "customer_name": cust,
+            "since": ev_date or (created.date() if created else None),
+            "job_id": jid, "job_number": jnum,
+        }
+    return occupants
+
+
+def assembly_bays_utilisation(db: Session) -> list:
+    """WO v4.32 §0.4 — the 5 assembly bays + per-bay utilisation (occupant chassis/job + since).
+    Additive extension of the v4.31 /bays/assembly response: BayOut gains optional occupant
+    fields; v4.31 consumers (useBayModel reads id/code/label) are unaffected."""
+    from app.schemas.chassis import BayOut
+    occupants = current_occupants(db)
+    out = []
+    for bay in list_assembly_bays(db):
+        o = BayOut.model_validate(bay)
+        occ = occupants.get(bay.id)
+        if occ:
+            o.occupied = True
+            o.occupant_chassis_id = occ["chassis_id"]
+            o.occupant_vin = occ["vin"]
+            o.occupant_customer = occ["customer_name"]
+            o.occupant_job_id = occ["job_id"]
+            o.occupant_job_number = occ["job_number"]
+            o.since = occ["since"]
+        out.append(o)
+    return out
 
 
 def add_photos(db: Session, record_id: int, event_id: int, files, who: str) -> list[ChassisPhotoOut]:

@@ -100,10 +100,23 @@ class AssemblyAssignRequest(BaseModel):
 
 
 class BayOut(BaseModel):
-    """A parking or assembly bay (master reference data, WO v4.31 §0.3)."""
+    """A parking or assembly bay (master reference data, WO v4.31 §0.3).
+
+    WO v4.32 §0.4 extends the ASSEMBLY response with utilisation fields (per-bay occupant +
+    since), derived from the latest 'assembly_assigned' event (§0.12 — event-derived, no
+    denormalised column). All optional/None for parking bays and pre-v4.32 consumers, so the
+    v4.31 contract (useBayModel reads id/code/label) is unchanged."""
     model_config = ConfigDict(from_attributes=True)
     id: int
     code: str
     label: Optional[str] = None
     sort_order: Optional[int] = None
     is_active: bool = True
+    # ── WO v4.32 utilisation (assembly bays only; None = free / not computed) ──
+    occupied: bool = False
+    occupant_chassis_id: Optional[int] = None
+    occupant_vin: Optional[str] = None
+    occupant_customer: Optional[str] = None
+    occupant_job_id: Optional[int] = None
+    occupant_job_number: Optional[str] = None
+    since: Optional[date] = None                  # assembly_assigned event_date (business date)

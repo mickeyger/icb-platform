@@ -16,7 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import Branch, CalculationRecord, Customer
-from app.models.mes import BomLine, GeneratedBom, PlanningAck, ProductionJob
+from app.models.mes import (
+    AssemblyBay, BomLine, ChassisLifecycleEvent, ChassisRecord, GeneratedBom, PlanningAck,
+    ProductionJob, ReworkTicket,
+)
 from app.schemas.production_jobs import TimelineEvent
 
 
@@ -291,3 +294,143 @@ def build_timeline(db: Session, job_id: int) -> list[TimelineEvent]:
     events = [TimelineEvent(event_type=t, occurred_at=ts, actor=a) for (t, ts, a) in candidates if ts]
     events.sort(key=lambda e: e.occurred_at)
     return events
+
+
+# ── WO v4.32 — Production Dashboard aggregations (§0.4/§0.6; read-only) ───────
+# In-flight per the §0.6 schema-aligned default: production_jobs statuses only.
+# (in_workshop / in_assembly are CHASSIS statuses — the team split derives from the
+# linked chassis_records.status, not from the job enum.)
+IN_FLIGHT_STATUSES = ("planning", "in_production")
+
+
+def _aware(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def stage_entered_at(job) -> Optional[datetime]:
+    """§0.6 default: when the job entered its CURRENT stage = the latest populated lifecycle
+    timestamp on the row (the same column set build_timeline reads). Falls back to created_at."""
+    candidates = [job.accepted_at, job.pre_job_sent_at, job.pre_job_confirmed_at,
+                  job.planning_acknowledged_at, job.chassis_received_at, job.planned_start_date]
+    vals = [_aware(t) for t in candidates if t is not None]
+    return max(vals) if vals else _aware(job.created_at)
+
+
+def chassis_received(job, chassis_status: Optional[str]) -> bool:
+    """§0.6 default for 'chassis on site': the legacy tick (chassis_received_at) OR the linked
+    chassis_record has been booked in (VCL → in_workshop / onward). 'received' alone is just a
+    created record, NOT a booked-in chassis."""
+    if job.chassis_received_at is not None:
+        return True
+    return chassis_status in ("in_workshop", "in_assembly", "dispatched")
+
+
+def _chassis_status_map(db: Session, jobs) -> dict:
+    ids = [j.chassis_record_id for j in jobs if j.chassis_record_id]
+    if not ids:
+        return {}
+    return {cid: st for cid, st in db.execute(
+        select(ChassisRecord.id, ChassisRecord.status).where(ChassisRecord.id.in_(ids))).all()}
+
+
+def compute_production_kpis(db: Session, branch_id: Optional[int] = None,
+                            now: Optional[datetime] = None) -> dict:
+    """The Production Dashboard metric values (WO v4.32 §0.4/§0.6) — ONE computation, shared by
+    every consumer (the §0.5 parity-by-construction pattern; Management Dashboard v4.33+ becomes
+    the second caller). §0.6 schema-aligned defaults, BA-approved 10 Jun PM:
+      * units_in_production: jobs in IN_FLIGHT_STATUSES (branch-filtered).
+      * delayed: start_slipped (planned_start_date < today, still 'planning') +
+        chassis_slipped (chassis_eta < today, chassis not received/booked-in).
+      * critical_chassis == chassis_slipped (the chassis-risk subset).
+      * bottleneck: in-flight job longest in its current stage, only if > 2 days; else None.
+      * completed_today: completed_at on today's date (branch-filtered).
+      * open_rework: rework_tickets.status='open' — table has NO branch column, so the count is
+        global ("filter where attributable", §0.7).
+      * target_today: None — no target exists in seed data (§0.6 no-target-line branch).
+    """
+    now = now or _now()
+    today = now.date()
+    stmt = select(ProductionJob).where(ProductionJob.status.in_(IN_FLIGHT_STATUSES))
+    if branch_id is not None:
+        stmt = stmt.where(ProductionJob.branch_id == branch_id)
+    jobs = db.execute(stmt).scalars().all()
+    ch_status = _chassis_status_map(db, jobs)
+
+    start_slipped, chassis_slipped = set(), set()
+    bottleneck = None
+    for j in jobs:
+        psd = _aware(j.planned_start_date)
+        if j.status == "planning" and psd is not None and psd.date() < today:
+            start_slipped.add(j.id)
+        eta = _aware(j.chassis_eta)
+        if (eta is not None and eta.date() < today
+                and not chassis_received(j, ch_status.get(j.chassis_record_id))):
+            chassis_slipped.add(j.id)
+        entered = stage_entered_at(j)
+        if entered is not None:
+            days = (now - entered).days
+            if days > 2 and (bottleneck is None or days > bottleneck["days_in_stage"]):
+                bottleneck = {"job_id": j.id, "job_number": j.job_number,
+                              "status": j.status, "days_in_stage": days}
+
+    day_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    completed_stmt = (select(ProductionJob.id)
+                      .where(ProductionJob.completed_at >= day_start))
+    if branch_id is not None:
+        completed_stmt = completed_stmt.where(ProductionJob.branch_id == branch_id)
+    completed_today = len(db.execute(completed_stmt).all())
+
+    open_rework = len(db.execute(
+        select(ReworkTicket.id).where(ReworkTicket.status == "open")).all())
+
+    return {
+        "units_in_production": len(jobs),
+        "delayed": {
+            "total": len(start_slipped | chassis_slipped),
+            "start_slipped": len(start_slipped),
+            "chassis_slipped": len(chassis_slipped),
+        },
+        "critical_chassis": len(chassis_slipped),
+        "bottleneck": bottleneck,
+        "completed_today": completed_today,
+        "target_today": None,                      # §0.6: no target in seed → no target line
+        "open_rework": open_rework,
+    }
+
+
+def list_in_progress(db: Session, branch_id: Optional[int] = None,
+                     now: Optional[datetime] = None) -> list[tuple]:
+    """WO v4.32 §0.4 — in-flight jobs (+ joined costing) enriched with chassis/bay context.
+    Returns [(JobRow, chassis_vin, chassis_status, bay_code, days_in_stage)] for the
+    /in-progress endpoint; bay code derives from the latest assembly_assigned event (§0.12)."""
+    now = now or _now()
+    rows = list_jobs(db, status=list(IN_FLIGHT_STATUSES), branch_id=branch_id, limit=500)
+    jobs = [r[0] for r in rows]
+    ch_ids = [j.chassis_record_id for j in jobs if j.chassis_record_id]
+    vin_status: dict = {}
+    bay_code_by_chassis: dict = {}
+    if ch_ids:
+        for cid, vin, st in db.execute(
+            select(ChassisRecord.id, ChassisRecord.vin, ChassisRecord.status)
+            .where(ChassisRecord.id.in_(ch_ids))
+        ).all():
+            vin_status[cid] = (vin, st)
+        for cid, code in db.execute(
+            select(ChassisLifecycleEvent.chassis_record_id, AssemblyBay.code)
+            .join(AssemblyBay, AssemblyBay.id == ChassisLifecycleEvent.assembly_bay_id)
+            .where(ChassisLifecycleEvent.chassis_record_id.in_(ch_ids),
+                   ChassisLifecycleEvent.event_type == "assembly_assigned")
+            .order_by(ChassisLifecycleEvent.chassis_record_id, ChassisLifecycleEvent.id.desc())
+        ).all():
+            bay_code_by_chassis.setdefault(cid, code)        # first per chassis = latest
+    out = []
+    for row in rows:
+        job = row[0]
+        vin, st = vin_status.get(job.chassis_record_id, (None, None))
+        bay_code = bay_code_by_chassis.get(job.chassis_record_id) if st == "in_assembly" else None
+        entered = stage_entered_at(job)
+        days = (now - entered).days if entered is not None else None
+        out.append((row, vin, st, bay_code, days))
+    return out
