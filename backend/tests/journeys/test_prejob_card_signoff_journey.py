@@ -19,6 +19,14 @@ T = 15_000
 JOURNEY = "prejob_signoff"
 
 
+def _goto_with_session(page: Page, path: str) -> None:
+    """Direct-load a page AND wait for the SPA's /api/session bootstrap — apiPost takes its
+    X-CSRF token from that response, so clicking before it lands 403s ("CSRF token missing").
+    THE root cause of the §3.7 ubuntu flake family (exposed by response instrumentation)."""
+    with page.expect_response(lambda r: "/api/session" in r.url, timeout=30_000):
+        page.goto(path)
+
+
 def _purge(db) -> None:
     from sqlalchemy import text
     db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE body_description LIKE 'J433S%'"))
@@ -69,15 +77,19 @@ def test_planner_signs_then_admin_completes(page: Page, live_server: str, role_u
                                             sent_card_id) -> None:
     # Planner signs via the §3.5 page.
     role_session(page, role_users["planner"], base=live_server)
-    page.goto(f"/mes-app/prejob/{sent_card_id}/signoff/planner")
+    _goto_with_session(page, f"/mes-app/prejob/{sent_card_id}/signoff/planner")
     expect(page.get_by_test_id("prejob-signoff-page")).to_be_visible(timeout=T)
     page.get_by_test_id("prejob-signoff-btn").click()
     attest = page.get_by_test_id("prejob-attestation")
     expect(attest).to_be_visible(timeout=T)
     attest.fill("I, Planner, confirm feasibility — chassis fits, gap workable.")
     # NO screenshot between fill and click: a full_page shot scrolls the page under the
-    # fixed-position modal and destabilises the button (the §3.7 flake class).
-    page.get_by_test_id("prejob-attestation-confirm").click()
+    # fixed-position modal and destabilises the button (the §3.7 flake class). Instrumented —
+    # a failing POST prints its error detail into the CI log.
+    with page.expect_response(lambda r: "/signoff/" in r.url and r.request.method == "POST",
+                              timeout=T) as ri:
+        page.get_by_test_id("prejob-attestation-confirm").click()
+    assert ri.value.status == 200, f"signoff failed HTTP {ri.value.status}: {ri.value.text()[:300]}"
     expect(page.get_by_text("Your Planner sign-off is in", exact=False)).to_be_visible(timeout=T)
     shot(page, "02-planner-signed", journey=JOURNEY)
 
@@ -88,7 +100,7 @@ def test_planner_signs_then_admin_completes(page: Page, live_server: str, role_u
     # re-mint as admin.
     page.context.clear_cookies()
     role_session(page, "admin", base=live_server)
-    page.goto(f"/mes-app/prejob/{sent_card_id}/signoff/sales")
+    _goto_with_session(page, f"/mes-app/prejob/{sent_card_id}/signoff/sales")
     expect(page.get_by_test_id("prejob-signoff-btn")).to_be_visible(timeout=T)
     page.get_by_test_id("prejob-signoff-btn").click()
     attest = page.get_by_test_id("prejob-attestation")

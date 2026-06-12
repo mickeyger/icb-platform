@@ -63,14 +63,20 @@ def sent_card_id():
 
 def test_admin_rejects_back_to_draft_with_reason(page: Page, sent_card_id) -> None:
     admin_session(page)
-    page.goto(f"/mes-app/prejob/{sent_card_id}/signoff/planner")
+    # Wait for the SPA session bootstrap (the X-CSRF source) before any mutation —
+    # the §3.7 CSRF race (see the signoff journey's note).
+    with page.expect_response(lambda r: "/api/session" in r.url, timeout=30_000):
+        page.goto(f"/mes-app/prejob/{sent_card_id}/signoff/planner")
     expect(page.get_by_test_id("prejob-reject-btn")).to_be_visible(timeout=T)
     page.get_by_test_id("prejob-reject-btn").click()
     reason = page.get_by_test_id("prejob-reject-reason")
     expect(reason).to_be_visible(timeout=T)
     reason.fill("Body gap unworkable on this chassis.")
-    # no mid-modal screenshot (full_page shots scroll under the fixed modal — flake class)
-    page.get_by_test_id("prejob-reject-confirm").click()
+    # no mid-modal screenshot (full_page shots scroll under the fixed modal — flake class);
+    # instrumented click — a failing POST prints its error detail into the CI log.
+    with page.expect_response(lambda r: "/reject/" in r.url, timeout=T) as ri:
+        page.get_by_test_id("prejob-reject-confirm").click()
+    assert ri.value.status == 200, f"reject failed HTTP {ri.value.status}: {ri.value.text()[:300]}"
     # §0.14 — back to draft; the page banner carries the prefixed reason; actions are gone.
     banner = page.get_by_text("Back at draft", exact=False)
     expect(banner).to_be_visible(timeout=T)

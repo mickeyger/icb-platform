@@ -99,8 +99,11 @@ def test_sales_creates_draft(page: Page, live_server: str, role_users, staged) -
     sel.select_option(label=TPL_NAME)
     page.get_by_test_id("prejob-create-draft").click()
     expect(page.get_by_test_id("prejob-modal-section").first).to_be_visible(timeout=T)
-    dims = page.get_by_test_id("prejob-modal-section").first.locator("input").first
-    assert "{{" not in (dims.input_value() or ""), "core tokens must bake at creation"
+    # Deterministic bake-proof: {{vin}} is ALWAYS in the context (None -> "Pending"), so the
+    # header must never carry it post-create. Dim tokens bake only when the calc HAS dims —
+    # CI's mock calcs may not (absent keys stay visible BY DESIGN), so don't assert on them.
+    body_desc = page.get_by_test_id("prejob-card-modal").locator("input").first
+    assert "{{vin}}" not in (body_desc.input_value() or ""), "vin token must bake at creation"
     page.get_by_test_id("prejob-save-draft").click()
     expect(page.get_by_text("Draft saved", exact=False)).to_be_visible(timeout=T)
     shot(page, "01-sales-draft", journey=JOURNEY)
@@ -127,10 +130,13 @@ def test_admin_completes_and_submits(page: Page, role_users, staged) -> None:
     # Step 6 — signers (journey_sales exists via role_users; planner list includes admin).
     page.get_by_test_id("prejob-sales-rep").select_option(index=1)
     page.get_by_test_id("prejob-planner").select_option(index=1)
-    # Step 7 — submit (waive the gap when pending).
+    # Step 7 — submit (waive the gap when pending). Instrumented: a failing POST prints its
+    # error detail instead of a blind banner-timeout (the CI-debuggability rule).
     waive = page.get_by_test_id("prejob-waive-gap")
     if waive.count() > 0:
         waive.check()
-    page.get_by_test_id("prejob-submit-check").click()
+    with page.expect_response(lambda r: "submit-for-check" in r.url, timeout=T) as ri:
+        page.get_by_test_id("prejob-submit-check").click()
+    assert ri.value.status == 200, f"submit failed HTTP {ri.value.status}: {ri.value.text()[:300]}"
     expect(page.get_by_test_id("prejob-status-banner")).to_be_visible(timeout=T)
     shot(page, "02-admin-submitted", journey=JOURNEY)
