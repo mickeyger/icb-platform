@@ -22,6 +22,10 @@ interface SectionItem { text: string; note?: string | null; sub_items?: string[]
 interface Section { name: string; items: SectionItem[] }
 interface TemplateOption { id: number; name: string; body_type: string; size_category: string | null; product_line: string; suggested: boolean }
 interface UserOption { id: number; username: string; role: string }
+interface FridgeOption {
+  id: number; manufacturer: string; model: string; display_name: string
+  mounting_drawing: string | null; cutout_width_mm: number | null; cutout_height_mm: number | null
+}
 interface PrejobCard {
   id: number; calculation_id: number; template_id: number | null
   body_description: string | null; chassis_make_model: string | null; vin_number: string | null
@@ -64,6 +68,7 @@ export function PreJobCardModal({
   const [templateId, setTemplateId] = useState<number | ''>('')
   const [salesReps, setSalesReps] = useState<UserOption[]>([])
   const [planners, setPlanners] = useState<UserOption[]>([])
+  const [fridges, setFridges] = useState<FridgeOption[]>([])
   const [waiveGap, setWaiveGap] = useState(false)
 
   const liveCalcId = costing?.calculation_id ?? null
@@ -73,7 +78,7 @@ export function PreJobCardModal({
     setWaiveGap(false)
     try {
       const cls = bodyClassOf(c)
-      const [existing, tpls, reps, plns] = await Promise.all([
+      const [existing, tpls, reps, plns, frs] = await Promise.all([
         liveCalcId != null
           ? apiGet<PrejobCard | null>(`/api/prejob-cards/by-calculation/${liveCalcId}`)
           : Promise.resolve(null),
@@ -81,11 +86,13 @@ export function PreJobCardModal({
           `/api/prejob-cards/templates?${cls ? `body_type=${cls}&` : ''}size_hint=${encodeURIComponent(c.body_type ?? '')}`),
         apiGet<UserOption[]>('/api/prejob-cards/user-options?kind=sales'),
         apiGet<UserOption[]>('/api/prejob-cards/user-options?kind=planner'),
+        apiGet<FridgeOption[]>('/api/prejob-cards/fridge-options'),
       ])
       setCard(existing)
       setTemplates(tpls)
       setSalesReps(reps)
       setPlanners(plns)
+      setFridges(frs)
       setTemplateId(tpls.find((t) => t.suggested)?.id ?? '')
     } catch (e) {
       handleApiError(e, toast.push)
@@ -102,6 +109,50 @@ export function PreJobCardModal({
   const patchCard = (p: Partial<PrejobCard>) => setCard((c) => (c ? { ...c, ...p } : c))
   const patchSections = (fn: (s: Section[]) => Section[]) =>
     setCard((c) => (c ? { ...c, sections: fn(structuredClone(c.sections)) } : c))
+
+  // Scope addition — live fridge substitution. Mirrors the backend engine's exact semantics
+  // for the 4 fridge tokens; a SWITCH (token already consumed) rewrites the previous
+  // display_name occurrences so the "Provision for X fridge" line follows the dropdown.
+  const fmtMm = (n: number | null) => (n == null ? '' : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' '))
+  const selectFridge = (f: FridgeOption | null) => {
+    if (!card) return
+    const prev = card.fridge_model
+    const next = f?.display_name ?? null
+    const replaceAll = (text: string): string => {
+      let t = text
+      if (next) {
+        t = t.split('{{fridge_make}}').join(next)
+        if (f?.mounting_drawing) t = t.split('{{fridge_drawing}}').join(f.mounting_drawing)
+        if (f?.cutout_width_mm != null) t = t.split('{{fridge_cutout_width}}').join(fmtMm(f.cutout_width_mm))
+        if (f?.cutout_height_mm != null) t = t.split('{{fridge_cutout_height}}').join(fmtMm(f.cutout_height_mm))
+        if (prev && prev !== next) t = t.split(prev).join(next)   // switch: rewrite consumed token
+      }
+      return t
+    }
+    setCard((c) => c ? {
+      ...c,
+      fridge_model: next,
+      sections: structuredClone(c.sections).map((s) => ({
+        ...s,
+        items: s.items.map((i) => ({
+          ...i,
+          text: replaceAll(i.text),
+          note: i.note != null ? replaceAll(i.note) : i.note,
+          sub_items: i.sub_items ? i.sub_items.map(replaceAll) : i.sub_items,
+        })),
+      })),
+    } : c)
+  }
+
+  const fridgesByMaker = useMemo(() => {
+    const g = new Map<string, FridgeOption[]>()
+    for (const f of fridges) {
+      const arr = g.get(f.manufacturer) ?? []
+      arr.push(f)
+      g.set(f.manufacturer, arr)
+    }
+    return [...g.entries()]
+  }, [fridges])
 
   const createDraft = async () => {
     if (!costing || liveCalcId == null || templateId === '') return
@@ -348,9 +399,25 @@ export function PreJobCardModal({
                   </label>
                 ))}
                 {card.fridge_ordering_mode === 'icb_orders' && (
-                  <input value={card.fridge_model ?? ''} disabled={!editable} placeholder="Fridge model, e.g. Transfrig Koolvan 760i TE"
-                    onChange={(e) => patchCard({ fridge_model: e.target.value || null })}
-                    className="mt-2 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body" />
+                  /* Scope addition — fridge DDM dropdown (grouped by manufacturer); selecting
+                     live-substitutes the {{fridge_*}} tokens in the sections above. */
+                  <select value={card.fridge_model ?? ''} disabled={!editable} data-testid="prejob-fridge-select"
+                    onChange={(e) => {
+                      const f = fridges.find((x) => x.display_name === e.target.value) ?? null
+                      selectFridge(f)
+                    }}
+                    className="mt-2 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body disabled:bg-surface-alt">
+                    <option value="">— select fridge unit —</option>
+                    {fridgesByMaker.map(([maker, units]) => (
+                      <optgroup key={maker} label={maker}>
+                        {units.map((f) => (
+                          <option key={f.id} value={f.display_name}>
+                            {f.display_name}{f.cutout_width_mm ? ` · cutout ${f.cutout_width_mm}×${f.cutout_height_mm ?? '—'}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                 )}
               </div>
 

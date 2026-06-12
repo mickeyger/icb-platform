@@ -108,6 +108,27 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
     fields: [],
     custom: true,
   },
+  // WO v4.33 scope addition — fridge DDM (flat shape: the generic CRUD table fits).
+  'fridge-units': {
+    key: 'fridge-units',
+    title: 'Fridge units',
+    basePath: '/api/admin/fridge-units',
+    columns: [
+      { key: 'manufacturer', label: 'Manufacturer' }, { key: 'model', label: 'Model' },
+      { key: 'display_name', label: 'Display name' }, { key: 'mounting_drawing', label: 'Drawing' },
+      { key: 'cutout_width_mm', label: 'Cutout W (mm)' }, { key: 'cutout_height_mm', label: 'Cutout H (mm)' },
+      { key: 'is_active', label: 'Active' },
+    ],
+    fields: [
+      { name: 'manufacturer', label: 'Manufacturer', required: true },
+      { name: 'model', label: 'Model' },
+      { name: 'display_name', label: 'Display name (fills {{fridge_make}})', required: true },
+      { name: 'mounting_drawing', label: 'Mounting drawing', default: 'A' },
+      { name: 'cutout_width_mm', label: 'Cutout width (mm)', type: 'number' },
+      { name: 'cutout_height_mm', label: 'Cutout height (mm)', type: 'number' },
+      { name: 'is_active', label: 'Active', type: 'bool', default: true },
+    ],
+  },
 }
 
-export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates']
+export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units']

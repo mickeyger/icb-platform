@@ -151,6 +151,15 @@ def create_card(db: Session, calculation_id: int, template_id: int, user) -> Pre
         sales_rep_user_id=calc.sales_rep_user_id or calc.user_id,
         status="draft",
     )
+    # Scope addition — bake the CORE tokens at creation ("substitutions become invisible at
+    # modal-open"): dims from the costing, vin/chassis, customer. Fridge tokens stay visible
+    # until the dropdown selects a unit (the modal live-substitutes them with the same
+    # semantics). Unknown tokens stay as-is by design.
+    from app.services.template_variables import build_context, substitute_sections, substitute_text
+    ctx = build_context(db, card, calc=calc, chassis=chassis)
+    ctx.pop("fridge_make", None)                       # not known at creation — keep visible
+    card.sections = substitute_sections(card.sections, ctx)
+    card.body_description = substitute_text(card.body_description, ctx) or card.body_description
     db.add(card)
     db.commit()
     db.refresh(card)
@@ -254,9 +263,24 @@ def _display_bits(db: Session, card: PrejobCard) -> dict:
 
 
 def render_pdf(db: Session, card: PrejobCard) -> bytes:
+    from app.models.mes import FridgeUnit
     from app.services.prejob_pdf import render_prejob_pdf
+    from app.services.template_variables import build_context, substitute_sections
     bits = _display_bits(db, card)
-    return render_prejob_pdf(card, quote_number=bits["quote"], customer_name=bits["customer"],
+    # Defensive substitution sweep: resolve any tokens still present (fridge picked after
+    # creation, late VIN, etc.) so the PDF never ships a {{token}} that HAS a known value.
+    fridge = None
+    if card.fridge_model:
+        fridge = db.execute(select(FridgeUnit)
+                            .where(FridgeUnit.display_name == card.fridge_model)
+                            ).scalars().first()
+    job = _job_for_calc(db, card.calculation_id)
+    ctx = build_context(db, card, calc=db.get(CalculationRecord, card.calculation_id),
+                        chassis=_chassis_for_job(db, job), fridge=fridge)
+    rendering = copy.copy(card)
+    rendering.sections = substitute_sections(card.sections, ctx)
+    return render_prejob_pdf(rendering, quote_number=bits["quote"],
+                             customer_name=bits["customer"],
                              sales_rep=bits["sales_rep"], planner=bits["planner"])
 
 

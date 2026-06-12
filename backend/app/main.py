@@ -71,6 +71,7 @@ from .routers.admin import (  # WO v4.26 — admin CRUD for the 4 master-data ta
     material_price_overrides as _r_admin_overrides, bom_spec_options as _r_admin_spec_options,
 )
 from .routers.admin import prejob_templates as _r_admin_prejob_templates  # WO v4.33 §3.3
+from .routers.admin import fridge_units as _r_admin_fridge_units  # WO v4.33 — fridge DDM
 from .routers import auth as _r_auth, trailers as _r_trailers
 from .routers import skin_taping as _r_skin_taping, calculator as _r_calculator
 from .routers import health as _r_health, formulas as _r_formulas
@@ -188,6 +189,7 @@ app.include_router(_r_admin_overrides.router)
 app.include_router(_r_admin_spec_options.router)
 app.include_router(_r_admin_spec_options.search_router)
 app.include_router(_r_admin_prejob_templates.router)  # WO v4.33 §3.3 — template review/approve
+app.include_router(_r_admin_fridge_units.router)  # WO v4.33 — fridge DDM CRUD
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered

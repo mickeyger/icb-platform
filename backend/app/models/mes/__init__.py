@@ -894,6 +894,35 @@ class PrejobCard(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 32. fridge_units — fridge DDM master (WO v4.33 scope addition, migration 0018).
+#     One row per (manufacturer × model) from the ICB standard mounting drawings;
+#     v4.33 seeds Drawing A (Front Mount) only — B/D/F/G/H per-style cutouts are a
+#     v4.33.1 enhancement (extra rows or a mounting_styles JSONB). display_name is
+#     what fills the {{fridge_make}} template token.
+# ─────────────────────────────────────────────────────────────────────────────
+class FridgeUnit(Base):
+    __tablename__ = "fridge_units"
+    __table_args__ = (
+        UniqueConstraint("manufacturer", "model", name="uq_fridge_units_manufacturer_model"),
+        Index("ix_fridge_units_active", "is_active", "manufacturer"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    manufacturer = Column(String(64), nullable=False)
+    model = Column(String(64), nullable=False, default="", server_default="")
+    display_name = Column(String(128), nullable=False)     # fills {{fridge_make}}
+    mounting_drawing = Column(String(8))                   # 'A' (v4.33) | 'B'|'D'|'F'|'G'|'H' later
+    cutout_width_mm = Column(Integer)                      # fills {{fridge_cutout_width}}
+    cutout_height_mm = Column(Integer)                     # fills {{fridge_cutout_height}}
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
@@ -903,6 +932,6 @@ __all__ = [
     "GeneratedBom", "BomLine",
     "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
     "ParkingBay", "AssemblyBay",
-    "PrejobTemplate", "PrejobCard",
+    "PrejobTemplate", "PrejobCard", "FridgeUnit",
     "CROSS_SCHEMA_FKS",
 ]

@@ -56,6 +56,20 @@ def user_options(kind: str = Query(..., description="sales | planner"),
     return svc.list_user_options(db, kind)
 
 
+@router.get("/fridge-options")
+def fridge_options(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """Scope addition — the active fridge DDM for the modal dropdown (grouped client-side by
+    manufacturer). Carries the bonus-token values so selection can live-substitute."""
+    from sqlalchemy import select as sa_select
+    from ..models.mes import FridgeUnit
+    rows = db.execute(sa_select(FridgeUnit).where(FridgeUnit.is_active.is_(True))
+                      .order_by(FridgeUnit.manufacturer, FridgeUnit.model)).scalars().all()
+    return [{"id": f.id, "manufacturer": f.manufacturer, "model": f.model,
+             "display_name": f.display_name, "mounting_drawing": f.mounting_drawing,
+             "cutout_width_mm": f.cutout_width_mm, "cutout_height_mm": f.cutout_height_mm}
+            for f in rows]
+
+
 @router.get("/by-calculation/{calculation_id}", response_model=Optional[PrejobCardOut])
 def get_by_calculation(calculation_id: int, db: Session = Depends(get_db),
                        user: User = Depends(require_user)):
