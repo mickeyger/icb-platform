@@ -126,6 +126,11 @@ export function PrejobSignoffPage() {
                 : card.status === 'sent_for_check' ? 'AMBER' : 'RED'}
               label={card.status.replace(/_/g, ' ')}
             />
+            <button onClick={() => window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')}
+              data-testid="prejob-page-pdf"
+              className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface-alt">
+              Download PDF
+            </button>
           </div>
 
           {card.status === 'draft' && card.reject_reason && (

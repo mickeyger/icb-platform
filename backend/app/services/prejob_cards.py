@@ -212,6 +212,13 @@ def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = Fal
     card.sent_for_check_at = _now()
     card.reject_reason = None                          # §0.14 — re-submit clears the old reason
 
+    # §3.6 — records-copy PDF snapshot (§0.11: the email attachment source). Rendered by the
+    # SAME function the Preview button uses; failure here must never block the submit.
+    try:
+        card.pdf_file_id = _snapshot_pdf(db, card)
+    except Exception:                                  # noqa: BLE001 — snapshot is best-effort
+        card.pdf_file_id = None
+
     # §0.21 — drive the legacy production_jobs transition so Planning gating keeps working.
     job = _job_for_calc(db, card.calculation_id)
     if job is not None and job.status in ("accepted",):
@@ -227,6 +234,62 @@ def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = Fal
     db.commit()
     db.refresh(card)
     return card
+
+
+# ── §3.6 — PDF + email content (the §0.11 transitional mailto pattern) ───────
+def _display_bits(db: Session, card: PrejobCard) -> dict:
+    calc = db.get(CalculationRecord, card.calculation_id)
+    quote = calc.quote_number if calc else None
+    customer = None
+    if calc is not None and calc.customer_id:
+        from app.database import Customer
+        cust = db.get(Customer, calc.customer_id)
+        customer = cust.name if cust else None
+    def uname(uid):
+        u = db.get(User, uid) if uid else None
+        return u.username if u else None
+    return {"quote": quote, "customer": customer,
+            "sales_rep": uname(card.sales_rep_user_id),
+            "planner": uname(card.planner_user_id)}
+
+
+def render_pdf(db: Session, card: PrejobCard) -> bytes:
+    from app.services.prejob_pdf import render_prejob_pdf
+    bits = _display_bits(db, card)
+    return render_prejob_pdf(card, quote_number=bits["quote"], customer_name=bits["customer"],
+                             sales_rep=bits["sales_rep"], planner=bits["planner"])
+
+
+def _snapshot_pdf(db: Session, card: PrejobCard) -> str:
+    from app.services.file_store import save_prejob_pdf
+    return save_prejob_pdf(card.id, render_pdf(db, card))
+
+
+def build_email(db: Session, card: PrejobCard, base_url: str) -> dict:
+    """§0.11 — subject + body with click-to-signoff links + a mailto: URL. The mailto carries
+    NO attachment (the protocol cannot, reliably — BA-corrected §0.11): the user attaches the
+    downloaded PDF manually. Recipients are blank — users carry no email column yet (v4.34
+    notification config captures addresses); Nadie addresses it in her mail client."""
+    from urllib.parse import quote as q
+    base = base_url.rstrip("/")
+    bits = _display_bits(db, card)
+    subject = f"Pre-Job Card for check — {bits['quote'] or f'card {card.id}'} — {bits['customer'] or ''}".strip(" —")
+    sales_link = f"{base}/mes-app/prejob/{card.id}/signoff/sales"
+    planner_link = f"{base}/mes-app/prejob/{card.id}/signoff/planner"
+    body = (
+        f"Hi,\r\n\r\n"
+        f"The Pre-Job Card for costing {bits['quote'] or card.id} ({bits['customer'] or '—'}) "
+        f"is ready for check.\r\n\r\n"
+        f"Sales Rep ({bits['sales_rep'] or 'unassigned'}) — review and sign off here:\r\n"
+        f"{sales_link}\r\n\r\n"
+        f"Planner ({bits['planner'] or 'unassigned'}) — review and sign off here:\r\n"
+        f"{planner_link}\r\n\r\n"
+        f"The PDF copy is attached for records (download it from the MES if missing).\r\n\r\n"
+        f"Sent from ICB MES (internal document — not for the customer).\r\n"
+    )
+    return {"subject": subject, "body": body,
+            "sales_link": sales_link, "planner_link": planner_link,
+            "mailto": f"mailto:?subject={q(subject)}&body={q(body)}"}
 
 
 # ── §3.5 — check sign-offs + reject (Stages B/C/D) ───────────────────────────

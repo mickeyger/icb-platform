@@ -138,6 +138,18 @@ export function PreJobCardModal({
     } finally { setBusy(false) }
   }
 
+  const openPdf = () => {
+    if (card) window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')
+  }
+
+  const openEmail = async () => {
+    if (!card) return
+    try {
+      const e = await apiGet<{ mailto: string }>(`/api/prejob-cards/${card.id}/email`)
+      window.location.href = e.mailto                   // §0.11 — opens the user's mail client
+    } catch (e) { handleApiError(e, toast.push) }
+  }
+
   const submit = async () => {
     if (!card || !costing) return
     const saved = await saveDraft(true)                 // submit what's on screen
@@ -147,7 +159,8 @@ export function PreJobCardModal({
       const sent = await apiPost<PrejobCard>(
         `/api/prejob-cards/${saved.id}/submit-for-check`, { waive_body_gap: waiveGap })
       setCard(sent)
-      toast.push({ kind: 'ok', message: 'Pre-Job Card sent for check' })
+      toast.push({ kind: 'ok', message: 'Sent for check — opening your email client (§0.11)' })
+      void openEmail()                                  // auto-open the prefilled mail draft
       await onConfirm(costing)
     } catch (e) { handleApiError(e, toast.push) } finally { setBusy(false) }
   }
@@ -385,6 +398,10 @@ export function PreJobCardModal({
                     </label>
                   )}
                   <button onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm">Close</button>
+                  <button onClick={openPdf} disabled={busy} data-testid="prejob-preview-pdf"
+                    className="flex items-center gap-1 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt disabled:opacity-50">
+                    <FileText size={14} /> Preview PDF
+                  </button>
                   <button onClick={() => void saveDraft()} disabled={busy} data-testid="prejob-save-draft"
                     className="rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt disabled:opacity-50">
                     Save Draft
@@ -396,7 +413,21 @@ export function PreJobCardModal({
                 </div>
               )}
               {!editable && (
-                <div className="flex justify-end border-t border-line pt-3">
+                <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-3">
+                  {/* §0.11 post-submit helpers: re-open the prefilled mail draft + grab the PDF
+                      for manual attach (mailto cannot carry attachments — BA-corrected §0.11). */}
+                  {(card.status === 'sent_for_check' || card.status === 'pre_job_confirmed') && (
+                    <>
+                      <button onClick={() => void openEmail()} data-testid="prejob-open-email"
+                        className="flex items-center gap-1 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt">
+                        <Send size={14} /> Open email draft
+                      </button>
+                      <button onClick={openPdf} data-testid="prejob-download-pdf"
+                        className="flex items-center gap-1 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt">
+                        <FileText size={14} /> Download PDF
+                      </button>
+                    </>
+                  )}
                   <button onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm">Close</button>
                 </div>
               )}

@@ -135,6 +135,7 @@ class PrejobCardOut(BaseModel):
     status: str                                        # draft | sent_for_check | pre_job_confirmed
     sent_for_check_at: Optional[datetime] = None
     reject_reason: Optional[str] = None
+    pdf_file_id: Optional[str] = None                  # records-copy snapshot (set at submit, §3.6)
     version: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

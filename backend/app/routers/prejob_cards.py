@@ -6,7 +6,7 @@ mutations with their own permission gates). Thin handlers → services.prejob_ca
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from ..database import CalculationRecord, Customer, User, get_db
@@ -69,6 +69,33 @@ def get_card(card_id: int, db: Session = Depends(get_db), user: User = Depends(r
     if card is None:
         raise HTTPException(status_code=404, detail="pre-job card not found")
     return _out(db, card)
+
+
+@router.get("/{card_id}/pdf")
+def get_card_pdf(card_id: int, db: Session = Depends(get_db),
+                 user: User = Depends(require_user)):
+    """§3.6 — ONE renderer, two consumers (modal Preview + email Download): always renders the
+    CURRENT card content (the submit-time snapshot in pdf_file_id is the frozen records copy)."""
+    from fastapi.responses import Response as RawResponse
+    card = db.get(PrejobCard, card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="pre-job card not found")
+    data = svc.render_pdf(db, card)
+    calc = db.get(CalculationRecord, card.calculation_id)
+    ref = (calc.quote_number if calc and calc.quote_number else f"card-{card.id}").replace("/", "-")
+    return RawResponse(content=data, media_type="application/pdf",
+                       headers={"Content-Disposition": f'inline; filename="prejob-{ref}.pdf"'})
+
+
+@router.get("/{card_id}/email")
+def get_card_email(request: Request, card_id: int, db: Session = Depends(get_db),
+                   user: User = Depends(require_user)):
+    """§0.11 — subject/body/mailto with the click-to-signoff links (no SMTP in v4.33)."""
+    card = db.get(PrejobCard, card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="pre-job card not found")
+    base = str(request.base_url)
+    return svc.build_email(db, card, base)
 
 
 @router.post("", response_model=PrejobCardOut, status_code=201)
