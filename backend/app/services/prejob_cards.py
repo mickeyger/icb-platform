@@ -169,7 +169,7 @@ def create_card(db: Session, calculation_id: int, template_id: int, user) -> Pre
 _DRAFT_EDITABLE = {
     "body_description", "chassis_make_model", "vin_number", "body_gap_mm",
     "sections", "fridge_ordering_mode", "fridge_model", "customer_notes",
-    "sales_rep_user_id", "planner_user_id", "template_id",
+    "sales_rep_user_id", "planner_user_id", "template_id", "cc_recipients",
 }
 
 
@@ -311,9 +311,15 @@ def build_email(db: Session, card: PrejobCard, base_url: str) -> dict:
         f"The PDF copy is attached for records (download it from the MES if missing).\r\n\r\n"
         f"Sent from ICB MES (internal document — not for the customer).\r\n"
     )
+    # CC addition — store raw, but only email-shaped entries feed the &cc= param.
+    cc_clean = ",".join(
+        a.strip() for a in (card.cc_recipients or "").split(",")
+        if "@" in a and "." in a.split("@")[-1])
+    cc_part = f"cc={q(cc_clean)}&" if cc_clean else ""
     return {"subject": subject, "body": body,
             "sales_link": sales_link, "planner_link": planner_link,
-            "mailto": f"mailto:?subject={q(subject)}&body={q(body)}"}
+            "cc": cc_clean or None,
+            "mailto": f"mailto:?{cc_part}subject={q(subject)}&body={q(body)}"}
 
 
 # ── §3.5 — check sign-offs + reject (Stages B/C/D) ───────────────────────────

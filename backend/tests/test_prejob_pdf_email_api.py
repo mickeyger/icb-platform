@@ -106,3 +106,19 @@ def test_email_payload_links_and_mailto(api, card):
     assert e["mailto"].startswith("mailto:?subject=")  # blank recipient — no user emails yet
     assert "attach" not in e["mailto"].split("body=")[0]   # no attachment pretence (§0.11)
     assert "Pre-Job Card" in e["subject"]
+    assert e["cc"] is None                                 # no CC set → no cc= param
+
+
+def test_cc_recipients_persist_and_reach_mailto(api, card):
+    """CC addition (migration 0019): stored raw on the draft; only email-shaped entries feed
+    the &cc= param (the 'not-an-email' entry is filtered from the mailto, kept in storage)."""
+    client, _ = api
+    cid = card["id"]
+    r = client.patch(f"/api/prejob-cards/{cid}",
+                     json={"cc_recipients": "burt@icb.co.za, not-an-email, nadie@icb.co.za"})
+    assert r.status_code == 200
+    assert r.json()["cc_recipients"] == "burt@icb.co.za, not-an-email, nadie@icb.co.za"
+    e = client.get(f"/api/prejob-cards/{cid}/email").json()
+    assert e["cc"] == "burt@icb.co.za,nadie@icb.co.za"
+    assert e["mailto"].startswith("mailto:?cc=")
+    assert "burt%40icb.co.za" in e["mailto"] and "not-an-email" not in e["mailto"]

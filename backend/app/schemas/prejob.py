@@ -97,6 +97,7 @@ class PrejobCardUpdate(BaseModel):
     sales_rep_user_id: Optional[int] = None
     planner_user_id: Optional[int] = None
     template_id: Optional[int] = None
+    cc_recipients: Optional[str] = None                # CC addition — comma-separated emails
 
 
 class SubmitForCheck(BaseModel):
@@ -136,6 +137,7 @@ class PrejobCardOut(BaseModel):
     sent_for_check_at: Optional[datetime] = None
     reject_reason: Optional[str] = None
     pdf_file_id: Optional[str] = None                  # records-copy snapshot (set at submit, §3.6)
+    cc_recipients: Optional[str] = None                # CC addition — comma-separated emails
     version: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

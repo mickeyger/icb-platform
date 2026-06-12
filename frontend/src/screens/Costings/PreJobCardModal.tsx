@@ -35,6 +35,7 @@ interface PrejobCard {
   sales_rep_user_id: number | null; sales_rep_signoff_at: string | null
   planner_user_id: number | null; planner_signoff_at: string | null
   status: string; sent_for_check_at: string | null; reject_reason: string | null
+  cc_recipients: string | null
   quote_number: string | null; customer_name: string | null; template_name: string | null
   sales_rep_username: string | null; planner_username: string | null
 }
@@ -179,6 +180,7 @@ export function PreJobCardModal({
         customer_notes: card.customer_notes,
         sales_rep_user_id: card.sales_rep_user_id,
         planner_user_id: card.planner_user_id,
+        cc_recipients: card.cc_recipients,
       })
       setCard(saved)
       if (!silent) toast.push({ kind: 'ok', message: 'Draft saved' })
@@ -453,6 +455,16 @@ export function PreJobCardModal({
                   )}
                 </label>
               </div>
+
+              {/* ── CC recipients (Michael-approved addition) — lands in the mailto &cc= ── */}
+              <label className="block text-xs text-muted">
+                CC on the check email (comma-separated addresses — optional)
+                <input value={card.cc_recipients ?? ''} disabled={!editable}
+                  placeholder="e.g. burt@icecoldbodies.co.za, nadie@icecoldbodies.co.za"
+                  data-testid="prejob-cc"
+                  onChange={(e) => patchCard({ cc_recipients: e.target.value || null })}
+                  className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body disabled:bg-surface-alt" />
+              </label>
 
               {/* ── Step 7: actions ── */}
               {editable && (

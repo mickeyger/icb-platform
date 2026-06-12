@@ -889,6 +889,10 @@ class PrejobCard(Base):
     sent_for_check_at = Column(DateTime(timezone=True))
     reject_reason = Column(Text)                           # captured on reject; cleared on re-submit
     pdf_file_id = Column(String(512))                      # file-store relative path of the generated PDF (§3.6)
+    # WO v4.33 CC addition (migration 0019, Michael-approved): comma-separated free-text email
+    # addresses CC'd on the check-notification mailto (users carry no email column until v4.34
+    # — Nadie types the addresses). Stored raw; email-shaped entries feed the &cc= param.
+    cc_recipients = Column(Text)
     version = Column(Integer, nullable=False, default=1, server_default="1")
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
