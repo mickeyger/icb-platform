@@ -25,15 +25,23 @@ def _purge(db) -> None:
                     "(SELECT calculation_record_id FROM icb_mes.production_jobs "
                     " WHERE job_number LIKE 'J433C%')"))
     db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'J433C%'"))
+    db.execute(text("DELETE FROM icb_mes.prejob_templates WHERE name LIKE 'J433C%'"))
     db.commit()
+
+
+TPL_NAME = "J433C Journey Template"
 
 
 @pytest.fixture(scope="module")
 def staged():
-    """A job-free, card-free calculation given a J433C 'accepted' job — the live Costings row
-    then shows the Pre-Job Card button (the v4.19 partial-state rule). Yields the quote."""
+    """Self-sufficient staging (CI's fresh DB has NO templates — the importer is a dev/ops
+    script — and NO fridge DDM): a J433C ACTIVE tokened template, the idempotent Drawing-A
+    fridge seed, and a job-free/card-free/non-repair calculation given a J433C 'accepted'
+    job (the live Costings row then shows the Pre-Job Card button). Yields the quote."""
     from app.database import Branch, CalculationRecord, SessionLocal
-    from app.models.mes import PrejobCard, ProductionJob
+    from app.models.mes import PrejobCard, PrejobTemplate, ProductionJob
+    from scripts.seed_fridge_units import seed as seed_fridges
+    seed_fridges()                                     # idempotent — no-op on the dev DB
     with SessionLocal() as db:
         _purge(db)
         taken = {j.calculation_record_id for j in db.query(ProductionJob)
@@ -47,6 +55,17 @@ def staged():
         if calc is None:
             pytest.skip("no job-free, card-free calculation on this DB")
         branch = db.query(Branch).order_by(Branch.id).first()
+        db.add(PrejobTemplate(
+            name=TPL_NAME, body_type="chiller", size_category="big",
+            product_line="standard", is_active=True, created_by="j433c",
+            header_format="{{external_length}}mm GRP Chiller Body VIN Nr: {{vin}}",
+            sections=[
+                {"name": "GRP SECTION", "items": [
+                    {"text": "External dimensions – {{external_length}}mm o/a (l) x "
+                             "{{external_width}}mm o/a (w) x {{external_height}}mm o/a (h)"},
+                    {"text": "Provision for {{fridge_make}} fridge unit – cut out."}]},
+                {"name": "FINISHING SECTION", "items": [{"text": "Reflexite tape."}]},
+            ]))
         job = ProductionJob(calculation_record_id=calc.id, branch_id=branch.id,
                             source="quote", status="accepted", job_number="J433C01")
         db.add(job)
@@ -75,7 +94,9 @@ def test_sales_creates_draft(page: Page, live_server: str, role_users, staged) -
     _open_modal(page, staged)
     sel = page.get_by_test_id("prejob-template-select")
     expect(sel).to_be_visible(timeout=T)
-    assert sel.input_value() != "", "suggested template should be pre-selected (§0.6)"
+    # Deterministic everywhere (CI has only the staged template; dev has Nadie's 22):
+    # pick the J433C template explicitly — the §0.6 suggestion RANKING is API-tested.
+    sel.select_option(label=TPL_NAME)
     page.get_by_test_id("prejob-create-draft").click()
     expect(page.get_by_test_id("prejob-modal-section").first).to_be_visible(timeout=T)
     dims = page.get_by_test_id("prejob-modal-section").first.locator("input").first
