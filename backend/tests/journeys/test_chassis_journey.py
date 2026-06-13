@@ -32,10 +32,24 @@ def test_chassis_journey(page: Page) -> None:
     # 1) Autologin as admin and land on the authenticated shell.
     admin_session(page)
 
-    # 2) Open the Chassis module from the top nav.
+    # 2) Open the Chassis module from the top nav. Wrap the click in expect_response so we WAIT for
+    #    the data fetch the (data-gated) chassis-table depends on, and surface a non-200 — e.g. a
+    #    transient-session 401 that would silently redirect to /login — as an actionable message
+    #    rather than a blind "table not visible" timeout (the §3.7 instrument-to-diagnose pattern;
+    #    chassis-table renders only when !loading AND rows>0, so it races the fetch otherwise).
     nav = page.get_by_test_id("nav-chassis")
     expect(nav).to_be_visible(timeout=T)
-    nav.click()
+    with page.expect_response(lambda r: "/api/chassis-records" in r.url, timeout=T) as resp_info:
+        nav.click()
+    resp = resp_info.value
+    assert resp.status == 200, (
+        f"chassis-records fetch returned {resp.status} (expected 200) — a non-200 here (session "
+        f"race → /login redirect, or a serialization 500) is the flake cause, not slow rendering.")
+    body = resp.json()
+    assert isinstance(body, list) and body, (
+        f"chassis-records returned 200 with "
+        f"{len(body) if isinstance(body, list) else 'a non-list'} rows — an empty list renders "
+        f"EmptyState, not chassis-table (a seed/DB-state flake, not a UI bug).")
 
     # 3) The chassis list + its table render with the live/seeded records.
     expect(page.get_by_test_id("chassis-list")).to_be_visible(timeout=T)
