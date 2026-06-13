@@ -181,6 +181,13 @@ Patterns that each bit once and are now pattern-fixed:
     misleading "costing not found" page that reads as a frontend bug. Diagnosed by capturing the
     SPA's OWN network status codes (all 401, incl. `/api/session`), not by trusting the rendered
     symptom — the direct application of ledger item 16.
+19. **Symptom-key your recipes** — a fix filed under what it IS ("local journey-verify recipe")
+    won't surface when you're scanning by what you SEE ("all-401 / costing not found"). Item 18
+    was *already* in memory and still cost ~20 minutes, because debugging searches symptoms, not
+    solution-names — and the verify-by-name entry didn't match the failure signature in the
+    moment. Index durable fixes by their symptom, and actually search memory when stuck. The
+    recall path is the part of the loop most engineers never debug in themselves; it's as much a
+    correctness surface as the code.
 
 ## Consequences
 
