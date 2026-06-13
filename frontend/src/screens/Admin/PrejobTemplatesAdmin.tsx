@@ -26,6 +26,7 @@ const BASE = '/api/admin/prejob-templates'
 const LINE_LABEL: Record<string, string> = {
   standard: 'Standard', rhinorange_legacy: 'Rhinorange (legacy)', rhinorange_2_0: 'Rhinorange 2.0',
 }
+type SortKey = 'name' | 'body_type' | 'size_category' | 'product_line' | 'item_count' | 'is_active'
 
 export function PrejobTemplatesAdmin() {
   const toast = useToast()
@@ -36,6 +37,7 @@ export function PrejobTemplatesAdmin() {
   const [status, setStatus] = useState('')                 // '' | 'draft' | 'active'
   const [editing, setEditing] = useState<TemplateDetail | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 })  // default A→Z by name
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -55,6 +57,22 @@ export function PrejobTemplatesAdmin() {
     (!bodyType || r.body_type === bodyType) &&
     (!line || r.product_line === line) &&
     (!status || (status === 'active' ? r.is_active : !r.is_active)))
+  const sorted = [...filtered].sort((a, b) => {                 // client-side: header click re-sorts
+    const av = a[sort.key]; const bv = b[sort.key]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1                                    // nulls (e.g. blank size) sort last
+    if (bv == null) return -1
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sort.dir
+    if (typeof av === 'boolean' && typeof bv === 'boolean') return (Number(bv) - Number(av)) * sort.dir
+    return String(av).localeCompare(String(bv)) * sort.dir
+  })
+  const th = (label: string, key: SortKey | null, align: 'left' | 'right' = 'left') => (
+    <th
+      onClick={key ? () => setSort((s) => ({ key, dir: (s.key === key ? -s.dir : 1) as 1 | -1 })) : undefined}
+      className={`py-2 ${align === 'right' ? 'text-right' : ''} ${key ? 'cursor-pointer select-none hover:text-body' : ''}`}>
+      {label}{key && sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+    </th>
+  )
 
   const open = async (id: number) => {
     try { setEditing(await apiGet<TemplateDetail>(`${BASE}/${id}`)) }
@@ -277,12 +295,13 @@ export function PrejobTemplatesAdmin() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-                <th className="py-2">Name</th><th>Body</th><th>Size</th><th>Line</th>
-                <th>Sections</th><th className="text-right">Items</th><th>Status</th>
+                {th('Name', 'name')}{th('Body', 'body_type')}{th('Size', 'size_category')}
+                {th('Line', 'product_line')}{th('Sections', null)}{th('Items', 'item_count', 'right')}
+                {th('Status', 'is_active')}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {sorted.map((r) => (
                 <tr key={r.id} data-testid="prejob-template-row" onClick={() => void open(r.id)}
                   className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-surface-alt">
                   <td className="py-2 font-semibold text-body">{r.name}</td>
