@@ -140,18 +140,73 @@ def test_double_submit_no_duplicate_chassis(api, staged):         # BA case 1
     assert _count_make("P434A Hino 300") == 1                     # exactly one
 
 
-def test_resubmit_after_reject_no_second_chassis(api, staged):    # review A2
+def test_resubmit_after_reject_readopts_via_job(api, staged):     # §3.4 — release + re-adopt, no dup
+    """With a production job, §3.4 reject drops the CARD link but the job keeps the chassis (not
+    orphaned), so re-submit re-adopts it via the job — one chassis across the reject cycle."""
     client, admin = api
+    from app.database import Branch, SessionLocal
+    from app.models.mes import ProductionJob
+    with SessionLocal() as db:
+        branch = db.query(Branch).order_by(Branch.id).first()
+        db.add(ProductionJob(calculation_record_id=staged["calc_id"], branch_id=branch.id,
+                             source="quote", status="accepted", job_number="P434AJOB3"))
+        db.commit()
     cid = _create_card(client, admin, staged, make_model="P434A Fuso Canter")
     assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
     crid1, _ = _chassis_of(cid)
+    assert crid1 is not None
     rj = client.post(f"/api/prejob-cards/{cid}/reject/planner", json={"reason": "P434A test reject"})
     assert rj.status_code == 200 and rj.json()["status"] == "draft"
-    r2 = client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={})   # signers/gap retained
-    assert r2.status_code == 200
-    crid2, _ = _chassis_of(cid)
-    assert crid2 == crid1                                         # link retained → no second row
+    crid_mid, _ = _chassis_of(cid)
+    assert crid_mid is None                                       # §3.4 released the card link
+    assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
+    crid2, ch2 = _chassis_of(cid)
+    assert crid2 == crid1                                         # re-adopted the job's chassis
+    assert ch2["status"] == "expected"                            # job kept it — never orphaned
     assert _count_make("P434A Fuso Canter") == 1
+
+
+def test_reject_orphans_jobless_auto_created_chassis(api, staged):    # §3.4 (§0.6) — orphan path
+    """A jobless card's auto-created chassis has no other links, so reject releases the card link
+    AND orphans the chassis (status → expected_orphaned, available for re-linking)."""
+    client, admin = api
+    cid = _create_card(client, admin, staged, make_model="P434A Orphan Me")
+    assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
+    crid1, _ = _chassis_of(cid)
+    assert crid1 is not None
+    rj = client.post(f"/api/prejob-cards/{cid}/reject/sales", json={"reason": "P434A orphan test"})
+    assert rj.status_code == 200
+    crid_after, _ = _chassis_of(cid)
+    assert crid_after is None                                     # card link released
+    from app.database import SessionLocal
+    from app.models.mes import ChassisRecord
+    with SessionLocal() as db:
+        ch = db.get(ChassisRecord, crid1)
+        assert ch is not None and ch.status == "expected_orphaned"   # orphaned, not deleted
+
+
+def test_reject_does_not_release_foreign_chassis(api, staged):       # §3.4 — only THIS card's auto-created
+    """A chassis NOT auto-created for this card (e.g. a register/VCL row manually linked) is left
+    untouched by reject — the created_via/ref guard protects it."""
+    client, admin = api
+    from app.database import SessionLocal
+    from app.models.mes import ChassisRecord, PrejobCard
+    cid = _create_card(client, admin, staged, make_model="P434A Card Make")
+    with SessionLocal() as db:
+        foreign = ChassisRecord(vin="P434BFOREIGN1", status="received", source="register",
+                                make="P434A Foreign", created_by="t", updated_by="t")
+        db.add(foreign)
+        db.flush()
+        foreign_id = foreign.id
+        db.get(PrejobCard, cid).chassis_record_id = foreign.id    # manual link to a non-auto chassis
+        db.commit()
+    assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
+    rj = client.post(f"/api/prejob-cards/{cid}/reject/planner", json={"reason": "P434A foreign test"})
+    assert rj.status_code == 200
+    crid_after, _ = _chassis_of(cid)
+    assert crid_after == foreign_id                              # link untouched (not auto-created here)
+    with SessionLocal() as db:
+        assert db.get(ChassisRecord, foreign_id).status == "received"   # status untouched
 
 
 def test_submit_adopts_preexisting_job_chassis(api, staged):      # review A4
@@ -246,8 +301,16 @@ def test_make_model_overflow_truncated_not_500(api, staged):      # review HIGH 
 
 def test_resubmit_syncs_corrected_make(api, staged):              # review MED — reject→fix→resubmit staleness
     """reject→fix make/model→resubmit must propagate the correction onto the linked 'expected'
-    chassis (same row, no duplicate)."""
+    chassis (same row, no duplicate). With a job, §3.4 reject keeps the chassis on the job and
+    re-submit re-adopts + syncs the corrected make."""
     client, admin = api
+    from app.database import Branch, SessionLocal
+    from app.models.mes import ProductionJob
+    with SessionLocal() as db:
+        branch = db.query(Branch).order_by(Branch.id).first()
+        db.add(ProductionJob(calculation_record_id=staged["calc_id"], branch_id=branch.id,
+                             source="quote", status="accepted", job_number="P434AJOB4"))
+        db.commit()
     cid = _create_card(client, admin, staged, make_model="P434A Wrong Make")
     assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
     crid1, ch1 = _chassis_of(cid)

@@ -129,9 +129,11 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
         return                                             # §3.2 case 2 — empty make/model: graceful no-op
     job = _job_for_calc(db, card.calculation_id)
     existing = _chassis_for_job(db, job)
-    if existing is not None:                               # §3.2 case A4 — adopt, don't duplicate
+    if existing is not None:                               # §3.2 case A4 — adopt the job's chassis, don't duplicate
         card.chassis_record_id = existing.id
-        return
+        if existing.created_via == "pre_job_card" and existing.status == "expected" and make_model:
+            existing.make = make_model                     # keep an auto-created 'expected' row synced
+        return                                             # (real/foreign chassis: job wins, no sync — §3.2 review #3)
     calc = db.get(CalculationRecord, card.calculation_id)
     from app.services.chassis import create_expected_chassis
     chassis = create_expected_chassis(                     # §0.5 shared insert (identical at §3.3)
@@ -449,6 +451,34 @@ def sign_off(db: Session, card_id: int, role: str, attestation: str, user) -> Pr
     return card
 
 
+def _release_auto_created_chassis(db: Session, card: PrejobCard) -> None:
+    """WO v4.34 §3.4 (§0.6) — on reject, release a chassis THIS card auto-created at §3.2 submit
+    (created_via='pre_job_card' AND created_source_ref == this card's ref). Drops the card link;
+    if nothing else references the chassis (no production_job, no other prejob_card) it's set to
+    'expected_orphaned' (available for re-linking). A card-driven job KEEPS its chassis via §3.2's
+    cross-link, so the common case just drops the card link (re-submit re-adopts the job's chassis
+    in _auto_create_chassis); only a jobless card actually orphans. Never touches a manually-linked
+    or VCL-received chassis (the created_via/ref guard)."""
+    if card.chassis_record_id is None:
+        return
+    chassis = db.get(ChassisRecord, card.chassis_record_id)
+    if chassis is None:
+        card.chassis_record_id = None
+        return
+    calc = db.get(CalculationRecord, card.calculation_id)
+    if not (chassis.created_via == "pre_job_card"
+            and chassis.created_source_ref == _source_ref(calc, card)):
+        return                                             # not auto-created for THIS card — leave it linked
+    chassis_id = chassis.id
+    card.chassis_record_id = None                          # §0.6 — release the card link
+    job_link = db.execute(select(ProductionJob.id)
+                          .where(ProductionJob.chassis_record_id == chassis_id)).first()
+    other_card = db.execute(select(PrejobCard.id).where(
+        PrejobCard.chassis_record_id == chassis_id, PrejobCard.id != card.id)).first()
+    if job_link is None and other_card is None and chassis.status == "expected":
+        chassis.status = "expected_orphaned"               # no other links → free for re-use
+
+
 def reject(db: Session, card_id: int, role: str, reason: str, user) -> PrejobCard:
     """§0.14 — either checker can reject; status returns to draft with the reason captured
     (prefixed with who rejected). Existing sign-offs reset — the re-submitted card is
@@ -472,6 +502,8 @@ def reject(db: Session, card_id: int, role: str, reason: str, user) -> PrejobCar
     card.planner_signoff_at = None
     card.planner_attestation = None
     card.sent_for_check_at = None
+    # WO v4.34 §3.4 (§0.6) — release the chassis this card auto-created (orphan it if unreferenced).
+    _release_auto_created_chassis(db, card)
     db.commit()
     db.refresh(card)
     return card
