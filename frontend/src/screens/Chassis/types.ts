@@ -22,7 +22,7 @@ export interface ChassisEvent {
 
 export interface ChassisRecord {
   id: number
-  vin: string
+  vin: string | null                         // WO v4.34 §0.3 — NULL until receive ('expected' rows)
   job_number?: string | null
   customer_name?: string | null
   make?: string | null
@@ -30,8 +30,20 @@ export interface ChassisRecord {
   status: string
   current_assembly_bay_id?: number | null   // WO v4.31 §0.12 — derived (latest assembly_assigned event)
   source: string
+  created_via?: string | null               // WO v4.34 §0.4 — provenance pill
+  created_source_ref?: string | null
   event_count: number
   latest_event_date?: string | null
+}
+
+// WO v4.34 §3.7 — one chassis-type DDM entry (mirrors backend schemas/chassis.py ChassisModelOut).
+export interface ChassisModel {
+  id: number
+  code: string
+  make: string
+  model: string
+  category?: string | null
+  max_payload_kg?: number | null
 }
 
 export interface ChassisRecordDetail extends ChassisRecord {
@@ -46,10 +58,21 @@ export interface ChassisRecordDetail extends ChassisRecord {
 }
 
 export const CHASSIS_STATUS_STYLE: Record<string, string> = {
+  expected: 'bg-primary-light/60 text-primary',          // WO v4.34 §0.3 — pipeline placeholder (no VIN yet)
+  expected_orphaned: 'bg-status-red/15 text-status-red',  // §0.6 — auto-created then released (reject)
   received: 'bg-status-amber/15 text-status-amber',
   in_workshop: 'bg-primary-light text-primary',
   in_assembly: 'bg-status-green/15 text-status-green',   // WO v4.31 — on an assembly bay
   dispatched: 'bg-status-green/15 text-status-green',
+}
+
+// WO v4.34 §0.4 — provenance pill: how a chassis row was created. Falls back to the raw token
+// when an unknown created_via appears (legacy rows carry source instead).
+export const CHASSIS_PROVENANCE: Record<string, { label: string; style: string }> = {
+  pre_job_card:       { label: 'Auto · Pre-Job', style: 'bg-primary-light/60 text-primary' },
+  planning_job_create:{ label: 'Auto · Planning', style: 'bg-primary-light/60 text-primary' },
+  manual_chassis_menu:{ label: 'Manual', style: 'bg-surface-alt text-body' },
+  legacy_import_v4_28:{ label: 'Imported', style: 'bg-surface-alt text-muted' },
 }
 
 // WO v4.31 §0.3 — a parking or assembly bay (mirrors backend schemas/chassis.py BayOut).

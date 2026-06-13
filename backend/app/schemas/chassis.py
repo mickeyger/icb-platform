@@ -36,7 +36,7 @@ class ChassisEventOut(BaseModel):
 class ChassisRecordOut(BaseModel):                # list item
     model_config = ConfigDict(from_attributes=True)
     id: int
-    vin: str
+    vin: Optional[str] = None                     # WO v4.34 §0.3 — NULL until receive ('expected' pipeline rows)
     job_number: Optional[str] = None
     customer_name: Optional[str] = None
     make: Optional[str] = None
@@ -44,6 +44,8 @@ class ChassisRecordOut(BaseModel):                # list item
     status: str
     current_assembly_bay_id: Optional[int] = None  # WO v4.31 §0.12 — DERIVED (latest assembly_assigned event), not a column
     source: str
+    created_via: Optional[str] = None             # WO v4.34 §0.4 — provenance pill (pre_job_card | planning_job_create | manual_chassis_menu | legacy_import_v4_28)
+    created_source_ref: Optional[str] = None      # e.g. "A32744/06/2026" or "Planning · Job 32791"
     event_count: int = 0
     latest_event_date: Optional[date] = None
 
@@ -81,6 +83,18 @@ class ChassisRecordUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+
+class ChassisModelOut(BaseModel):
+    """WO v4.34 §3.7 — one chassis-type DDM entry feeding the make/model dropdowns (Planning ack,
+    Pre-Job Card, Chassis +New/edit). Read-only in v4.34; admin CRUD is v4.35."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    code: str
+    make: str
+    model: str
+    category: Optional[str] = None
+    max_payload_kg: Optional[int] = None
 
 
 class ChassisEventCapture(BaseModel):

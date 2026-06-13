@@ -84,6 +84,9 @@ class PlanningAckRequest(BaseModel):
     chassis_model: Optional[str] = None
     customer_dealer: Optional[str] = None
     tail_lift_code: Optional[str] = None
+    # WO v4.34 §0.8 — optional job-number override (SAP-assigned during the parallel run). None
+    # (field absent) keeps the quote-derived value; refused when locked / SAP_RETIRED (§0.9).
+    job_number: Optional[str] = None
     chassis_inhouse_bom: Optional[list] = None
 
 
@@ -118,6 +121,11 @@ class ProductionJobListItem(BaseModel):
     pre_job_signoff_production_at: Optional[datetime] = None
     pre_job_signoff_production_by: Optional[str] = None
     pre_job_confirmed_at: Optional[datetime] = None
+    # WO v4.34 §0.7/§0.9 — job_number is the canonical numeric (above); these carry its provenance,
+    # the post-SAP-retirement lock, and the site flag (set by the list router — same for every row).
+    job_number_source: Optional[str] = None              # quote_derived | sap_assigned | manual
+    job_number_locked: bool = False
+    sap_retired: bool = False
 
 
 class ProductionJobInProgressItem(ProductionJobListItem):
@@ -252,6 +260,8 @@ def to_list_item(job, calc, customer, branch_code=None) -> ProductionJobListItem
         pre_job_signoff_production_at=job.pre_job_signoff_production_at,
         pre_job_signoff_production_by=job.pre_job_signoff_production_by,
         pre_job_confirmed_at=job.pre_job_confirmed_at,
+        job_number_source=job.job_number_source,
+        job_number_locked=bool(job.job_number_locked),
     )
 
 

@@ -96,6 +96,17 @@ def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> lis
     return out
 
 
+def list_chassis_models(db: Session):
+    """WO v4.34 §3.7 — the active chassis-type DDM, ordered for the make/model dropdowns. ONE
+    controlled vocabulary across Planning ack, Pre-Job Card, and Chassis +New/edit (read-only;
+    admin CRUD is v4.35)."""
+    from app.models.mes import ChassisModel
+    return db.execute(
+        select(ChassisModel).where(ChassisModel.is_active.is_(True))
+        .order_by(ChassisModel.sort_order, ChassisModel.make, ChassisModel.model)
+    ).scalars().all()
+
+
 def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
@@ -134,12 +145,38 @@ def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
     if db.execute(select(ChassisRecord.id).where(ChassisRecord.vin == vin)).first():
         raise HTTPException(status_code=409, detail=f"chassis with VIN {vin} already exists")
     rec = ChassisRecord(vin=vin[:32], source="manual", status="received",
+                        created_via="manual_chassis_menu",       # WO v4.34 §0.4 — provenance
                         created_by=who, updated_by=who,
                         **payload.model_dump(exclude={"vin"}, exclude_none=True))
     db.add(rec)
     db.commit()
     db.refresh(rec)
     return rec
+
+
+def create_expected_chassis(db: Session, *, make, vin, body_gap_mm, created_via,
+                            created_source_ref, who, source=None) -> ChassisRecord:
+    """WO v4.34 §0.3/§0.5 — the SINGLE creation point for a pipeline 'expected' chassis, shared by
+    both touchpoints (Pre-Job submit §3.2 + Planning ack §3.3) so the rows are identical by
+    construction. `vin` may be NULL (unknown until receive — NULLs don't collide on
+    uq_chassis_records_vin); `make` is truncated to the column width (64). `created_via` is the
+    canonical provenance (VARCHAR(32)); `source` is the legacy VARCHAR(16) field — a short honest
+    token ('pre_job_card' / 'planning_ack'), defaulting to created_via truncated. FLUSHES, never
+    commits — the caller's transaction owns the commit, keeping the insert atomic with its
+    touchpoint."""
+    chassis = ChassisRecord(
+        vin=((vin or "").strip()[:32] or None),
+        status="expected",
+        source=(source or created_via)[:16],
+        created_via=created_via,
+        created_source_ref=((created_source_ref or "")[:64] or None),
+        make=((make or "").strip()[:64] or None),
+        body_gap_mm=body_gap_mm,
+        created_by=who, updated_by=who,
+    )
+    db.add(chassis)
+    db.flush()                                            # populate id for the caller's FK link
+    return chassis
 
 
 def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRecord:

@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    AssemblyAssignRequest, BayOut, ChassisEventCapture, ChassisEventOut, ChassisPhotoOut,
-    ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
+    AssemblyAssignRequest, BayOut, ChassisEventCapture, ChassisEventOut, ChassisModelOut,
+    ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
 )
 from ..services import chassis as svc
 
@@ -31,6 +31,14 @@ def list_records(q: Optional[str] = Query(None), status: Optional[str] = Query(N
 def checklists(user: User = Depends(require_user)):
     """VCL/DCL checklist templates (DATA, not UI-hard-coded — Workshop-refine placeholder, v4.28)."""
     return svc.CHASSIS_CHECKLIST_TEMPLATES
+
+
+# WO v4.34 §3.7 — literal path, MUST precede the /{record_id} catch-all below (FastAPI matches in
+# declaration order; after it, "models" would 422 as a failed int-parse of record_id).
+@router.get("/models", response_model=List[ChassisModelOut])
+def chassis_models(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """The chassis-type DDM (active rows) feeding the make/model dropdowns. Read-only (admin CRUD v4.35)."""
+    return svc.list_chassis_models(db)
 
 
 @router.get("/bays/assembly", response_model=List[BayOut])

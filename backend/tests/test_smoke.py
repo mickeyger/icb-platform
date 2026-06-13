@@ -90,7 +90,10 @@ def test_mes_schema_tables():
         v433_tables = db.execute(text(
             "select count(*) from information_schema.tables where table_schema='icb_mes' "
             "and table_name in ('prejob_templates','prejob_cards','fridge_units')")).scalar()
-    assert n == 32
+        v434_tables = db.execute(text(
+            "select count(*) from information_schema.tables where table_schema='icb_mes' "
+            "and table_name = 'chassis_models'")).scalar()      # WO v4.34 §3.7 (migration 0021)
+    assert n == 33                                              # +chassis_models (0021)
     assert new_tables == 4
     assert v422_tables == 2
     assert v425_tables == 3
@@ -99,6 +102,7 @@ def test_mes_schema_tables():
     assert v428_tables == 3
     assert v431_tables == 2
     assert v433_tables == 3
+    assert v434_tables == 1
 
 
 def test_legacy_view_exposes_old_shape():

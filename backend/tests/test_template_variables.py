@@ -60,6 +60,42 @@ def test_build_context_from_real_shapes():
         assert int(ctx["external_length"].replace(" ", "")) == int(round(dims["length"] * 1000))
 
 
+# ── §3.6 token fallback: chassis_make_model "Pending — to be confirmed" ──────────
+def test_chassis_make_model_pending_when_empty():
+    from app.services.template_variables import substitute_text
+    # vin keeps "Pending"; chassis_make_model gets its own placeholder (§0.10)
+    assert substitute_text("Chassis: {{chassis_make_model}}", {"chassis_make_model": None}) == \
+        "Chassis: Pending — to be confirmed"
+    assert substitute_text("Chassis: {{chassis_make_model}}", {"chassis_make_model": "  "}) == \
+        "Chassis: Pending — to be confirmed"
+    assert substitute_text("VIN {{vin}}", {"vin": None}) == "VIN Pending"          # unchanged
+    assert substitute_text("Chassis: {{chassis_make_model}}",
+                           {"chassis_make_model": "FAW 28.330"}) == "Chassis: FAW 28.330"  # real value wins
+
+
+def test_build_context_always_sets_chassis_make_model():
+    from types import SimpleNamespace
+    from app.services.template_variables import build_context, substitute_text
+    # card with no make → key PRESENT (not omitted) so it resolves to the placeholder, not the raw token
+    card = SimpleNamespace(vin_number=None, body_description=None, fridge_model=None,
+                           chassis_make_model=None)
+    ctx = build_context(None, card)
+    assert "chassis_make_model" in ctx and ctx["chassis_make_model"] is None
+    assert substitute_text("Chassis: {{chassis_make_model}}", ctx) == "Chassis: Pending — to be confirmed"
+    assert "chassis_make_model" in build_context(None, None)    # even calc-only / no-card renders
+
+
+def test_build_context_chassis_make_model_precedence():
+    from types import SimpleNamespace
+    from app.services.template_variables import build_context
+    card = SimpleNamespace(vin_number=None, body_description=None, fridge_model=None,
+                           chassis_make_model="Card Make")
+    chassis = SimpleNamespace(vin="V1", make="Chassis", model="Make")
+    assert build_context(None, card, chassis=chassis)["chassis_make_model"] == "Chassis Make"  # chassis overrides
+    bare = SimpleNamespace(vin="V1", make=None, model=None)
+    assert build_context(None, card, chassis=bare)["chassis_make_model"] == "Card Make"         # card value kept
+
+
 # ── normalizer ────────────────────────────────────────────────────────────────
 def test_normalize_item_patterns():
     from scripts.normalize_template_tokens import normalize_header, normalize_item_text

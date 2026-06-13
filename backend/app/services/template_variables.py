@@ -8,7 +8,8 @@ Semantics (BA-locked):
   * `{{token}}` placeholders replace from a context dict.
   * Key ABSENT from the context → token left AS-IS (visible in the UI/PDF so a missing
     binding is spottable, never silently blanked).
-  * Key present but value None/empty → "Pending" for {{vin}}, blank otherwise.
+  * Key present but value None/empty → a per-token placeholder ("Pending" for {{vin}},
+    "Pending — to be confirmed" for {{chassis_make_model}} — §0.10), blank otherwise.
   * Lengths format as `5 400` (space-separated thousands — the existing template
     convention); the unit suffix lives in the template text (`{{external_length}}mm`).
 
@@ -18,7 +19,7 @@ Token vocabulary (8 core + 3 fridge bonus):
       the REAL source is dimensions_json {length, width, height} in METRES -> ×1000)
   fridge_make            <- prejob_cards.fridge_model (the DDM display_name)
   vin                    <- chassis vin ("Pending" when unknown)
-  chassis_make_model     <- chassis make/model
+  chassis_make_model     <- chassis make/model ("Pending — to be confirmed" when unknown)
   customer_name          <- the costing's customer
   body_description       <- template/card body description
   fridge_drawing / fridge_cutout_width / fridge_cutout_height  <- fridge_units row
@@ -31,7 +32,13 @@ import re
 from typing import Any, Optional
 
 _TOKEN_RE = re.compile(r"\{\{\s*([a-z_]+)\s*\}\}")
-_PENDING_TOKENS = {"vin"}                                  # empty -> "Pending"
+# WO v4.34 §0.10 — tokens whose empty value renders as a per-token "pending" placeholder (not
+# blank). chassis_make_model joins vin so an as-yet-unknown chassis reads as a clear status rather
+# than an empty gap; each maps to its own copy. Everything not listed still blanks when empty.
+_PENDING_TOKENS = {
+    "vin": "Pending",
+    "chassis_make_model": "Pending — to be confirmed",
+}
 
 
 def format_mm(value: Any) -> str:
@@ -54,7 +61,7 @@ def substitute_text(text: str, context: dict) -> str:
             return m.group(0)                              # absent -> leave visible
         val = context[key]
         if val is None or str(val).strip() == "":
-            return "Pending" if key in _PENDING_TOKENS else ""
+            return _PENDING_TOKENS.get(key, "")            # per-token placeholder, else blank
         return str(val)
     return _TOKEN_RE.sub(_repl, text or "")
 
@@ -98,8 +105,7 @@ def build_context(db, card, calc=None, chassis=None,
             ctx["body_description"] = card.body_description
         if card.fridge_model:
             ctx["fridge_make"] = card.fridge_model
-        if card.chassis_make_model:
-            ctx["chassis_make_model"] = card.chassis_make_model
+        ctx["chassis_make_model"] = card.chassis_make_model   # §0.10 — None -> "Pending — to be confirmed"
     if chassis is not None:
         ctx.setdefault("vin", chassis.vin)
         mm = " ".join(x for x in (chassis.make, chassis.model) if x)
@@ -113,4 +119,7 @@ def build_context(db, card, calc=None, chassis=None,
             ctx["fridge_cutout_width"] = format_mm(fridge.cutout_width_mm)
         if fridge.cutout_height_mm is not None:
             ctx["fridge_cutout_height"] = format_mm(fridge.cutout_height_mm)
+    # WO v4.34 §3.6 — chassis_make_model is ALWAYS present (even with no card / no chassis make),
+    # so an unknown chassis reads "Pending — to be confirmed" rather than leaving the raw token.
+    ctx.setdefault("chassis_make_model", None)
     return ctx

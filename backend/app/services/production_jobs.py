@@ -8,6 +8,7 @@ explicitly via `get_with_costing` / `list_jobs` (the §3.4 pattern).
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -65,7 +66,22 @@ def _to_dt(d: Optional[date]) -> Optional[datetime]:
 
 
 def _job_number_from_quote(quote_number: Optional[str]) -> Optional[str]:
-    return quote_number.split("-")[-1] if quote_number else None
+    """WO v4.34 §0.7 — the NUMERIC core of the quote (A32744/06/2026 → 32744; legacy Q-32891 →
+    32891): the first run of digits, after any letter prefix and before the /MM/YYYY. UNIQUE was
+    dropped in migration 0020 (numeric cores collide across letter prefixes; id stays the PK)."""
+    if not quote_number:
+        return None
+    m = re.search(r"\d+", quote_number)
+    return m.group(0) if m else None
+
+
+def sap_retired(db: Session) -> bool:
+    """WO v4.34 §0.9 — the site-level SAP_RETIRED flag (icb_costings.admin_settings, seeded FALSE
+    by 0020). When TRUE, new jobs lock their quote-derived job_number and the Planning-ack override
+    is refused (and hidden). The admin UI to flip it is v4.35."""
+    from app.database import AdminSetting
+    row = db.query(AdminSetting).filter_by(key="SAP_RETIRED").first()
+    return bool(row and str(row.value).strip().lower() in ("true", "1", "yes"))
 
 
 def _resolve_branch_id(db: Session, calc, fallback_branch_id: Optional[int]) -> Optional[int]:
@@ -168,7 +184,9 @@ def accept_calculation(db: Session, calculation_id: int, user,
     job = ProductionJob(
         calculation_record_id=calc.id,
         branch_id=branch_id,
-        job_number=_job_number_from_quote(calc.quote_number),
+        job_number=_job_number_from_quote(calc.quote_number),   # §0.7 — numeric core
+        job_number_source="quote_derived",
+        job_number_locked=sap_retired(db),                      # §0.9 — lock once SAP is retired
         status="accepted",
         accepted_at=_now(),
     )
@@ -186,14 +204,17 @@ def accept_calculation(db: Session, calculation_id: int, user,
     return get_with_costing(db, job.id), True
 
 
-def send_pre_job_card(db: Session, job_id: int, user) -> JobRow:
+def send_pre_job_card(db: Session, job_id: int, user, commit: bool = True) -> JobRow:
+    # commit=False lets a caller fold this transition into a larger single transaction (WO v4.34
+    # §3.2: the Pre-Job submit owns one commit covering card flip + job transition + chassis insert
+    # atomically). The standalone router path keeps commit=True.
     job, calc, _, _ = get_with_costing(db, job_id)
     if calc.is_repair:
         raise RepairQuoteCannotSendPreJobError(
             f"job {job_id} is a repair quote; repairs skip the pre-job card")
     job.pre_job_sent_at = _now()
     job.status = "pre_job_sent"
-    db.commit()
+    db.commit() if commit else db.flush()
     return get_with_costing(db, job_id)
 
 
@@ -218,12 +239,58 @@ def record_signoff(db: Session, job_id: int, role: str, attestation: str, user) 
     return get_with_costing(db, job_id)
 
 
+def _planning_ref(job: ProductionJob) -> str:
+    """§0.4 — the originating reference for a Planning-created chassis: the job number when set,
+    else a stable id form (workbook jobs may carry no job_number)."""
+    return f"Planning · Job {job.job_number}" if job.job_number else f"Planning · job {job.id}"
+
+
+def _auto_create_chassis_at_ack(db: Session, job: ProductionJob,
+                                chassis_data: Optional[dict], who) -> None:
+    """WO v4.34 §3.3 (§0.5b) — at Planning ack, anchor the pipeline chassis from the chassis MODEL
+    captured in the ack, IF the job isn't already linked. A card-driven job is already linked via
+    §3.2's card+job cross-link, so this no-ops for the common path; it covers jobs that reached
+    Planning WITHOUT a Pre-Job-Card chassis (workbook imports, or a card with no make/model).
+
+    Mirrors §3.2's 'same INSERT pattern' exactly: status='expected', vin=NULL — the VIN is unknown
+    on the chassis row until VCL receive even when the planner typed one at ack (that value is
+    preserved in job.chassis_data_json and becomes authoritative on the row at VCL). Keeping vin
+    NULL here is deliberate: it avoids any uq_chassis_records_vin collision AND the cross-job
+    aliasing a VIN-adopt would risk (a VIN can already anchor another job). Runs inside
+    record_planning_ack's transaction (atomic with the ack); the FOR UPDATE lock on the job makes
+    the job-FK guard a true idempotency key under concurrent acks on the same job."""
+    if job.chassis_record_id is not None:
+        return                                            # already linked (§3.2 or a prior ack) — idempotent
+    make = (((chassis_data or {}).get("chassis_model")) or "").strip()
+    if not make:
+        return                                            # no chassis model entered — graceful no-op
+    from app.services.chassis import create_expected_chassis
+    chassis = create_expected_chassis(
+        db, make=make, vin=None,                          # VIN unknown until VCL receive (mirrors §3.2)
+        body_gap_mm=None, created_via="planning_job_create", source="planning_ack",  # source is VARCHAR(16)
+        created_source_ref=_planning_ref(job), who=who)
+    job.chassis_record_id = chassis.id
+
+
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
-                        notes: Optional[str], user, chassis_data: Optional[dict] = None) -> JobRow:
+                        notes: Optional[str], user, chassis_data: Optional[dict] = None,
+                        job_number: Optional[str] = None) -> JobRow:
+    # §3.3 — lock the job row so concurrent acks serialize (the loser re-reads 'planning' and 422s
+    # before the chassis auto-create); makes the job-FK idempotency guard race-safe.
+    db.execute(select(ProductionJob).where(ProductionJob.id == job_id).with_for_update())
     job, _, _, _ = get_with_costing(db, job_id)
     if job.status != "pre_job_confirmed":
         raise WrongStatusForTransitionError(
             f"job {job_id} is '{job.status}'; planning-ack requires 'pre_job_confirmed'")
+    # WO v4.34 §0.8 — optional job-number override (an SAP-assigned number during the parallel run)
+    # → source 'sap_assigned'. Refused when the number is locked or SAP_RETIRED (§0.9 forces
+    # quote-derived); blank or unchanged input keeps the quote-derived value.
+    if job_number is not None:
+        new_jn = job_number.strip()
+        if (new_jn and new_jn != (job.job_number or "")
+                and not job.job_number_locked and not sap_retired(db)):
+            job.job_number = new_jn
+            job.job_number_source = "sap_assigned"
     actor = getattr(user, "username", None)
     now = _now()
     eta_dt = _to_dt(chassis_eta)
@@ -252,6 +319,9 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                 merged = {}
         merged.update({k: v for k, v in chassis_data.items() if v is not None})
         job.chassis_data_json = json.dumps(merged) if merged else None
+    # WO v4.34 §3.3 (§0.5b) — anchor the pipeline chassis from the ack's chassis info (idempotent;
+    # no-op when the job is already linked via §3.2). Inside this transaction → atomic with the ack.
+    _auto_create_chassis_at_ack(db, job, chassis_data, getattr(user, "username", None))
     job.status = "planning"
     db.commit()
     return get_with_costing(db, job_id)
