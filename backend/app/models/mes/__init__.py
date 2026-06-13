@@ -66,6 +66,7 @@ class ProductionJob(Base):
         Index("ix_production_jobs_branch_id", "branch_id"),
         Index("ix_production_jobs_calculation_record_id", "calculation_record_id"),
         Index("ix_production_jobs_chassis_record_id", "chassis_record_id"),   # WO v4.29 (0014)
+        Index("ix_production_jobs_job_number", "job_number"),                 # WO v4.34 (0020)
         {"schema": "icb_mes"},
     )
 
@@ -76,7 +77,13 @@ class ProductionJob(Base):
     calculation_record_id = Column(Integer, nullable=True, unique=True)
     # cross-schema -> icb_costings.branches.id (FK in 0003, RESTRICT); NOT NULL from 0005 (WO v4.16)
     branch_id = Column(Integer, nullable=False)
-    job_number = Column(String(32), unique=True)          # derived from Q-32891 -> 32891
+    # WO v4.34 §0.7 (0020): UNIQUE dropped — job_number is the NUMERIC core of the quote
+    # (A32744/06/2026 -> 32744). Numeric cores collide across letter prefixes, so id stays the
+    # true PK; non-unique ix_production_jobs_job_number (declared in __table_args__).
+    job_number = Column(String(32))
+    job_number_source = Column(String(16))                # quote_derived | sap_assigned | manual
+    job_number_locked = Column(Boolean, nullable=False,   # §0.9 — TRUE locks override post-SAP-retirement
+                               server_default=sa_text("false"), default=False)
     status = Column(String(24), nullable=False, default="accepted")
     # accepted | pre_job_sent | pre_job_confirmed | planning | in_production | completed
     accepted_at = Column(DateTime(timezone=True))         # NEW (spec); no source column in calculations
@@ -688,7 +695,9 @@ class ChassisRecord(Base):
         {"schema": "icb_mes"},
     )
     id = Column(Integer, primary_key=True)
-    vin = Column(String(32), nullable=False)               # vehicle_id_no (VIN anchor; UNIQUE)
+    # WO v4.34 §0.3 (0020): VIN nullable — unknown until receive ('expected' chassis carry NULL).
+    # uq_chassis_records_vin stays; Postgres keeps NULLs out of the unique index natively.
+    vin = Column(String(32))                               # vehicle_id_no (VIN anchor; UNIQUE when set)
     job_number = Column(String(32))                        # soft link (text; no FK — register provenance)
     customer_name = Column(String(128))
     contact_person = Column(String(128))
@@ -697,9 +706,10 @@ class ChassisRecord(Base):
     model = Column(String(64))
     description = Column(String(255))
     status = Column(String(24), nullable=False, default="received", server_default="received")
-    # received | in_workshop | in_assembly | dispatched | returned (denormalised from the latest
-    # event; 'in_assembly' added WO v4.31 §0.12 — values-in-comments only, NO bay column here:
-    # "which bay" is derived from the latest 'assembly_assigned' lifecycle event.
+    # received | in_workshop | in_assembly | dispatched | returned | expected | expected_orphaned
+    # (denormalised from the latest event; 'in_assembly' WO v4.31 §0.12; 'expected' +
+    # 'expected_orphaned' WO v4.34 §0.3 for the pipeline — values-in-comments only, NO bay column
+    # here: "which bay" is derived from the latest 'assembly_assigned' lifecycle event.
     # WO v4.33 §0.8 (migration 0017): the customer's specified cab-to-body gap. Captured from the
     # quote when known; Simeon enters/verifies it during the chassis VCL (the VCL checklist's
     # body_gap_mm field write-through in services/chassis.capture_event). Pre-Job Cards
@@ -709,6 +719,9 @@ class ChassisRecord(Base):
     source = Column(String(16), nullable=False, default="register", server_default="register")  # register | vcl_form
     source_register_id = Column(Integer)                   # originating chassis_register.id (traceability)
     notes = Column(Text)
+    # WO v4.34 §0.4 (0020) — pipeline provenance: how + whence this row was created.
+    created_via = Column(String(32))                       # pre_job_card | planning_job_create | manual_chassis_menu | legacy_import_v4_28
+    created_source_ref = Column(String(64))                # e.g. "A32744/06/2026" or "Planning · Job 32791"
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     created_by = Column(String(128))
@@ -857,6 +870,7 @@ class PrejobCard(Base):
     __table_args__ = (
         Index("ix_prejob_cards_calculation", "calculation_id"),
         Index("ix_prejob_cards_status", "status"),
+        Index("ix_prejob_cards_chassis_record_id", "chassis_record_id"),   # WO v4.34 (0020)
         {"schema": "icb_mes"},
     )
     id = Column(Integer, primary_key=True)
@@ -868,6 +882,9 @@ class PrejobCard(Base):
     chassis_make_model = Column(String(128))
     vin_number = Column(String(64))                        # nullable until chassis VCL (or TBD for complete-build trailers)
     body_gap_mm = Column(Integer)                          # §0.8 — from quote spec / chassis VCL
+    # WO v4.34 §0.5 (0020) — direct FK to the auto-created/linked chassis (ON DELETE SET NULL).
+    # Supersedes the indirect card→job→chassis path as the pipeline single source of truth.
+    chassis_record_id = Column(Integer)
     body_gap_pending = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
     sections = Column(JSONB, nullable=False)               # mutated copy of template.sections (§0.5 shape)
     fridge_ordering_mode = Column(String(24))              # icb_orders | customer_supplies | none
