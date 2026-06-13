@@ -8,6 +8,7 @@ explicitly via `get_with_costing` / `list_jobs` (the §3.4 pattern).
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -65,7 +66,22 @@ def _to_dt(d: Optional[date]) -> Optional[datetime]:
 
 
 def _job_number_from_quote(quote_number: Optional[str]) -> Optional[str]:
-    return quote_number.split("-")[-1] if quote_number else None
+    """WO v4.34 §0.7 — the NUMERIC core of the quote (A32744/06/2026 → 32744; legacy Q-32891 →
+    32891): the first run of digits, after any letter prefix and before the /MM/YYYY. UNIQUE was
+    dropped in migration 0020 (numeric cores collide across letter prefixes; id stays the PK)."""
+    if not quote_number:
+        return None
+    m = re.search(r"\d+", quote_number)
+    return m.group(0) if m else None
+
+
+def sap_retired(db: Session) -> bool:
+    """WO v4.34 §0.9 — the site-level SAP_RETIRED flag (icb_costings.admin_settings, seeded FALSE
+    by 0020). When TRUE, new jobs lock their quote-derived job_number and the Planning-ack override
+    is refused (and hidden). The admin UI to flip it is v4.35."""
+    from app.database import AdminSetting
+    row = db.query(AdminSetting).filter_by(key="SAP_RETIRED").first()
+    return bool(row and str(row.value).strip().lower() in ("true", "1", "yes"))
 
 
 def _resolve_branch_id(db: Session, calc, fallback_branch_id: Optional[int]) -> Optional[int]:
@@ -168,7 +184,9 @@ def accept_calculation(db: Session, calculation_id: int, user,
     job = ProductionJob(
         calculation_record_id=calc.id,
         branch_id=branch_id,
-        job_number=_job_number_from_quote(calc.quote_number),
+        job_number=_job_number_from_quote(calc.quote_number),   # §0.7 — numeric core
+        job_number_source="quote_derived",
+        job_number_locked=sap_retired(db),                      # §0.9 — lock once SAP is retired
         status="accepted",
         accepted_at=_now(),
     )
@@ -255,7 +273,8 @@ def _auto_create_chassis_at_ack(db: Session, job: ProductionJob,
 
 
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
-                        notes: Optional[str], user, chassis_data: Optional[dict] = None) -> JobRow:
+                        notes: Optional[str], user, chassis_data: Optional[dict] = None,
+                        job_number: Optional[str] = None) -> JobRow:
     # §3.3 — lock the job row so concurrent acks serialize (the loser re-reads 'planning' and 422s
     # before the chassis auto-create); makes the job-FK idempotency guard race-safe.
     db.execute(select(ProductionJob).where(ProductionJob.id == job_id).with_for_update())
@@ -263,6 +282,15 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
     if job.status != "pre_job_confirmed":
         raise WrongStatusForTransitionError(
             f"job {job_id} is '{job.status}'; planning-ack requires 'pre_job_confirmed'")
+    # WO v4.34 §0.8 — optional job-number override (an SAP-assigned number during the parallel run)
+    # → source 'sap_assigned'. Refused when the number is locked or SAP_RETIRED (§0.9 forces
+    # quote-derived); blank or unchanged input keeps the quote-derived value.
+    if job_number is not None:
+        new_jn = job_number.strip()
+        if (new_jn and new_jn != (job.job_number or "")
+                and not job.job_number_locked and not sap_retired(db)):
+            job.job_number = new_jn
+            job.job_number_source = "sap_assigned"
     actor = getattr(user, "username", None)
     now = _now()
     eta_dt = _to_dt(chassis_eta)

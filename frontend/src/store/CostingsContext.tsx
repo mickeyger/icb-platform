@@ -62,6 +62,7 @@ export interface ChassisEtaPayload {
   customer_dealer?: string
   tail_lift_code?: string
   chassis_inhouse_bom?: { category: string; description: string; item_code: string }[]
+  job_number?: string                        // WO v4.34 §0.8 — Planning-ack override (SAP-assigned)
 }
 
 export interface ChassisCatalogue {
@@ -83,6 +84,10 @@ interface ApiProductionJob {
   pre_job_signoff_production_at?: string | null
   pre_job_signoff_production_by?: string | null
   pre_job_confirmed_at?: string | null
+  // WO v4.34 §0.7/§0.9 — the canonical numeric job_number's provenance + lock + site flag.
+  job_number_source?: string | null
+  job_number_locked?: boolean
+  sap_retired?: boolean
 }
 
 const CostingsContext = createContext<CostingsValue | null>(null)
@@ -106,7 +111,10 @@ function mergeProductionJob(c: Costing, pj?: ApiProductionJob): Costing {
     ...c,
     production_job_id: pj.id,
     status: (pj.mes_status as StatusName) || c.status,
-    job_number_assigned: pj.job_number ?? c.job_number_assigned,
+    job_number_assigned: pj.job_number ?? c.job_number_assigned,   // mirrors the canonical numeric (§0.7)
+    job_number_source: pj.job_number_source ?? c.job_number_source,
+    job_number_locked: pj.job_number_locked ?? c.job_number_locked,
+    sap_retired: pj.sap_retired ?? c.sap_retired,
     // WO v4.29 — surface the pj's sign-off state (the source of truth) so each box reflects signed +
     // timestamp immediately, not only once BOTH are in.
     pre_job_signoff_sales_at: pj.pre_job_signoff_sales_at ?? c.pre_job_signoff_sales_at,
@@ -366,6 +374,7 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
           customer_dealer: payload?.customer_dealer,
           tail_lift_code: payload?.tail_lift_code,
           chassis_inhouse_bom: payload?.chassis_inhouse_bom,
+          job_number: payload?.job_number,             // §0.8 — override (backend ignores if unchanged/locked/retired)
         })
         return
       }

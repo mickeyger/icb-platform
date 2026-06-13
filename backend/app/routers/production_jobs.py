@@ -48,7 +48,11 @@ def list_production_jobs(
     eff_branch = branch_id if branch_id is not None else (branch.id if branch is not None else None)
     rows = svc.list_jobs(db, status=statuses, branch_id=eff_branch,
                          accepted_since=accepted_since, limit=limit, offset=offset)
-    return [to_list_item(job, calc, customer, bc) for (job, calc, customer, bc) in rows]
+    retired = svc.sap_retired(db)                        # WO v4.34 §0.9 — site flag, computed once
+    items = [to_list_item(job, calc, customer, bc) for (job, calc, customer, bc) in rows]
+    for it in items:
+        it.sap_retired = retired
+    return items
 
 
 # WO v4.32 §0.4 — the two dashboard aggregations. Both are literal paths and MUST be declared
@@ -186,7 +190,8 @@ def planning_ack(
     }
     try:
         return _detail(svc.record_planning_ack(
-            db, job_id, body.chassis_eta, body.notes, user, chassis_data=chassis_data))
+            db, job_id, body.chassis_eta, body.notes, user, chassis_data=chassis_data,
+            job_number=body.job_number))
     except svc.NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except svc.WrongStatusForTransitionError as e:

@@ -43,6 +43,7 @@ export function PlanningAckPanel({
       customer_dealer: cd.customer_dealer ?? '',
       tail_lift_code: cd.tail_lift_code ?? '',
       chassis_inhouse_bom: cd.chassis_inhouse_bom ?? [],
+      job_number: costing.job_number_assigned ?? '',     // WO v4.34 §0.8 — pre-fill the override with the current number
     }
   }, [costing])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
@@ -155,6 +156,19 @@ export function PlanningAckPanel({
               This job is awaiting acknowledgement by the Planning team before it can be scheduled.
               You are signed in as <strong>{profile.name}</strong> ({profile.role}).
             </p>
+            {/* WO v4.34 §0.8 — job-number override (SAP-assigned during the parallel run); hidden
+                once SAP_RETIRED or the number is locked (§0.9 forces the quote-derived value). */}
+            {canAck && !costing.sap_retired && !costing.job_number_locked && (
+              <label className="mb-2 block text-xs text-muted">
+                Job number <span className="text-[10px]">(edit only to record an SAP-assigned number)</span>
+                <input
+                  data-testid="planning-ack-job-number"
+                  value={form.job_number ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, job_number: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body"
+                />
+              </label>
+            )}
             <Tooltip k="planning_board.acknowledge_receipt_button" placement="top">
               {canAck ? (
                 <button
