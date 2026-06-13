@@ -7,6 +7,7 @@ import { Tooltip } from '../../components/ui/Tooltip'
 import { useAppData } from '../../store/AppDataContext'
 import { useCostings, type ChassisCatalogue, type ChassisEtaPayload } from '../../store/CostingsContext'
 import { data as mockData } from '../../data/mockData'
+import { ChassisModelSelect } from '../Chassis/ChassisModelSelect'
 import { zar, dmy, hhmm } from '../../lib/format'
 import type { Costing } from '../../data/costingsData'
 
@@ -298,8 +299,7 @@ function ChassisExternalSection({
   setForm: React.Dispatch<React.SetStateAction<ChassisEtaPayload>>
   canEdit: boolean
 }) {
-  // Real-world catalogues from icb_mock_data.json (Hino/Isuzu/MAN/Volvo + Dhollandia).
-  const chassisModels = mockData.chassis_models
+  // Real-world tail-lift catalogue from icb_mock_data.json; chassis types now come from the DDM (§3.7).
   const tailLifts = mockData.tail_lifts
 
   return (
@@ -312,17 +312,10 @@ function ChassisExternalSection({
         <div className="space-y-2">
           <label className="block text-xs">
             <span className="font-semibold text-muted">Chassis type</span>
-            <select
-              value={form.chassis_model ?? ''}
-              disabled={!canEdit}
-              onChange={(e) => setForm((f) => ({ ...f, chassis_model: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm disabled:bg-surface-alt"
-            >
-              <option value="">— select —</option>
-              {chassisModels.map((c) => (
-                <option key={c.code} value={c.code}>{c.make} {c.model}</option>
-              ))}
-            </select>
+            {/* WO v4.34 §3.7 — the chassis-type DDM (was the hardcoded icb_mock_data list); stores the
+                display string so it agrees with the Pre-Job Card + Chassis surfaces. */}
+            <ChassisModelSelect testid="planning-ack-chassis-model" value={form.chassis_model}
+              disabled={!canEdit} onChange={(v) => setForm((f) => ({ ...f, chassis_model: v }))} />
             <span className="mt-1 block text-[10px] text-muted">Pre-filled from the costing; override if the customer has changed their mind.</span>
           </label>
 
