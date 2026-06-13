@@ -221,8 +221,44 @@ def record_signoff(db: Session, job_id: int, role: str, attestation: str, user) 
     return get_with_costing(db, job_id)
 
 
+def _planning_ref(job: ProductionJob) -> str:
+    """§0.4 — the originating reference for a Planning-created chassis: the job number when set,
+    else a stable id form (workbook jobs may carry no job_number)."""
+    return f"Planning · Job {job.job_number}" if job.job_number else f"Planning · job {job.id}"
+
+
+def _auto_create_chassis_at_ack(db: Session, job: ProductionJob,
+                                chassis_data: Optional[dict], who) -> None:
+    """WO v4.34 §3.3 (§0.5b) — at Planning ack, anchor the pipeline chassis from the chassis MODEL
+    captured in the ack, IF the job isn't already linked. A card-driven job is already linked via
+    §3.2's card+job cross-link, so this no-ops for the common path; it covers jobs that reached
+    Planning WITHOUT a Pre-Job-Card chassis (workbook imports, or a card with no make/model).
+
+    Mirrors §3.2's 'same INSERT pattern' exactly: status='expected', vin=NULL — the VIN is unknown
+    on the chassis row until VCL receive even when the planner typed one at ack (that value is
+    preserved in job.chassis_data_json and becomes authoritative on the row at VCL). Keeping vin
+    NULL here is deliberate: it avoids any uq_chassis_records_vin collision AND the cross-job
+    aliasing a VIN-adopt would risk (a VIN can already anchor another job). Runs inside
+    record_planning_ack's transaction (atomic with the ack); the FOR UPDATE lock on the job makes
+    the job-FK guard a true idempotency key under concurrent acks on the same job."""
+    if job.chassis_record_id is not None:
+        return                                            # already linked (§3.2 or a prior ack) — idempotent
+    make = (((chassis_data or {}).get("chassis_model")) or "").strip()
+    if not make:
+        return                                            # no chassis model entered — graceful no-op
+    from app.services.chassis import create_expected_chassis
+    chassis = create_expected_chassis(
+        db, make=make, vin=None,                          # VIN unknown until VCL receive (mirrors §3.2)
+        body_gap_mm=None, created_via="planning_job_create", source="planning_ack",  # source is VARCHAR(16)
+        created_source_ref=_planning_ref(job), who=who)
+    job.chassis_record_id = chassis.id
+
+
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                         notes: Optional[str], user, chassis_data: Optional[dict] = None) -> JobRow:
+    # §3.3 — lock the job row so concurrent acks serialize (the loser re-reads 'planning' and 422s
+    # before the chassis auto-create); makes the job-FK idempotency guard race-safe.
+    db.execute(select(ProductionJob).where(ProductionJob.id == job_id).with_for_update())
     job, _, _, _ = get_with_costing(db, job_id)
     if job.status != "pre_job_confirmed":
         raise WrongStatusForTransitionError(
@@ -255,6 +291,9 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                 merged = {}
         merged.update({k: v for k, v in chassis_data.items() if v is not None})
         job.chassis_data_json = json.dumps(merged) if merged else None
+    # WO v4.34 §3.3 (§0.5b) — anchor the pipeline chassis from the ack's chassis info (idempotent;
+    # no-op when the job is already linked via §3.2). Inside this transaction → atomic with the ack.
+    _auto_create_chassis_at_ack(db, job, chassis_data, getattr(user, "username", None))
     job.status = "planning"
     db.commit()
     return get_with_costing(db, job_id)

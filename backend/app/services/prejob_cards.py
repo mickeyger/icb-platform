@@ -133,19 +133,11 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
         card.chassis_record_id = existing.id
         return
     calc = db.get(CalculationRecord, card.calculation_id)
-    who = getattr(user, "username", None)
-    chassis = ChassisRecord(
-        vin=None,                                          # §3.2 case 3 — unknown until VCL receive (NULLs don't collide)
-        status="expected",
-        source="pre_job_card",                             # honest provenance (matches created_via; §0.4)
-        created_via="pre_job_card",
-        created_source_ref=_source_ref(calc, card),
-        make=make_model,                                   # whole free-text string (≤64); model-split is lossy, VCL fills later
-        body_gap_mm=card.body_gap_mm,
-        created_by=who, updated_by=who,
-    )
-    db.add(chassis)
-    db.flush()                                             # populate chassis.id before linking
+    from app.services.chassis import create_expected_chassis
+    chassis = create_expected_chassis(                     # §0.5 shared insert (identical at §3.3)
+        db, make=make_model, vin=None,                     # §3.2 case 3 — VIN unknown until VCL receive
+        body_gap_mm=card.body_gap_mm, created_via="pre_job_card",
+        created_source_ref=_source_ref(calc, card), who=getattr(user, "username", None))
     card.chassis_record_id = chassis.id
     if job is not None and job.chassis_record_id is None:
         job.chassis_record_id = chassis.id                 # keep card↔job↔chassis consistent (blocks §3.3 dup)

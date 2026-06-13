@@ -716,7 +716,7 @@ class ChassisRecord(Base):
     # pre-populate from here and render "Pending — awaiting chassis VCL" while NULL.
     body_gap_mm = Column(Integer)
     submit_status = Column(String(32))                    # legacy register value
-    source = Column(String(16), nullable=False, default="register", server_default="register")  # register | vcl_form | manual | pre_job_card (WO v4.34 §3.2)
+    source = Column(String(16), nullable=False, default="register", server_default="register")  # register | vcl_form | manual | pre_job_card | planning_ack (WO v4.34 §3.2/§3.3)
     source_register_id = Column(Integer)                   # originating chassis_register.id (traceability)
     notes = Column(Text)
     # WO v4.34 §0.4 (0020) — pipeline provenance: how + whence this row was created.
