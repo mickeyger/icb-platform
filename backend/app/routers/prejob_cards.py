@@ -13,8 +13,8 @@ from ..database import CalculationRecord, Customer, User, get_db
 from ..deps import require_permission, require_user
 from ..models.mes import PrejobCard, PrejobTemplate
 from ..schemas.prejob import (
-    PrejobCardCreate, PrejobCardOut, PrejobCardUpdate, RejectRequest, SignOffRequest,
-    SubmitForCheck, TemplateOption, UserOption,
+    PrejobCardCreate, PrejobCardOut, PrejobCardSummary, PrejobCardUpdate, RejectRequest,
+    SignOffRequest, SubmitForCheck, TemplateOption, UserOption,
 )
 from ..services import prejob_cards as svc
 
@@ -68,6 +68,14 @@ def fridge_options(db: Session = Depends(get_db), user: User = Depends(require_u
              "display_name": f.display_name, "mounting_drawing": f.mounting_drawing,
              "cutout_width_mm": f.cutout_width_mm, "cutout_height_mm": f.cutout_height_mm}
             for f in rows]
+
+
+@router.get("/summaries", response_model=List[PrejobCardSummary])
+def card_summaries(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """§0.21 — per-calculation card summaries so the costings list surfaces (dashboard +
+    Planning ack) supersede the legacy job-level sign-off widgets in bulk. Declared BEFORE
+    /{card_id} so the static path wins the route match."""
+    return svc.list_card_summaries(db)
 
 
 @router.get("/by-calculation/{calculation_id}", response_model=Optional[PrejobCardOut])

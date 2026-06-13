@@ -291,7 +291,9 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                         job pending
                       </span>
                     )}
-                    {c.status === 'Pre-Job Sent' && (
+                    {c.status === 'Pre-Job Sent' && !c.prejob_card && (
+                      // §0.21 — the legacy bottleneck dot reads job-level signoff columns the
+                      // new flow never writes; suppress it once a Pre-Job Card supersedes them.
                       <BottleneckIndicator
                         salesAt={c.pre_job_signoff_sales_at ?? null}
                         productionAt={c.pre_job_signoff_production_at ?? null}

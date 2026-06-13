@@ -148,3 +148,18 @@ class PrejobCardOut(BaseModel):
     sales_rep_username: Optional[str] = None
     planner_username: Optional[str] = None
     created_by_username: Optional[str] = None
+
+
+class PrejobCardSummary(BaseModel):
+    """§0.21 — the per-calculation card state the costings LIST surfaces need to supersede the
+    legacy job-level sign-off widgets in bulk (dashboard bottleneck gate, Planning ack
+    provenance, the detail status panel). Keyed by calculation_id on the client."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    calculation_id: int
+    status: str
+    reject_reason: Optional[str] = None
+    sales_rep_signoff_at: Optional[datetime] = None
+    sales_rep_username: Optional[str] = None
+    planner_signoff_at: Optional[datetime] = None
+    planner_username: Optional[str] = None

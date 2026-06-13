@@ -95,6 +95,26 @@ def get_for_calculation(db: Session, calculation_id: int) -> Optional[PrejobCard
                       .order_by(PrejobCard.id.desc())).scalars().first()
 
 
+def list_card_summaries(db: Session) -> list[dict]:
+    """§0.21 — lightweight per-calculation card summaries for the costings LIST surfaces, so
+    the dashboard bottleneck dot + the Planning ack panel can supersede the legacy job-level
+    sign-off widgets in bulk (the detail panel reads the same shape). Two queries, no N+1:
+    all cards, then the signer usernames resolved from one User fetch."""
+    cards = db.execute(select(PrejobCard)).scalars().all()
+    uids = {c.sales_rep_user_id for c in cards} | {c.planner_user_id for c in cards}
+    uids.discard(None)
+    names = {u.id: u.username for u in
+             db.execute(select(User).where(User.id.in_(uids or {0}))).scalars().all()}
+    return [{
+        "id": c.id, "calculation_id": c.calculation_id, "status": c.status,
+        "reject_reason": c.reject_reason,
+        "sales_rep_signoff_at": c.sales_rep_signoff_at,
+        "sales_rep_username": names.get(c.sales_rep_user_id),
+        "planner_signoff_at": c.planner_signoff_at,
+        "planner_username": names.get(c.planner_user_id),
+    } for c in cards]
+
+
 def create_card(db: Session, calculation_id: int, template_id: int, user) -> PrejobCard:
     """Stage A — Internal Sales drafts from a template (§3.4 step 1-2 prefill)."""
     calc = db.get(CalculationRecord, calculation_id)

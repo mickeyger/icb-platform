@@ -130,6 +130,21 @@ export interface Costing {
   // Work Order v4.19 — linked production job id (null = accepted calc with no job
   // yet → the "partial" state that renders a "Retry job creation" button).
   production_job_id?: number | null
+  // WO v4.33 §0.21 — the live Pre-Job Card summary (null/absent = none). When present it
+  // SUPERSEDES the legacy pre_job_signoff_* surfaces (detail status panel, dashboard bottleneck
+  // dot, Planning ack provenance) — the new flow never writes the legacy job-level columns.
+  prejob_card?: PrejobCardSummary | null
+}
+
+export interface PrejobCardSummary {
+  id: number
+  calculation_id: number
+  status: string                 // draft | sent_for_check | pre_job_confirmed (rejected = draft + reason)
+  reject_reason: string | null
+  sales_rep_signoff_at: string | null
+  sales_rep_username: string | null
+  planner_signoff_at: string | null
+  planner_username: string | null
 }
 
 export interface ChassisBomItem {

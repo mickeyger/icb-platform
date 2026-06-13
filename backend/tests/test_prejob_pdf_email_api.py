@@ -122,3 +122,16 @@ def test_cc_recipients_persist_and_reach_mailto(api, card):
     assert e["cc"] == "burt@icb.co.za,nadie@icb.co.za"
     assert e["mailto"].startswith("mailto:?cc=")
     assert "burt%40icb.co.za" in e["mailto"] and "not-an-email" not in e["mailto"]
+
+
+def test_summaries_carries_card_state_for_the_costings_list(api, card):
+    """§0.21 — /summaries feeds the bulk supersede on the costings list surfaces (dashboard +
+    Planning ack + detail panel): the card's calc id, status, and resolved signer usernames."""
+    client, _ = api
+    rows = client.get("/api/prejob-cards/summaries").json()
+    mine = next((r for r in rows if r["id"] == card["id"]), None)
+    assert mine, "summaries must include the created card"
+    assert mine["calculation_id"] == card["calculation_id"]
+    assert mine["status"] == "draft"
+    assert mine["sales_rep_username"] == "admin" and mine["planner_username"] == "admin"
+    assert mine["sales_rep_signoff_at"] is None and mine["planner_signoff_at"] is None

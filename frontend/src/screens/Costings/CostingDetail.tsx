@@ -26,19 +26,8 @@ import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
 import { PreJobSignoffModal } from './PreJobSignoffModal'
 import { BottleneckIndicator } from './BottleneckIndicator'
-import type { Costing } from '../../data/costingsData'
+import type { Costing, PrejobCardSummary } from '../../data/costingsData'
 import type { Status } from '../../data/types'
-
-// WO v4.33 §0.21 — the new flow's live sign-off state (read from prejob_cards via
-// /by-calculation). When a row exists it SUPERSEDES the legacy production_jobs sign-off
-// widget below: the new flow never writes the legacy sales/production_signoff_at columns
-// ("planner ≠ production"), so the old widget would be both a duplicate surface and
-// permanently un-tickable. One card → one sign-off surface.
-interface PrejobCardStatus {
-  id: number; status: string; reject_reason: string | null
-  sales_rep_signoff_at: string | null; sales_rep_username: string | null
-  planner_signoff_at: string | null; planner_username: string | null
-}
 
 export function CostingDetail() {
   const { quote = '' } = useParams<{ quote: string }>()
@@ -50,28 +39,18 @@ export function CostingDetail() {
   const [repairOpen, setRepairOpen] = useState(false)
   const [signoffRole, setSignoffRole] = useState<'sales' | 'production' | null>(null)
   const [chassisReceivedDate, setChassisReceivedDate] = useState('')
-  const [prejobCard, setPrejobCard] = useState<PrejobCardStatus | null>(null)
 
   const c = costings.find((x) => x.quote_number === decodeURIComponent(quote))
+  // §0.21 — the live Pre-Job Card summary rides on the costing (CostingsContext merges
+  // /api/prejob-cards/summaries into every row). When present it supersedes the legacy
+  // job-level sign-off widget; one card → one sign-off surface across all costings views.
+  const prejobCard = c?.prejob_card ?? null
 
   useEffect(() => {
     if (!toast) return
     const t = setTimeout(() => setToast(''), 2200)
     return () => clearTimeout(t)
   }, [toast])
-
-  // §0.21 — does a Pre-Job Card row exist for this calculation? Live mode only (demo data has
-  // no calc id / API). Re-runs when the costing's status flips (submit → Pre-Job Sent, both
-  // checks → confirmed) so the panel tracks the card without a manual reload.
-  useEffect(() => {
-    const calcId = c?.calculation_id ?? null
-    if (mode !== 'live' || calcId == null) { setPrejobCard(null); return }
-    let cancelled = false
-    apiGet<PrejobCardStatus | null>(`/api/prejob-cards/by-calculation/${calcId}`)
-      .then((card) => { if (!cancelled) setPrejobCard(card) })
-      .catch(() => { if (!cancelled) setPrejobCard(null) })
-    return () => { cancelled = true }
-  }, [mode, c?.calculation_id, c?.status, c?.pre_job_confirmed_at])
 
   if (!c) {
     return (
@@ -413,7 +392,7 @@ export function CostingDetail() {
 // WO v4.33 §0.21 — the new-flow status panel. Reads prejob_cards (the source of truth) and is
 // the SINGLE sign-off surface once a card exists; "View Pre-Job Card" reopens the same modal
 // (read-only when sent/confirmed), and the email/PDF helpers re-run the §0.11/§3.6 routes.
-function PreJobCardStatusPanel({ card, onView }: { card: PrejobCardStatus; onView: () => void }) {
+function PreJobCardStatusPanel({ card, onView }: { card: PrejobCardSummary; onView: () => void }) {
   const rejected = card.status === 'draft' && !!card.reject_reason
   const pill: { s: Status; label: string } =
     card.status === 'pre_job_confirmed' ? { s: 'GREEN', label: 'Pre-Job Confirmed' }
