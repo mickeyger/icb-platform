@@ -45,6 +45,18 @@ the assigned one (Burt signing as planner backup shows Burt + his attestation, n
 a reject resets BOTH sign-offs (the re-submitted card is re-checked by both roles, not just
 the rejector) and prefixes the captured reason with who rejected.
 
+**The UI supersede (the user-facing half — completed pre-merge after a click-test catch):**
+§0.21 said "the old PreJobSignoffModal becomes unreachable for new cards," but that was only
+the server-side column discipline. The legacy sign-off SURFACES still rendered for new cards —
+a duplicate, permanently un-tickable checkbox widget on the Costings detail page, a stale
+"awaiting both" bottleneck dot on the dashboard, and empty "Sales/Production sign-off: —"
+lines on the Planning ack panel — all reading the columns the new flow never writes. The fix
+is one bulk read: `GET /api/prejob-cards/summaries` returns each calculation's card state,
+merged onto every costing as `prejob_card`; the detail panel, the dashboard dot, and the
+Planning provenance all gate on that ONE field. New-flow cards drive a new status panel (status
+pill + Sales Rep / Planner rows from the card); legacy rows with no card keep the old widget.
+One card → one sign-off surface, everywhere.
+
 ### 3. Workflow constraints — one card per costing (service-level, deliberate)
 
 The costing reference is canonical (§0.7 — no Pre-Job Card numbering), and creation 409s if
@@ -156,6 +168,19 @@ Patterns that each bit once and are now pattern-fixed:
     root-caused by staging the page and looking (probe scripts, response listeners), not by
     re-running until green; the page was provably correct throughout — all four bugs were in
     test mechanics or test data.
+17. **Supersede the SURFACES, not just the columns** — §0.21's "never write the legacy
+    columns" rule is only half a supersede; every UI that READS those columns must gate on
+    "does a new card exist?" too. A pre-merge click-test caught three that didn't (the detail
+    widget, the dashboard dot, the Planning ack lines). One bulk summary field (`/summaries` →
+    `prejob_card` on every costing) feeding all three beats per-row fetches and stops the
+    surfaces drifting apart.
+18. **Journey infra: an external `:8001` server must mirror the harness's env** — running the
+    suite against a hand-started server (`MES_BASE` set) requires `MES_DEMO_AUTOLOGIN_USER=admin`
+    AND the server's own origin in `ALLOWED_ORIGINS` (e.g. `http://127.0.0.1:8001`, which is not
+    a default). Miss the origin and autologin 403s → every API 401s → the SPA renders a
+    misleading "costing not found" page that reads as a frontend bug. Diagnosed by capturing the
+    SPA's OWN network status codes (all 401, incl. `/api/session`), not by trusting the rendered
+    symptom — the direct application of ledger item 16.
 
 ## Consequences
 
