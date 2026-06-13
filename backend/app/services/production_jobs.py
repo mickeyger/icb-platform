@@ -186,14 +186,17 @@ def accept_calculation(db: Session, calculation_id: int, user,
     return get_with_costing(db, job.id), True
 
 
-def send_pre_job_card(db: Session, job_id: int, user) -> JobRow:
+def send_pre_job_card(db: Session, job_id: int, user, commit: bool = True) -> JobRow:
+    # commit=False lets a caller fold this transition into a larger single transaction (WO v4.34
+    # §3.2: the Pre-Job submit owns one commit covering card flip + job transition + chassis insert
+    # atomically). The standalone router path keeps commit=True.
     job, calc, _, _ = get_with_costing(db, job_id)
     if calc.is_repair:
         raise RepairQuoteCannotSendPreJobError(
             f"job {job_id} is a repair quote; repairs skip the pre-job card")
     job.pre_job_sent_at = _now()
     job.status = "pre_job_sent"
-    db.commit()
+    db.commit() if commit else db.flush()
     return get_with_costing(db, job_id)
 
 

@@ -36,7 +36,7 @@ class ChassisEventOut(BaseModel):
 class ChassisRecordOut(BaseModel):                # list item
     model_config = ConfigDict(from_attributes=True)
     id: int
-    vin: str
+    vin: Optional[str] = None                     # WO v4.34 §0.3 — NULL until receive ('expected' pipeline rows)
     job_number: Optional[str] = None
     customer_name: Optional[str] = None
     make: Optional[str] = None

@@ -89,6 +89,68 @@ def _chassis_for_job(db: Session, job: Optional[ProductionJob]) -> Optional[Chas
     return db.get(ChassisRecord, job.chassis_record_id)
 
 
+def _source_ref(calc, card: PrejobCard) -> str:
+    """§0.4 — the originating reference stamped on an auto-created chassis: the quote number when
+    known, else a stable card ref (early/repair drafts whose calc has no quote_number)."""
+    return calc.quote_number if (calc and calc.quote_number) else f"card {card.id}"
+
+
+def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
+    """WO v4.34 §3.2 (§0.5a) — at Pre-Job submit, promote the card's chassis info into a
+    chassis_records row (status='expected') so the pipeline has a single source of truth from the
+    earliest capture, not just from VCL onward.
+
+    Idempotent — keyed on `card.chassis_record_id IS NULL` (the LINK, never submission history),
+    so a resubmit-after-reject is a no-op while the link survives. Adopts the production job's
+    existing chassis instead of minting a duplicate; when it DOES create, it links BOTH the card
+    and the job so §3.3's Planning auto-create (which keys on the job FK) can't create a third.
+
+    On a resubmit where the link already exists, an auto-created 'expected' row is kept IN SYNC
+    with later card edits (the reject→fix-make/model→resubmit path); a row that has since been
+    received/VCL'd is left alone (its make/model is then the source of truth). The ADOPT path
+    deliberately does NOT reconcile a divergent make/model — the job's chassis wins by design.
+    Idempotency is only as durable as the card→chassis FK, which is ON DELETE SET NULL: deleting
+    the linked 'expected' row re-arms creation on the next submit (acceptable — a job anchor would
+    block the delete via RESTRICT).
+
+    Concurrency: the caller holds a FOR UPDATE row-lock on the card, so the status guard is a true
+    idempotency key. Runs INSIDE the single submit transaction and is NOT best-effort — a failure
+    propagates so the whole submit rolls back atomically (the chassis is the pipeline foundation,
+    unlike the cosmetic PDF snapshot)."""
+    make_model = (card.chassis_make_model or "").strip()[:64]   # chassis.make is VARCHAR(64); the card field is 128
+    if card.chassis_record_id is not None:
+        ch = db.get(ChassisRecord, card.chassis_record_id)      # sync an auto-created 'expected' row with card edits
+        if ch is not None and ch.created_via == "pre_job_card" and ch.status == "expected":
+            if make_model:
+                ch.make = make_model
+            ch.body_gap_mm = card.body_gap_mm
+        return                                             # already linked — idempotent (sync only, no new row)
+    if not make_model:
+        return                                             # §3.2 case 2 — empty make/model: graceful no-op
+    job = _job_for_calc(db, card.calculation_id)
+    existing = _chassis_for_job(db, job)
+    if existing is not None:                               # §3.2 case A4 — adopt, don't duplicate
+        card.chassis_record_id = existing.id
+        return
+    calc = db.get(CalculationRecord, card.calculation_id)
+    who = getattr(user, "username", None)
+    chassis = ChassisRecord(
+        vin=None,                                          # §3.2 case 3 — unknown until VCL receive (NULLs don't collide)
+        status="expected",
+        source="pre_job_card",                             # honest provenance (matches created_via; §0.4)
+        created_via="pre_job_card",
+        created_source_ref=_source_ref(calc, card),
+        make=make_model,                                   # whole free-text string (≤64); model-split is lossy, VCL fills later
+        body_gap_mm=card.body_gap_mm,
+        created_by=who, updated_by=who,
+    )
+    db.add(chassis)
+    db.flush()                                             # populate chassis.id before linking
+    card.chassis_record_id = chassis.id
+    if job is not None and job.chassis_record_id is None:
+        job.chassis_record_id = chassis.id                 # keep card↔job↔chassis consistent (blocks §3.3 dup)
+
+
 def get_for_calculation(db: Session, calculation_id: int) -> Optional[PrejobCard]:
     return db.execute(select(PrejobCard)
                       .where(PrejobCard.calculation_id == calculation_id)
@@ -223,7 +285,13 @@ def update_card(db: Session, card_id: int, data: dict, user) -> PrejobCard:
 
 def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = False) -> PrejobCard:
     """Stage A→B/C — §0.8 gate + §0.21 legacy status drive."""
-    card = db.get(PrejobCard, card_id)
+    # §3.2 — FOR UPDATE row-lock: under READ COMMITTED a concurrent second submit blocks here,
+    # then re-reads 'sent_for_check' and 409s below before the auto-create runs — so no duplicate
+    # 'expected' chassis (the §0.5 race guard; the VIN unique index is no backstop — NULLs don't
+    # collide). Mirrors the with_for_update() idiom in quote_numbering.py.
+    card = db.execute(
+        select(PrejobCard).where(PrejobCard.id == card_id).with_for_update()
+    ).scalar_one_or_none()
     if card is None:
         raise HTTPException(status_code=404, detail="pre-job card not found")
     if card.status != "draft":
@@ -249,17 +317,21 @@ def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = Fal
         card.pdf_file_id = None
 
     # §0.21 — drive the legacy production_jobs transition so Planning gating keeps working.
+    # commit=False keeps this inside the ONE submit transaction (the db.commit() below owns it),
+    # so the card flip + job transition + chassis insert are atomic — a later failure rolls back
+    # ALL of it (no half-applied 'job sent, no chassis' state). Repair quotes skip the pre-job;
+    # the card still flips. Any OTHER failure propagates → the submit fails cleanly and atomically.
     job = _job_for_calc(db, card.calculation_id)
     if job is not None and job.status in ("accepted",):
         from app.services import production_jobs as pj
         try:
-            pj.send_pre_job_card(db, job.id, user)     # sets pre_job_sent_at + status
-        except Exception:                              # repair quotes 422 etc. — card still flips
-            db.rollback()
-            card = db.get(PrejobCard, card_id)
-            card.status = "sent_for_check"
-            card.sent_for_check_at = _now()
-            card.reject_reason = None
+            pj.send_pre_job_card(db, job.id, user, commit=False)   # sets pre_job_sent_at + status
+        except pj.RepairQuoteCannotSendPreJobError:
+            pass                                       # repairs skip pre-job — card still flips, no job change
+
+    # §3.2 (§0.5a) — auto-create/link the 'expected' chassis. Same transaction; NOT best-effort
+    # (the chassis is the pipeline foundation) — a failure rolls the whole submit back.
+    _auto_create_chassis(db, card, user)
     db.commit()
     db.refresh(card)
     return card
