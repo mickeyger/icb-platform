@@ -96,6 +96,17 @@ def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> lis
     return out
 
 
+def list_chassis_models(db: Session):
+    """WO v4.34 §3.7 — the active chassis-type DDM, ordered for the make/model dropdowns. ONE
+    controlled vocabulary across Planning ack, Pre-Job Card, and Chassis +New/edit (read-only;
+    admin CRUD is v4.35)."""
+    from app.models.mes import ChassisModel
+    return db.execute(
+        select(ChassisModel).where(ChassisModel.is_active.is_(True))
+        .order_by(ChassisModel.sort_order, ChassisModel.make, ChassisModel.model)
+    ).scalars().all()
+
+
 def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
@@ -134,6 +145,7 @@ def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
     if db.execute(select(ChassisRecord.id).where(ChassisRecord.vin == vin)).first():
         raise HTTPException(status_code=409, detail=f"chassis with VIN {vin} already exists")
     rec = ChassisRecord(vin=vin[:32], source="manual", status="received",
+                        created_via="manual_chassis_menu",       # WO v4.34 §0.4 — provenance
                         created_by=who, updated_by=who,
                         **payload.model_dump(exclude={"vin"}, exclude_none=True))
     db.add(rec)

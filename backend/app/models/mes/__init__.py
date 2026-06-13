@@ -944,6 +944,34 @@ class FridgeUnit(Base):
     updated_by = Column(String(128))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 33. chassis_models — chassis make/model DDM (WO v4.34 §3.7, migration 0021).
+#     ONE controlled vocabulary for the chassis-type dropdowns (Planning ack +
+#     Pre-Job Card + Chassis +New/edit) so free-text variants ("Isuzu NPR 400"
+#     vs "NPR 400") stop fragmenting chassis_records lookups + token substitution.
+#     Seeded read-only (mirrors the fridge_units DDM); admin CRUD is v4.35.
+# ─────────────────────────────────────────────────────────────────────────────
+class ChassisModel(Base):
+    __tablename__ = "chassis_models"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_chassis_models_code"),
+        Index("ix_chassis_models_active", "is_active", "make"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    code = Column(String(64), nullable=False)              # stable key, e.g. ISUZU-FTR-850-AMT
+    make = Column(String(64), nullable=False)
+    model = Column(String(128), nullable=False)            # 128 — full model strings are long
+    category = Column(String(32))                          # truck | bakkie | trailer
+    max_payload_kg = Column(Integer)
+    is_active = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
@@ -953,6 +981,6 @@ __all__ = [
     "GeneratedBom", "BomLine",
     "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
     "ParkingBay", "AssemblyBay",
-    "PrejobTemplate", "PrejobCard", "FridgeUnit",
+    "PrejobTemplate", "PrejobCard", "FridgeUnit", "ChassisModel",
     "CROSS_SCHEMA_FKS",
 ]
