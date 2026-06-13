@@ -16,6 +16,7 @@ import { StoresReconciliation } from './screens/Materials/StoresReconciliation'
 import { ChassisList } from './screens/Chassis/ChassisList'
 import { ChassisDetail } from './screens/Chassis/ChassisDetail'
 import { AdminModule } from './screens/Admin/AdminModule'
+import { PrejobSignoffPage } from './screens/Prejob/PrejobSignoffPage'
 
 export default function App() {
   return (
@@ -44,6 +45,8 @@ export default function App() {
       <Route path="/production" element={<Layout><ProductionDashboard /></Layout>} />
       <Route path="/management" element={<Layout><ManagementDashboard /></Layout>} />
       <Route path="/qc" element={<Layout><QcFinalCheck /></Layout>} />
+      {/* WO v4.33 §3.5 — Pre-Job Card check sign-off pages (deep-linkable from the email) */}
+      <Route path="/prejob/:id/signoff/:role" element={<Layout><PrejobSignoffPage /></Layout>} />
       {/* WO v4.25 read-only inspector → WO v4.26 full admin CRUD module (admin-gated) */}
       <Route path="/admin" element={<Navigate to="/admin/spec-options" replace />} />
       <Route path="/admin/:resource" element={<Layout><AdminModule /></Layout>} />

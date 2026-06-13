@@ -108,12 +108,27 @@ export function PlanningAckPanel({
               <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
                 Accepted by customer: <strong>{costing.accepted_at ? `${dmy(costing.accepted_at)} ${hhmm(costing.accepted_at)}` : '—'}</strong>
               </li>
-              <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
-                Sales sign-off: <strong>{costing.pre_job_signoff_sales_by ?? '—'}</strong> {costing.pre_job_signoff_sales_at && `· ${dmy(costing.pre_job_signoff_sales_at)} ${hhmm(costing.pre_job_signoff_sales_at)}`}
-              </li>
-              <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
-                Production sign-off: <strong>{costing.pre_job_signoff_production_by ?? '—'}</strong> {costing.pre_job_signoff_production_at && `· ${dmy(costing.pre_job_signoff_production_at)} ${hhmm(costing.pre_job_signoff_production_at)}`}
-              </li>
+              {/* §0.21 — when a Pre-Job Card supersedes the legacy job sign-offs, show the
+                  NEW-flow provenance (Sales Rep + Planner from the card); else the legacy two. */}
+              {costing.prejob_card ? (
+                <>
+                  <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
+                    Sales Rep: <strong>{costing.prejob_card.sales_rep_username ?? '—'}</strong> {costing.prejob_card.sales_rep_signoff_at ? `· ${dmy(costing.prejob_card.sales_rep_signoff_at)} ${hhmm(costing.prejob_card.sales_rep_signoff_at)}` : '· awaiting'}
+                  </li>
+                  <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
+                    Planner: <strong>{costing.prejob_card.planner_username ?? '—'}</strong> {costing.prejob_card.planner_signoff_at ? `· ${dmy(costing.prejob_card.planner_signoff_at)} ${hhmm(costing.prejob_card.planner_signoff_at)}` : '· awaiting'}
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
+                    Sales sign-off: <strong>{costing.pre_job_signoff_sales_by ?? '—'}</strong> {costing.pre_job_signoff_sales_at && `· ${dmy(costing.pre_job_signoff_sales_at)} ${hhmm(costing.pre_job_signoff_sales_at)}`}
+                  </li>
+                  <li><ShieldCheck size={11} className="mr-1 inline-block text-status-green" />
+                    Production sign-off: <strong>{costing.pre_job_signoff_production_by ?? '—'}</strong> {costing.pre_job_signoff_production_at && `· ${dmy(costing.pre_job_signoff_production_at)} ${hhmm(costing.pre_job_signoff_production_at)}`}
+                  </li>
+                </>
+              )}
             </ul>
           </div>
 

@@ -34,7 +34,7 @@ import { Spinner } from '../../components/ui/feedback'
 // chrome-only: smaller title, no New-Costing self-link, distinct root testid.
 export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) {
   const nav = useNavigate()
-  const { mode, costings, statusCounts, acceptStage, firePreJobCard, scheduleRepairPhases, acceptCosting } = useCostings()
+  const { mode, costings, statusCounts, acceptStage, refresh, scheduleRepairPhases, acceptCosting } = useCostings()
   const { profile, hasPermission } = useAppData()
   const [filter, setFilter] = useState<Set<StatusName>>(new Set())
   const [q, setQ] = useState('')
@@ -94,14 +94,8 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
     })
   }
 
-  const checkedRows = filtered.filter((c) => selected.has(c.quote_number))
-  const bulkPreJobReady =
-    checkedRows.length > 0 && checkedRows.every((c) => c.status === 'Accepted')
-
-  async function handleBulkPreJob() {
-    for (const c of checkedRows) await firePreJobCard(c.quote_number)
-    setSelected(new Set())
-  }
+  // WO v4.33 §0.19 — bulk Pre-Job send DROPPED: the preview-and-edit flow is per-card
+  // (template choice + section edits + signer selection can't be batched). Single-card only.
 
   return (
     <div className="p-4" data-testid={embedded ? 'costings-dashboard-embedded' : 'costings-dashboard'}>
@@ -207,18 +201,15 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
         </div>
       </Tooltip>
 
-      {/* Bulk-action bar */}
+      {/* Bulk-action bar — WO v4.33 §0.19: bulk Pre-Job send dropped (per-card preview flow);
+          the selection bar stays for future bulk actions but carries no Pre-Job button. */}
       {selected.size > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-primary bg-primary-light px-3 py-2 text-sm">
           <span className="font-semibold text-primary">{selected.size} selected</span>
-          <button
-            onClick={handleBulkPreJob}
-            disabled={!bulkPreJobReady}
-            className="ml-auto flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-dark disabled:opacity-40"
-          >
-            <Send size={13} /> Send Pre-Job Cards ({selected.size})
-          </button>
-          <button onClick={() => setSelected(new Set())} className="text-xs text-primary hover:underline">
+          <span className="text-xs text-primary/80">
+            Pre-Job Cards are sent per costing (open a row's Send action) — bulk send was retired in v4.33.
+          </span>
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-primary hover:underline">
             Clear
           </button>
         </div>
@@ -300,7 +291,9 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                         job pending
                       </span>
                     )}
-                    {c.status === 'Pre-Job Sent' && (
+                    {c.status === 'Pre-Job Sent' && !c.prejob_card && (
+                      // §0.21 — the legacy bottleneck dot reads job-level signoff columns the
+                      // new flow never writes; suppress it once a Pre-Job Card supersedes them.
                       <BottleneckIndicator
                         salesAt={c.pre_job_signoff_sales_at ?? null}
                         productionAt={c.pre_job_signoff_production_at ?? null}
@@ -380,8 +373,10 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
       <PreJobCardModal
         costing={preJobTarget}
         onClose={() => setPreJobTarget(null)}
-        onConfirm={async (c) => {
-          await firePreJobCard(c.quote_number)
+        onConfirm={async () => {
+          // WO v4.33 §0.21 — the modal's Submit-for-Check drives the pre_job_sent transition
+          // server-side; the parent just refreshes the list (no legacy firePreJobCard).
+          await refresh()
           setPreJobTarget(null)
         }}
       />

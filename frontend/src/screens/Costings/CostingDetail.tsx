@@ -16,7 +16,7 @@ import {
 import { useCostings } from '../../store/CostingsContext'
 import { apiGet } from '../../lib/api'
 import { useAppData } from '../../store/AppDataContext'
-import { Card, SectionTitle } from '../../components/ui/primitives'
+import { Card, SectionTitle, StatusPill } from '../../components/ui/primitives'
 import { Toast } from '../../components/ui/overlays'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { zar, dmy, hhmm } from '../../lib/format'
@@ -26,12 +26,13 @@ import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
 import { PreJobSignoffModal } from './PreJobSignoffModal'
 import { BottleneckIndicator } from './BottleneckIndicator'
-import type { Costing } from '../../data/costingsData'
+import type { Costing, PrejobCardSummary } from '../../data/costingsData'
+import type { Status } from '../../data/types'
 
 export function CostingDetail() {
   const { quote = '' } = useParams<{ quote: string }>()
   const nav = useNavigate()
-  const { mode, costings, firePreJobCard, scheduleRepairPhases, signoffPreJob, markChassisReceived } = useCostings()
+  const { mode, costings, refresh, scheduleRepairPhases, signoffPreJob, markChassisReceived } = useCostings()
   const { hasPermission, profile } = useAppData()
   const [toast, setToast] = useState('')
   const [preJobOpen, setPreJobOpen] = useState(false)
@@ -40,6 +41,10 @@ export function CostingDetail() {
   const [chassisReceivedDate, setChassisReceivedDate] = useState('')
 
   const c = costings.find((x) => x.quote_number === decodeURIComponent(quote))
+  // §0.21 — the live Pre-Job Card summary rides on the costing (CostingsContext merges
+  // /api/prejob-cards/summaries into every row). When present it supersedes the legacy
+  // job-level sign-off widget; one card → one sign-off surface across all costings views.
+  const prejobCard = c?.prejob_card ?? null
 
   useEffect(() => {
     if (!toast) return
@@ -79,7 +84,7 @@ export function CostingDetail() {
             {c.quote_type === 'Repair' && (
               <span className="rounded bg-[#7E22CE]/10 px-2 py-0.5 text-[11px] font-bold uppercase text-[#7E22CE]">Repair</span>
             )}
-            {c.status === 'Pre-Job Sent' && (
+            {c.status === 'Pre-Job Sent' && !prejobCard && (
               <BottleneckIndicator
                 salesAt={c.pre_job_signoff_sales_at ?? null}
                 productionAt={c.pre_job_signoff_production_at ?? null}
@@ -177,11 +182,16 @@ export function CostingDetail() {
         </Card>
       </div>
 
-      {(c.status === 'Pre-Job Sent' || c.pre_job_signoff_sales_at || c.pre_job_signoff_production_at || c.pre_job_confirmed_at) && (
+      {prejobCard ? (
+        /* §0.21 — a Pre-Job Card row exists → it IS the single sign-off surface. */
+        <PreJobCardStatusPanel card={prejobCard} onView={() => setPreJobOpen(true)} />
+      ) : (c.status === 'Pre-Job Sent' || c.pre_job_signoff_sales_at || c.pre_job_signoff_production_at || c.pre_job_confirmed_at) ? (
         <Tooltip k="costings_detail.prejob_signoff_section">
           {/* WO v4.29 — keep this section visible AFTER confirmation so the sign-off provenance
-              (who + when, both roles) is retained on the record, not just while awaiting. */}
-          <Card className={`mb-4 ${c.pre_job_signoff_sales_at && c.pre_job_signoff_production_at ? 'border-status-green' : 'border-status-amber'}`}>
+              (who + when, both roles) is retained on the record, not just while awaiting.
+              §0.21: LEGACY path only — renders when no prejob_cards row supersedes it (rows
+              in-flight at the v4.33 cutover complete here; new cards never reach this). */}
+          <Card data-testid="prejob-legacy-signoff" className={`mb-4 ${c.pre_job_signoff_sales_at && c.pre_job_signoff_production_at ? 'border-status-green' : 'border-status-amber'}`}>
             <SectionTitle>Pre-Job Card sign-offs</SectionTitle>
             <p className="mb-3 text-xs text-muted">
               {c.pre_job_signoff_sales_at && c.pre_job_signoff_production_at
@@ -212,7 +222,7 @@ export function CostingDetail() {
             </div>
           </Card>
         </Tooltip>
-      )}
+      ) : null}
 
       <Card className="mb-4 p-0">
         <div className="p-4 pb-2"><SectionTitle>Bill of materials (illustrative)</SectionTitle></div>
@@ -339,10 +349,11 @@ export function CostingDetail() {
       <PreJobCardModal
         costing={preJobOpen ? c : null}
         onClose={() => setPreJobOpen(false)}
-        onConfirm={async (target) => {
-          await firePreJobCard(target.quote_number)
+        onConfirm={async () => {
+          // WO v4.33 §0.21 — submit drives pre_job_sent server-side; just refresh + navigate.
+          await refresh()
           setPreJobOpen(false)
-          setToast(`Pre-Job Card sent — awaiting confirmation`)
+          setToast(`Pre-Job Card sent for check`)
           nav('/costings')
         }}
       />
@@ -374,6 +385,81 @@ export function CostingDetail() {
       />
 
       <Toast message={toast} show={!!toast} />
+    </div>
+  )
+}
+
+// WO v4.33 §0.21 — the new-flow status panel. Reads prejob_cards (the source of truth) and is
+// the SINGLE sign-off surface once a card exists; "View Pre-Job Card" reopens the same modal
+// (read-only when sent/confirmed), and the email/PDF helpers re-run the §0.11/§3.6 routes.
+function PreJobCardStatusPanel({ card, onView }: { card: PrejobCardSummary; onView: () => void }) {
+  const rejected = card.status === 'draft' && !!card.reject_reason
+  const pill: { s: Status; label: string } =
+    card.status === 'pre_job_confirmed' ? { s: 'GREEN', label: 'Pre-Job Confirmed' }
+      : card.status === 'sent_for_check' ? { s: 'AMBER', label: 'Sent for check' }
+        : rejected ? { s: 'RED', label: 'Rejected — back at draft' }
+          : { s: 'GREY', label: 'Draft' }
+  const border = pill.s === 'GREEN' ? 'border-status-green' : pill.s === 'RED' ? 'border-status-red' : 'border-status-amber'
+
+  const openEmail = async () => {
+    try {
+      const e = await apiGet<{ mailto: string }>(`/api/prejob-cards/${card.id}/email`)
+      window.location.href = e.mailto                     // §0.11 — opens the user's mail client
+    } catch { /* no mail client / offline — non-fatal, the deep-links live in the card too */ }
+  }
+
+  return (
+    <Tooltip k="costings_detail.prejob_signoff_section">
+      <Card data-testid="prejob-status-panel" className={`mb-4 ${border}`}>
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <SectionTitle>Pre-Job Card</SectionTitle>
+          <StatusPill status={pill.s} label={pill.label} />
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          The live Pre-Job Card record — both checks below drive confirmation (§0.21 supersedes
+          the legacy job-level sign-off).
+        </p>
+        {rejected && (
+          <div className="mb-3 rounded-md border border-status-red/40 bg-status-red/5 p-2 text-xs text-status-red">
+            {card.reject_reason}
+          </div>
+        )}
+        <div className="space-y-2">
+          <SignoffRow label="Sales Rep" at={card.sales_rep_signoff_at} who={card.sales_rep_username} />
+          <SignoffRow label="Planner" at={card.planner_signoff_at} who={card.planner_username} />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button data-testid="prejob-panel-view" onClick={onView}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark">
+            View Pre-Job Card →
+          </button>
+          <button onClick={() => void openEmail()}
+            className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface-alt">
+            <Send size={14} /> Open email draft
+          </button>
+          <button onClick={() => window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')}
+            className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface-alt">
+            <Printer size={14} /> Download PDF
+          </button>
+        </div>
+      </Card>
+    </Tooltip>
+  )
+}
+
+function SignoffRow({ label, at, who }: { label: string; at: string | null; who: string | null }) {
+  const signed = !!at
+  return (
+    <div className={`flex items-center gap-3 rounded-md border p-3 ${signed ? 'border-status-green/40 bg-status-green/5' : 'border-line bg-white'}`}>
+      <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${signed ? 'bg-status-green text-white' : 'bg-surface-alt text-muted'}`}>
+        {signed ? <CheckCircle2 size={16} /> : <Circle size={14} />}
+      </span>
+      <div className="flex-1 text-sm">
+        <span className="font-semibold text-body">{label}:</span>{' '}
+        {signed
+          ? <span className="text-status-green">{who ?? '—'} · {dmy(at!)} {hhmm(at!)}</span>
+          : <span className="text-muted">awaiting sign-off{who ? ` — assigned: ${who}` : ' — unassigned'}</span>}
+      </div>
     </div>
   )
 }

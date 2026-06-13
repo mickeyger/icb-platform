@@ -14,6 +14,7 @@ import {
   ALL_STATUSES,
   type Costing,
   type LiveCalculation,
+  type PrejobCardSummary,
   type RepairPhaseInsertion,
   type StatusName,
 } from '../data/costingsData'
@@ -133,9 +134,11 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
   // refetch() = reads only (calcs spine ⋈ production-jobs). No autologin (§3.5).
   const refetch = useCallback(async () => {
     try {
-      const [calcs, pjs] = await Promise.all([
+      const [calcs, pjs, cards] = await Promise.all([
         apiGet<LiveCalculation[]>('/api/calculations?limit=100'),
         apiGet<ApiProductionJob[]>('/api/production-jobs?limit=200'),
+        // §0.21 — the live Pre-Job Card summaries; tolerate an older backend (→ no supersede).
+        apiGet<PrejobCardSummary[]>('/api/prejob-cards/summaries').catch(() => [] as PrejobCardSummary[]),
       ])
       if (!Array.isArray(calcs) || calcs.length === 0) {
         setCostings(costingsMock.costings)
@@ -143,7 +146,11 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         return
       }
       const pjByCalc = new Map((pjs ?? []).map((p) => [p.calculation_record_id, p]))
-      const rows = calcs.map((c) => mergeProductionJob(liveToCosting(c), pjByCalc.get(c.id)))
+      const cardByCalc = new Map((cards ?? []).map((s) => [s.calculation_id, s]))
+      const rows = calcs.map((c) => ({
+        ...mergeProductionJob(liveToCosting(c), pjByCalc.get(c.id)),
+        prejob_card: cardByCalc.get(c.id) ?? null,
+      }))
       liveIdByQuote.current = new Map(calcs.map((c) => [c.quote_number ?? `#${c.id}`, c.id]))
       pjIdByQuote.current = new Map(
         rows.filter((r) => r.production_job_id != null).map((r) => [r.quote_number, r.production_job_id as number]),

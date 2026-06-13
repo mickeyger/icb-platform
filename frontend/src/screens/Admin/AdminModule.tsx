@@ -5,6 +5,7 @@ import { NavLink, Navigate, useParams } from 'react-router-dom'
 import { EmptyState } from '../../components/ui/feedback'
 import { useAppData } from '../../store/AppDataContext'
 import { AdminCrudTable } from './AdminCrudTable'
+import { PrejobTemplatesAdmin } from './PrejobTemplatesAdmin'
 import { ADMIN_ORDER, ADMIN_RESOURCES } from './adminResources'
 
 export function AdminModule() {
@@ -40,7 +41,11 @@ export function AdminModule() {
         <p className="mt-3 px-1 text-xs text-muted">WO v4.26 — full CRUD, admin only. Formulas run
           against resolved specs by the AST-safe evaluator.</p>
       </aside>
-      <main className="min-w-0 flex-1"><AdminCrudTable key={resource} config={cfg} /></main>
+      <main className="min-w-0 flex-1">
+        {cfg.custom
+          ? <PrejobTemplatesAdmin key={resource} />
+          : <AdminCrudTable key={resource} config={cfg} />}
+      </main>
     </div>
   )
 }

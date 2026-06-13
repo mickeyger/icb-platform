@@ -31,3 +31,22 @@ def save_chassis_photo(record_id: int, cycle: int, event_type: str, photo_id: in
 
 def chassis_photo_abspath(rel_path: str) -> Path:
     return _UPLOADS_ROOT / rel_path
+
+
+# ── WO v4.33 §3.6 — Pre-Job Card PDF snapshots (same local-FS seam) ──────────
+_PREJOB_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "prejob"
+
+
+def save_prejob_pdf(card_id: int, data: bytes) -> str:
+    """Persist the records-copy PDF generated at Submit-for-Check (§0.11 — the email's
+    attachment source). Overwrites on re-submit (latest content wins); returns the relative
+    path stored in prejob_cards.pdf_file_id."""
+    rel = Path(str(card_id)) / f"prejob-card-{card_id}.pdf"
+    dest = _PREJOB_ROOT / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    return str(rel).replace("\\", "/")
+
+
+def prejob_pdf_abspath(rel_path: str) -> Path:
+    return _PREJOB_ROOT / rel_path

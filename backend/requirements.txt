@@ -33,6 +33,11 @@ cryptography==46.0.6
 openpyxl==3.1.5
 xlrd==2.0.2
 
+# --- Word template import (WO v4.33 — Pre-Job Card template parser + its CI tests) ---
+# Reads .docx only; the one-time .doc conversion uses Word COM via pywin32, which stays a
+# dev-box-only install (CI never converts — it tests on pre-converted fixtures).
+python-docx==1.2.0
+
 # --- PDF generation (reportlab/pypdf path) ---
 reportlab==4.4.10
 pypdf==4.0.1

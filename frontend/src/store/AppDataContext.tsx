@@ -34,6 +34,9 @@ const SERVER_KEYS = new Set<string>([
   'buying.resolve_discrepancy', 'buying.raise_pr', 'buying.defer_pr',
   'buying.override_supplier', 'buying.bulk_raise',
   'chassis.assembly_assign',       // WO v4.31 — true per-role gating for the parking->assembly assign
+  'prejob.create',                 // WO v4.33 §0.3 — Internal Sales creates/submits Pre-Job Cards
+  'prejob.signoff_sales',          // WO v4.33 — Sales Rep check sign-off (§3.5 page gating)
+  'prejob.signoff_planner',        // WO v4.33 — Planner check sign-off (§3.5 page gating)
 ])
 const KEY_ALIAS: Record<string, string> = {
   'materials.count': 'stores.count',
