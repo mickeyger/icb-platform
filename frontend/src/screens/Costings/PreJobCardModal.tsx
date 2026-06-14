@@ -16,6 +16,7 @@ import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { apiGet, apiPatch, apiPost, handleApiError } from '../../lib/api'
 import { dmy } from '../../lib/format'
+import { compareTemplatesBySize } from '../../lib/templateSort'
 import { ChassisModelSelect } from '../Chassis/ChassisModelSelect'
 import type { Costing } from '../../data/costingsData'
 
@@ -48,6 +49,27 @@ function bodyClassOf(costing: Costing): string | undefined {
   if (low.includes('trailer') || low.includes('body only')) return 'trailer'
   if (low.includes('dry freight')) return 'dry_freight'
   return BODY_CLASSES.find((c) => low.includes(c))
+}
+
+// WO v4.33.1 §3.5 — soft over-size warning. Derive the template's nominal length (mm) from its NAME
+// ("13.8m Reefer Body" → 13800) — the BA's derive-from-name (no column, no migration). Returns null
+// when the name has no parseable leading metre value (e.g. "Big …") → the caller skips silently.
+function nominalLengthMm(name: string | null | undefined): number | null {
+  const m = (name ?? '').match(/(\d+(?:\.\d+)?)\s*m\b/i)
+  return m ? Math.round(parseFloat(m[1]) * 1000) : null
+}
+
+// Parse a baked "{N}mm o/a (l|w|h)" dimension out of the card's sections (the §0.5 dims line); the
+// numbers are space-thousands ("5 400"). Returns null when no dims were baked (no calc dimensions).
+function bakedDimMm(sections: Section[], axis: 'l' | 'w' | 'h'): number | null {
+  const re = new RegExp(`(\\d[\\d\\s]*?)\\s*mm\\s*o/a\\s*\\(${axis}\\)`, 'i')
+  for (const sec of sections ?? []) {
+    for (const item of sec.items ?? []) {
+      const m = (item.text ?? '').match(re)
+      if (m) return parseInt(m[1].replace(/\s/g, ''), 10)
+    }
+  }
+  return null
 }
 
 export function PreJobCardModal({
@@ -107,6 +129,32 @@ export function PreJobCardModal({
     if (costing) void load(costing)
     else { setCard(null); setTemplates([]) }
   }, [costing, load])
+
+  // WO v4.33.1 §3.5 — over-size soft warning: costing length > 2× the selected template's nominal.
+  // Non-blocking; skips silently (logs a one-liner) when either value isn't parseable.
+  const sizeWarning = useMemo(() => {
+    if (!card) return null
+    const nominal = nominalLengthMm(card.template_name)
+    if (nominal == null) {
+      if (card.template_name) console.info(
+        `[prejob-size] template "${card.template_name}" has no parseable nominal length — over-size warning skipped`)
+      return null
+    }
+    const costL = bakedDimMm(card.sections, 'l')
+    if (costL == null || costL <= 2 * nominal) return null   // no baked dims, or within range
+    const w = bakedDimMm(card.sections, 'w')
+    const h = bakedDimMm(card.sections, 'h')
+    return `Costing dimensions (${costL}×${w ?? '—'}×${h ?? '—'}mm) appear larger than `
+      + `"${card.template_name}" typical size — consider selecting a larger template?`
+  }, [card])
+
+  // WO v4.33.1 §3.6 — the suggested template stays on top; the rest sort human-numeric (size
+  // buckets: 2.3m < 3.2m < mid < big < 15.5m), fixing the lexical "15.5m before 2.3m" order.
+  const sortedTemplates = useMemo(() => {
+    const suggested = templates.filter((t) => t.suggested)
+    const rest = templates.filter((t) => !t.suggested).sort(compareTemplatesBySize)
+    return [...suggested, ...rest]
+  }, [templates])
 
   const patchCard = (p: Partial<PrejobCard>) => setCard((c) => (c ? { ...c, ...p } : c))
   const patchSections = (fn: (s: Section[]) => Section[]) =>
@@ -263,6 +311,14 @@ export function PreJobCardModal({
             </div>
           )}
 
+          {sizeWarning && (
+            <div data-testid="prejob-size-warning"
+              className="mb-3 flex items-start gap-2 rounded-md bg-status-amber/15 p-3 text-sm text-status-amber">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{sizeWarning}</span>
+            </div>
+          )}
+
           {loading ? <Spinner /> : !card ? (
             /* ── Step 1: no card yet — template selection ── */
             liveCalcId == null ? (
@@ -279,7 +335,7 @@ export function PreJobCardModal({
                   className="mt-1 w-full rounded-md border border-line px-2 py-2 text-sm text-body"
                   data-testid="prejob-template-select">
                   <option value="">— choose a template —</option>
-                  {templates.map((t) => (
+                  {sortedTemplates.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.suggested ? '★ ' : ''}{t.name}
                       {t.product_line !== 'standard' ? ` (${t.product_line === 'rhinorange_2_0' ? 'Rhinorange 2.0' : 'Rhinorange legacy'})` : ''}
