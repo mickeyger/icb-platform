@@ -252,11 +252,11 @@ def _auto_create_chassis_at_ack(db: Session, job: ProductionJob,
     §3.2's card+job cross-link, so this no-ops for the common path; it covers jobs that reached
     Planning WITHOUT a Pre-Job-Card chassis (workbook imports, or a card with no make/model).
 
-    Mirrors §3.2's 'same INSERT pattern' exactly: status='expected', vin=NULL — the VIN is unknown
-    on the chassis row until VCL receive even when the planner typed one at ack (that value is
-    preserved in job.chassis_data_json and becomes authoritative on the row at VCL). Keeping vin
-    NULL here is deliberate: it avoids any uq_chassis_records_vin collision AND the cross-job
-    aliasing a VIN-adopt would risk (a VIN can already anchor another job). Runs inside
+    Mirrors §3.2's 'same INSERT pattern' exactly: status='expected', vin=NULL AT CREATE — keeping vin
+    NULL on the INSERT avoids any uq_chassis_records_vin collision AND the cross-job aliasing a
+    VIN-adopt would risk (a VIN can already anchor another job). The VIN (attested at pre-job, or
+    captured at ack) is then stamped onto the row by record_planning_ack's propagation step right
+    after this (guarded against overwrite + clash), so the Chassis page reflects the ack. Runs inside
     record_planning_ack's transaction (atomic with the ack); the FOR UPDATE lock on the job makes
     the job-FK guard a true idempotency key under concurrent acks on the same job."""
     if job.chassis_record_id is not None:
@@ -322,6 +322,23 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
     # WO v4.34 §3.3 (§0.5b) — anchor the pipeline chassis from the ack's chassis info (idempotent;
     # no-op when the job is already linked via §3.2). Inside this transaction → atomic with the ack.
     _auto_create_chassis_at_ack(db, job, chassis_data, getattr(user, "username", None))
+    # WO v4.34 (ack follow-up, BA 2026-06-14) — the acknowledged job's final number + its VIN land on
+    # the LINKED chassis so the Chassis page reflects the ack. The VIN is the one attested on the
+    # Pre-Job Card OR captured here when the card left it blank. No-op when no chassis is linked; never
+    # overwrites an existing VIN, and skips a value already anchoring another chassis
+    # (uq_chassis_records_vin) so the ack can't fail on a VIN clash.
+    if job.chassis_record_id:
+        chassis = db.get(ChassisRecord, job.chassis_record_id)
+        if chassis is not None:
+            if job.job_number:
+                chassis.job_number = job.job_number
+            vin = (((chassis_data or {}).get("chassis_vin")) or "").strip()[:32]
+            if vin and not chassis.vin:
+                clash = db.execute(select(ChassisRecord.id).where(
+                    ChassisRecord.vin == vin, ChassisRecord.id != chassis.id)).first()
+                if not clash:
+                    chassis.vin = vin
+            chassis.updated_by = actor
     job.status = "planning"
     db.commit()
     return get_with_costing(db, job_id)

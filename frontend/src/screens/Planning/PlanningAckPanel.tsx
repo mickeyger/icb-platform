@@ -39,19 +39,23 @@ export function PlanningAckPanel({
   // ack so a planner can't silently rewrite what Sales + Production already attested to.
   const card = costing?.prejob_card
   const chassisLocked = card?.status === 'pre_job_confirmed' && !!card?.chassis_make_model
+  // §3.9 refine (BA 2026-06-14) — lock the VIN read-only ONLY when one was actually attested at
+  // pre-job; if the card left it blank, the planner captures it here at ack (it then lands on the
+  // chassis record server-side).
+  const vinLocked = card?.status === 'pre_job_confirmed' && !!card?.vin_number
   const seed: ChassisEtaPayload = useMemo(() => {
     if (!costing) return { chassis_eta: '' }
     const cd = costing.chassis_data ?? {}
     return {
       chassis_eta: costing.chassis_eta ?? '',
-      chassis_vin: (chassisLocked ? card?.vin_number : cd.chassis_vin) ?? '',
+      chassis_vin: (vinLocked ? card?.vin_number : cd.chassis_vin) ?? '',
       chassis_model: (chassisLocked ? card?.chassis_make_model : cd.chassis_model) ?? '',
       customer_dealer: cd.customer_dealer ?? '',
       tail_lift_code: cd.tail_lift_code ?? '',
       chassis_inhouse_bom: cd.chassis_inhouse_bom ?? [],
       job_number: costing.job_number_assigned ?? '',     // WO v4.34 §0.8 — pre-fill the override with the current number
     }
-  }, [costing, chassisLocked, card])
+  }, [costing, chassisLocked, vinLocked, card])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
   useEffect(() => setForm(seed), [seed])
 
@@ -154,6 +158,7 @@ export function PlanningAckPanel({
               setForm={setForm}
               canEdit={canAck}
               chassisLocked={chassisLocked}
+              vinLocked={vinLocked}
             />
           )}
 
@@ -301,11 +306,13 @@ function ChassisExternalSection({
   setForm,
   canEdit,
   chassisLocked,
+  vinLocked,
 }: {
   form: ChassisEtaPayload
   setForm: React.Dispatch<React.SetStateAction<ChassisEtaPayload>>
   canEdit: boolean
   chassisLocked?: boolean
+  vinLocked?: boolean
 }) {
   // Real-world tail-lift catalogue from icb_mock_data.json; chassis types now come from the DDM (§3.7).
   const tailLifts = mockData.tail_lifts
@@ -373,9 +380,9 @@ function ChassisExternalSection({
           <Tooltip k="costings_detail.chassis_vin_field">
             <label className="block text-xs">
               <span className="font-semibold text-muted">Chassis VIN</span>
-              {/* §3.9 — VIN locks read-only with the chassis type once the card is confirmed; the
-                  real VIN is captured later at chassis-received, never rewritten on the ack. */}
-              {chassisLocked ? (
+              {/* §3.9 — VIN locks read-only ONLY when one was attested at pre-job (vinLocked); if the
+                  card left it blank, the planner captures it here and it lands on the chassis record. */}
+              {vinLocked ? (
                 <div data-testid="planning-ack-vin-locked"
                      className="mt-1 w-full rounded-md border border-line bg-surface-alt px-2 py-1.5 font-mono text-sm text-body">
                   {form.chassis_vin || '—'}

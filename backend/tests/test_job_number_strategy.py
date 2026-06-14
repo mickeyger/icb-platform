@@ -6,7 +6,8 @@ import pytest
 
 def _purge(db) -> None:
     from sqlalchemy import text
-    db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'P434C%'"))
+    db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'P434C%'"))  # jobs first (FK)
+    db.execute(text("DELETE FROM icb_mes.chassis_records WHERE created_by='p434c'"))
     db.commit()
 
 
@@ -111,6 +112,46 @@ def test_ack_override_refused_when_sap_retired(staged_job):   # §0.9
         assert jn == "P434C01" and src == "quote_derived"  # refused — SAP_RETIRED forces quote-derived
     finally:
         _set_sap_retired(False)
+
+
+def test_ack_propagates_job_number_and_vin_to_chassis():
+    """BA 2026-06-14 — at Planning ack, the job's final number + the VIN (attested at pre-job, or
+    captured here when blank) land on the LINKED chassis so the Chassis page reflects the ack."""
+    from app.database import Branch, CalculationRecord, SessionLocal, User
+    from app.models.mes import ChassisRecord, ProductionJob
+    from app.services import production_jobs as svc
+    vin = "P434CACKVIN01"
+    with SessionLocal() as db:
+        _purge(db)
+        taken = {j.calculation_record_id for j in db.query(ProductionJob)
+                 .filter(ProductionJob.calculation_record_id.isnot(None)).all()}
+        calc = (db.query(CalculationRecord)
+                .filter(~CalculationRecord.id.in_(taken or {0}), CalculationRecord.quote_number.isnot(None))
+                .order_by(CalculationRecord.id.desc()).first())
+        if calc is None:
+            pytest.skip("no job-free calculation on this DB")
+        branch = db.query(Branch).order_by(Branch.id).first()
+        chassis = ChassisRecord(make="P434C Make", vin=None, status="expected", source="pre_job_card",
+                                created_via="pre_job_card", created_source_ref="P434C",
+                                created_by="p434c", updated_by="p434c")
+        db.add(chassis)
+        db.flush()
+        job = ProductionJob(calculation_record_id=calc.id, branch_id=branch.id, source="quote",
+                            status="pre_job_confirmed", job_number="P434C01",
+                            job_number_source="quote_derived", chassis_record_id=chassis.id)
+        db.add(job)
+        db.commit()
+        jid, chid = job.id, chassis.id
+    with SessionLocal() as db:
+        admin = db.query(User).filter_by(username="admin").first()
+        svc.record_planning_ack(db, jid, chassis_eta=None, notes=None, user=admin,
+                                chassis_data={"chassis_vin": vin})   # VIN captured at ack
+    with SessionLocal() as db:
+        ch = db.get(ChassisRecord, chid)
+        assert ch.job_number == "P434C01"                  # job number → Chassis page
+        assert ch.vin == vin                               # captured VIN → chassis record
+    with SessionLocal() as db:
+        _purge(db)
 
 
 def test_sap_retired_helper():
