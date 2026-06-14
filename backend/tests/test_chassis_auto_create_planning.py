@@ -96,19 +96,20 @@ def test_ack_no_chassis_info_no_op(staged_job):
     assert crid is None and ch is None                    # nothing entered → graceful no-op
 
 
-def test_ack_vin_in_data_stays_null_on_row(staged_job):
-    """A VIN typed at ack does NOT land on the 'expected' chassis row (mirrors §3.2: VIN unknown
-    until VCL). It IS preserved in job.chassis_data_json (the existing v4.29 capture)."""
+def test_ack_vin_lands_on_chassis_row(staged_job):
+    """WO v4.34 (ack follow-up, BA 2026-06-14) — a VIN typed at ack now LANDS on the linked chassis
+    row (the Chassis page reflects the ack), and is still preserved in job.chassis_data_json. The
+    row is created vin=NULL (collision-safe) then stamped by record_planning_ack's propagation."""
     import json
     from app.database import SessionLocal
     from app.models.mes import ProductionJob
     _ack(staged_job, {"chassis_model": "P434B Scania", "chassis_vin": "P434BVIN0001"})
     crid, ch = _job_chassis(staged_job)
     assert crid is not None
-    assert ch["vin"] is None and ch["make"] == "P434B Scania"
+    assert ch["vin"] == "P434BVIN0001" and ch["make"] == "P434B Scania"   # VIN → chassis row
     with SessionLocal() as db:
         cd = json.loads(db.get(ProductionJob, staged_job).chassis_data_json or "{}")
-    assert cd.get("chassis_vin") == "P434BVIN0001"        # entered VIN preserved for VCL
+    assert cd.get("chassis_vin") == "P434BVIN0001"        # still preserved in the job's data
 
 
 def test_ack_vin_only_no_op(staged_job):
