@@ -129,6 +129,15 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
       { name: 'is_active', label: 'Active', type: 'bool', default: true },
     ],
   },
+  // WO v4.33.1 §3.1 — admin nav-aid: Pre-Job Cards awaiting sign-off (custom list view, not CRUD).
+  'prejob-signoffs': {
+    key: 'prejob-signoffs',
+    title: 'Pre-Job sign-offs',
+    basePath: '/api/prejob-cards/outstanding',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
 }
 
-export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units']
+export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs']
