@@ -16,6 +16,7 @@ import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { apiGet, apiPatch, apiPost, handleApiError } from '../../lib/api'
 import { dmy } from '../../lib/format'
+import { ChassisModelSelect } from '../Chassis/ChassisModelSelect'
 import type { Costing } from '../../data/costingsData'
 
 interface SectionItem { text: string; note?: string | null; sub_items?: string[] | null; sap_item_code?: string | null }
@@ -313,9 +314,10 @@ export function PreJobCardModal({
                     className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm text-body disabled:bg-surface-alt" />
                 </label>
                 <label className="text-xs text-muted">Chassis (make / model)
-                  <input value={card.chassis_make_model ?? ''} disabled={!editable}
-                    onChange={(e) => patchCard({ chassis_make_model: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body disabled:bg-surface-alt" />
+                  {/* WO v4.34 §3.7 — DDM dropdown (was free-text); stops "Isuzu NPR 400" variants
+                      fragmenting chassis_records + token substitution. */}
+                  <ChassisModelSelect testid="prejob-chassis-make" value={card.chassis_make_model}
+                    disabled={!editable} onChange={(v) => patchCard({ chassis_make_model: v })} />
                 </label>
                 <label className="text-xs text-muted">VIN Nr
                   <input value={card.vin_number ?? ''} disabled={!editable}

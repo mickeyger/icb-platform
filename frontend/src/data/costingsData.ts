@@ -103,7 +103,10 @@ export interface Costing {
   pre_job_confirmed_at?: string
   pre_job_recipients?: string[]
   pre_job_awaiting_from?: string[]
-  job_number_assigned?: string
+  job_number_assigned?: string                 // mirrors the canonical numeric production_jobs.job_number (WO v4.34 §0.7)
+  job_number_source?: string | null            // quote_derived | sap_assigned | manual
+  job_number_locked?: boolean                  // §0.9 — TRUE once SAP is retired
+  sap_retired?: boolean                        // site-level (§0.9) — hides the Planning-ack override
   repair_scope?: string
   repair_phase_entry?: string
   repair_phases?: { phase: string; bay_id: string; estimated_hours: number }[]
@@ -145,6 +148,8 @@ export interface PrejobCardSummary {
   sales_rep_username: string | null
   planner_signoff_at: string | null
   planner_username: string | null
+  chassis_make_model?: string | null   // WO v4.34 §3.9 — attested spec for the Planning-ack lock-down
+  vin_number?: string | null
 }
 
 export interface ChassisBomItem {

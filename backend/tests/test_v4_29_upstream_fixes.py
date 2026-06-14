@@ -111,14 +111,17 @@ def fresh_job(app_mod, jhb_id):
 
     yield _make
     with SessionLocal() as db:
+        ack_chassis = []               # WO v4.34 §3.3 — chassis auto-created at planning-ack (untracked above)
         for pid in pjs:
             for s in db.query(PlanningSlot).filter_by(production_job_id=pid).all():
                 db.delete(s)
             pj = db.get(ProductionJob, pid)
             if pj:
+                if pj.chassis_record_id and pj.chassis_record_id not in chassis:
+                    ack_chassis.append(pj.chassis_record_id)   # capture before the job (FK) is dropped
                 db.delete(pj)
         db.commit()                    # drop jobs (FK -> chassis is ON DELETE RESTRICT) first
-        for crid in chassis:
+        for crid in chassis + ack_chassis:
             for e in db.query(ChassisLifecycleEvent).filter_by(chassis_record_id=crid).all():
                 db.delete(e)
             cr = db.get(ChassisRecord, crid)

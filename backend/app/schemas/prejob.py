@@ -163,3 +163,6 @@ class PrejobCardSummary(BaseModel):
     sales_rep_username: Optional[str] = None
     planner_signoff_at: Optional[datetime] = None
     planner_username: Optional[str] = None
+    # WO v4.34 §3.9 — attested chassis spec for the Planning-ack lock-down (sign-off integrity).
+    chassis_make_model: Optional[str] = None
+    vin_number: Optional[str] = None

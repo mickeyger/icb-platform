@@ -21,6 +21,7 @@ icb_mock_data.json (planning_board -> planning_slots, rework_tickets).
 """
 import argparse
 import json
+import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -82,7 +83,12 @@ def _date(s):
 
 
 def _job_num(quote):
-    return quote.split("-")[-1] if quote else None
+    # WO v4.34 §0.7 — the NUMERIC core (A32744/06/2026 → 32744), matching
+    # production_jobs._job_number_from_quote so a reseed never reintroduces the full quote.
+    if not quote:
+        return None
+    m = re.search(r"\d+", quote)
+    return m.group(0) if m else None
 
 
 def _setval(db, schema_table):

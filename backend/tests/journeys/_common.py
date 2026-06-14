@@ -201,8 +201,17 @@ def admin_session(page: "Page") -> "Page":
     Always call this before deep-linking any ``/mes-app`` sub-route: an
     unauthenticated deep-link races the auth guard and may bounce to the Jinja
     ``/login`` page (the v4.26 lesson).
+
+    We gate on the autologin POST *response* (not just ``wait_for_dashboard``): the top-nav can
+    render before the session cookie has propagated, so a fetch fired by an immediate in-SPA nav
+    (e.g. the chassis list's mount fetch) races the session and 401s → /login redirect. Waiting
+    for the Set-Cookie response makes the session ready for the next request (WO v4.34 — the root
+    cause behind the recurring test_chassis_journey flake, diagnosed via the instrument-to-
+    diagnose wrap). The SPA re-fires autologin on every full page load (its dedupe resets), so the
+    response is always observable here.
     """
-    page.goto("/mes-app/")
+    with page.expect_response(lambda r: "/api/mes/autologin" in r.url, timeout=30_000):
+        page.goto("/mes-app/")
     wait_for_dashboard(page)
     return page
 

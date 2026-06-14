@@ -7,6 +7,7 @@ import { Tooltip } from '../../components/ui/Tooltip'
 import { useAppData } from '../../store/AppDataContext'
 import { useCostings, type ChassisCatalogue, type ChassisEtaPayload } from '../../store/CostingsContext'
 import { data as mockData } from '../../data/mockData'
+import { ChassisModelSelect } from '../Chassis/ChassisModelSelect'
 import { zar, dmy, hhmm } from '../../lib/format'
 import type { Costing } from '../../data/costingsData'
 
@@ -33,18 +34,28 @@ export function PlanningAckPanel({
   // open, then mutated as the planner edits fields. The Acknowledge button only
   // enables once `eta` is non-empty.
   const inHouse = costing?.chassis_supplied_by === 'in-house'
+  // WO v4.34 §3.9 — sign-off integrity: once the linked Pre-Job Card is CONFIRMED with a chassis
+  // supplied, that attested spec is the source of truth. chassis_type + VIN lock read-only on the
+  // ack so a planner can't silently rewrite what Sales + Production already attested to.
+  const card = costing?.prejob_card
+  const chassisLocked = card?.status === 'pre_job_confirmed' && !!card?.chassis_make_model
+  // §3.9 refine (BA 2026-06-14) — lock the VIN read-only ONLY when one was actually attested at
+  // pre-job; if the card left it blank, the planner captures it here at ack (it then lands on the
+  // chassis record server-side).
+  const vinLocked = card?.status === 'pre_job_confirmed' && !!card?.vin_number
   const seed: ChassisEtaPayload = useMemo(() => {
     if (!costing) return { chassis_eta: '' }
     const cd = costing.chassis_data ?? {}
     return {
       chassis_eta: costing.chassis_eta ?? '',
-      chassis_vin: cd.chassis_vin ?? '',
-      chassis_model: cd.chassis_model ?? '',
+      chassis_vin: (vinLocked ? card?.vin_number : cd.chassis_vin) ?? '',
+      chassis_model: (chassisLocked ? card?.chassis_make_model : cd.chassis_model) ?? '',
       customer_dealer: cd.customer_dealer ?? '',
       tail_lift_code: cd.tail_lift_code ?? '',
       chassis_inhouse_bom: cd.chassis_inhouse_bom ?? [],
+      job_number: costing.job_number_assigned ?? '',     // WO v4.34 §0.8 — pre-fill the override with the current number
     }
-  }, [costing])
+  }, [costing, chassisLocked, vinLocked, card])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
   useEffect(() => setForm(seed), [seed])
 
@@ -146,6 +157,8 @@ export function PlanningAckPanel({
               form={form}
               setForm={setForm}
               canEdit={canAck}
+              chassisLocked={chassisLocked}
+              vinLocked={vinLocked}
             />
           )}
 
@@ -155,6 +168,19 @@ export function PlanningAckPanel({
               This job is awaiting acknowledgement by the Planning team before it can be scheduled.
               You are signed in as <strong>{profile.name}</strong> ({profile.role}).
             </p>
+            {/* WO v4.34 §0.8 — job-number override (SAP-assigned during the parallel run); hidden
+                once SAP_RETIRED or the number is locked (§0.9 forces the quote-derived value). */}
+            {canAck && !costing.sap_retired && !costing.job_number_locked && (
+              <label className="mb-2 block text-xs text-muted">
+                Job number <span className="text-[10px]">(edit only to record an SAP-assigned number)</span>
+                <input
+                  data-testid="planning-ack-job-number"
+                  value={form.job_number ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, job_number: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body"
+                />
+              </label>
+            )}
             <Tooltip k="planning_board.acknowledge_receipt_button" placement="top">
               {canAck ? (
                 <button
@@ -279,13 +305,16 @@ function ChassisExternalSection({
   form,
   setForm,
   canEdit,
+  chassisLocked,
+  vinLocked,
 }: {
   form: ChassisEtaPayload
   setForm: React.Dispatch<React.SetStateAction<ChassisEtaPayload>>
   canEdit: boolean
+  chassisLocked?: boolean
+  vinLocked?: boolean
 }) {
-  // Real-world catalogues from icb_mock_data.json (Hino/Isuzu/MAN/Volvo + Dhollandia).
-  const chassisModels = mockData.chassis_models
+  // Real-world tail-lift catalogue from icb_mock_data.json; chassis types now come from the DDM (§3.7).
   const tailLifts = mockData.tail_lifts
 
   return (
@@ -298,18 +327,25 @@ function ChassisExternalSection({
         <div className="space-y-2">
           <label className="block text-xs">
             <span className="font-semibold text-muted">Chassis type</span>
-            <select
-              value={form.chassis_model ?? ''}
-              disabled={!canEdit}
-              onChange={(e) => setForm((f) => ({ ...f, chassis_model: e.target.value }))}
-              className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm disabled:bg-surface-alt"
-            >
-              <option value="">— select —</option>
-              {chassisModels.map((c) => (
-                <option key={c.code} value={c.code}>{c.make} {c.model}</option>
-              ))}
-            </select>
-            <span className="mt-1 block text-[10px] text-muted">Pre-filled from the costing; override if the customer has changed their mind.</span>
+            {/* WO v4.34 §3.7 — the chassis-type DDM (was the hardcoded icb_mock_data list); stores the
+                display string so it agrees with the Pre-Job Card + Chassis surfaces.
+                §3.9 — locked read-only once the linked card is confirmed WITH a chassis (sign-off
+                integrity: the attested spec is the source of truth, not the planner's edit). */}
+            {chassisLocked ? (
+              <div data-testid="planning-ack-chassis-locked"
+                   className="mt-1 flex w-full items-center justify-between rounded-md border border-line bg-surface-alt px-2 py-1.5 text-sm text-body">
+                <span>{form.chassis_model || '—'}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">attested · locked</span>
+              </div>
+            ) : (
+              <ChassisModelSelect testid="planning-ack-chassis-model" value={form.chassis_model}
+                disabled={!canEdit} onChange={(v) => setForm((f) => ({ ...f, chassis_model: v }))} />
+            )}
+            <span className="mt-1 block text-[10px] text-muted">
+              {chassisLocked
+                ? 'From the confirmed Pre-Job Card — locked after sign-off.'
+                : 'Pre-filled from the costing; override if the customer has changed their mind.'}
+            </span>
           </label>
 
           <label className="block text-xs">
@@ -344,14 +380,24 @@ function ChassisExternalSection({
           <Tooltip k="costings_detail.chassis_vin_field">
             <label className="block text-xs">
               <span className="font-semibold text-muted">Chassis VIN</span>
-              <input
-                type="text"
-                value={form.chassis_vin ?? ''}
-                disabled={!canEdit}
-                onChange={(e) => setForm((f) => ({ ...f, chassis_vin: e.target.value }))}
-                placeholder="(filled when the chassis physically arrives)"
-                className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt"
-              />
+              {/* §3.9 — VIN locks read-only ONLY when one was attested at pre-job (vinLocked); if the
+                  card left it blank, the planner captures it here and it lands on the chassis record. */}
+              {vinLocked ? (
+                <div data-testid="planning-ack-vin-locked"
+                     className="mt-1 w-full rounded-md border border-line bg-surface-alt px-2 py-1.5 font-mono text-sm text-body">
+                  {form.chassis_vin || '—'}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  data-testid="planning-ack-vin"
+                  value={form.chassis_vin ?? ''}
+                  disabled={!canEdit}
+                  onChange={(e) => setForm((f) => ({ ...f, chassis_vin: e.target.value }))}
+                  placeholder="(filled when the chassis physically arrives)"
+                  className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt"
+                />
+              )}
             </label>
           </Tooltip>
 
