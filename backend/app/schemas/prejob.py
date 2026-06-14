@@ -166,3 +166,16 @@ class PrejobCardSummary(BaseModel):
     # WO v4.34 §3.9 — attested chassis spec for the Planning-ack lock-down (sign-off integrity).
     chassis_make_model: Optional[str] = None
     vin_number: Optional[str] = None
+
+
+class OutstandingSignoffOut(BaseModel):
+    """WO v4.33.1 §3.1 — a card awaiting sign-off (status='sent_for_check'), for the admin
+    Outstanding Pre-Job Sign-offs nav-aid page."""
+    id: int
+    quote_number: Optional[str] = None
+    customer_name: Optional[str] = None
+    sent_for_check_at: Optional[datetime] = None
+    sales_rep_username: Optional[str] = None
+    sales_rep_signoff_at: Optional[datetime] = None
+    planner_username: Optional[str] = None
+    planner_signoff_at: Optional[datetime] = None

@@ -176,6 +176,42 @@ def list_card_summaries(db: Session) -> list[dict]:
     } for c in cards]
 
 
+def list_outstanding_signoffs(db: Session) -> list[dict]:
+    """WO v4.33.1 §3.1 — cards awaiting sign-off (status='sent_for_check') for the admin Outstanding
+    Pre-Job Sign-offs nav-aid page. This filter is exactly 'awaiting sign-off': reject sends a card
+    back to 'draft' (clears sent_for_check_at), so there's no rejection-pending edge state. One join
+    + two batched name fetches (no N+1)."""
+    from app.database import Customer
+    cards = db.execute(
+        select(PrejobCard).where(PrejobCard.status == "sent_for_check")).scalars().all()
+    if not cards:
+        return []
+    calcs = {c.id: c for c in db.execute(
+        select(CalculationRecord).where(
+            CalculationRecord.id.in_({c.calculation_id for c in cards}))).scalars().all()}
+    cust_ids = {calc.customer_id for calc in calcs.values() if calc.customer_id}
+    customers = {cu.id: cu.name for cu in db.execute(
+        select(Customer).where(Customer.id.in_(cust_ids))).scalars().all()} if cust_ids else {}
+    uids = ({c.sales_rep_user_id for c in cards} | {c.planner_user_id for c in cards})
+    uids.discard(None)
+    names = {u.id: u.username for u in db.execute(
+        select(User).where(User.id.in_(uids or {0}))).scalars().all()}
+    out = []
+    for c in cards:
+        calc = calcs.get(c.calculation_id)
+        out.append({
+            "id": c.id,
+            "quote_number": calc.quote_number if calc else None,
+            "customer_name": customers.get(calc.customer_id) if (calc and calc.customer_id) else None,
+            "sent_for_check_at": c.sent_for_check_at,
+            "sales_rep_username": names.get(c.sales_rep_user_id),
+            "sales_rep_signoff_at": c.sales_rep_signoff_at,
+            "planner_username": names.get(c.planner_user_id),
+            "planner_signoff_at": c.planner_signoff_at,
+        })
+    return out
+
+
 def create_card(db: Session, calculation_id: int, template_id: int, user) -> PrejobCard:
     """Stage A — Internal Sales drafts from a template (§3.4 step 1-2 prefill)."""
     calc = db.get(CalculationRecord, calculation_id)

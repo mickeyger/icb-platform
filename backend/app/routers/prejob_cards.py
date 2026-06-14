@@ -10,11 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from ..database import CalculationRecord, Customer, User, get_db
-from ..deps import require_permission, require_user
+from ..deps import require_admin, require_permission, require_user
 from ..models.mes import PrejobCard, PrejobTemplate
 from ..schemas.prejob import (
-    PrejobCardCreate, PrejobCardOut, PrejobCardSummary, PrejobCardUpdate, RejectRequest,
-    SignOffRequest, SubmitForCheck, TemplateOption, UserOption,
+    OutstandingSignoffOut, PrejobCardCreate, PrejobCardOut, PrejobCardSummary, PrejobCardUpdate,
+    RejectRequest, SignOffRequest, SubmitForCheck, TemplateOption, UserOption,
 )
 from ..services import prejob_cards as svc
 
@@ -76,6 +76,13 @@ def card_summaries(db: Session = Depends(get_db), user: User = Depends(require_u
     Planning ack) supersede the legacy job-level sign-off widgets in bulk. Declared BEFORE
     /{card_id} so the static path wins the route match."""
     return svc.list_card_summaries(db)
+
+
+@router.get("/outstanding", response_model=List[OutstandingSignoffOut])
+def outstanding_signoffs(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """WO v4.33.1 §3.1 — cards in 'sent_for_check' (awaiting sign-off) for the admin Outstanding
+    Pre-Job Sign-offs nav-aid page. Admin-gated; declared BEFORE /{card_id} so the static path wins."""
+    return svc.list_outstanding_signoffs(db)
 
 
 @router.get("/by-calculation/{calculation_id}", response_model=Optional[PrejobCardOut])
