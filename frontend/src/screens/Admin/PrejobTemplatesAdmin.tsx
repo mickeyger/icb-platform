@@ -9,6 +9,7 @@ import { Card, StatusPill } from '../../components/ui/primitives'
 import { Spinner } from '../../components/ui/feedback'
 import { useToast } from '../../components/ui/toast'
 import { apiDelete, apiGet, apiPatch, apiPost, handleApiError } from '../../lib/api'
+import { compareTemplatesBySize } from '../../lib/templateSort'
 
 interface SectionItem { text: string; note?: string | null; sub_items?: string[] | null; sap_item_code?: string | null }
 interface Section { name: string; items: SectionItem[] }
@@ -58,6 +59,7 @@ export function PrejobTemplatesAdmin() {
     (!line || r.product_line === line) &&
     (!status || (status === 'active' ? r.is_active : !r.is_active)))
   const sorted = [...filtered].sort((a, b) => {                 // client-side: header click re-sorts
+    if (sort.key === 'name') return compareTemplatesBySize(a, b) * sort.dir   // §3.6 — human-numeric (size buckets)
     const av = a[sort.key]; const bv = b[sort.key]
     if (av == null && bv == null) return 0
     if (av == null) return 1                                    // nulls (e.g. blank size) sort last
