@@ -40,7 +40,7 @@ export function PrejobSignoffPage() {
   const { id, role } = useParams<{ id: string; role: string }>()
   const nav = useNavigate()
   const toast = useToast()
-  const { hasPermission, isAdmin, apiMode } = useAppData()
+  const { hasPermission, isAdmin, apiMode, profile } = useAppData()
   const meta = role === 'sales' || role === 'planner' ? ROLE_META[role] : null
   const allowed = !!meta && (isAdmin || hasPermission(meta.perm))
 
@@ -49,6 +49,7 @@ export function PrejobSignoffPage() {
   const [busy, setBusy] = useState(false)
   const [attestOpen, setAttestOpen] = useState(false)
   const [attestation, setAttestation] = useState('')
+  const [confirmed, setConfirmed] = useState(false)        // §3.2 — required attestation checkbox
   const [rejectOpen, setRejectOpen] = useState(false)
   const [reason, setReason] = useState('')
 
@@ -64,12 +65,23 @@ export function PrejobSignoffPage() {
   const mySignoffAt = useMemo(() => (card && role === 'sales'
     ? card.sales_rep_signoff_at : card?.planner_signoff_at) ?? null, [card, role])
 
+  // WO v4.33.1 §3.2 — the fixed legal attestation statement (interpolated), mirroring the legacy
+  // PreJobSignoffModal. Stored AS the attestation (with any optional notes appended) so the exact
+  // confirmed text is the audit record, not just a re-derivable assumption.
+  const boilerplate = card && meta
+    ? `I, ${profile.name} (${meta.label}), confirm that I have reviewed the Pre-Job Card for quote `
+      + `${card.quote_number ?? '—'} and verify the specifications are true and correct. This `
+      + `electronic confirmation is recorded with timestamp and user identity.`
+    : ''
+
   const doSignoff = async () => {
-    if (!card || !meta) return
+    if (!card || !meta || !confirmed) return
     setBusy(true)
     try {
+      const notes = attestation.trim()
       const updated = await apiPost<PrejobCard>(
-        `/api/prejob-cards/${card.id}/signoff/${role}`, { attestation })
+        `/api/prejob-cards/${card.id}/signoff/${role}`,
+        { attestation: notes ? `${boilerplate}\n\n${notes}` : boilerplate })
       setCard(updated)
       setAttestOpen(false)
       toast.push({
@@ -217,7 +229,7 @@ export function PrejobSignoffPage() {
                 className="flex items-center gap-1 rounded-md border border-status-red px-4 py-2 text-sm font-semibold text-status-red hover:bg-status-red/10">
                 <X size={14} /> Reject
               </button>
-              <button onClick={() => { setAttestation(''); setAttestOpen(true) }} data-testid="prejob-signoff-btn"
+              <button onClick={() => { setAttestation(''); setConfirmed(false); setAttestOpen(true) }} data-testid="prejob-signoff-btn"
                 className="flex items-center gap-1 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark">
                 <Check size={14} /> Sign off as {meta.label}
               </button>
@@ -236,13 +248,25 @@ export function PrejobSignoffPage() {
           {/* Attestation modal (§0.12) */}
           <Modal open={attestOpen} onClose={() => setAttestOpen(false)} className="max-w-md">
             <h3 className="mb-2 text-base font-bold text-body">{meta.label} sign-off attestation</h3>
-            <textarea value={attestation} rows={3} autoFocus data-testid="prejob-attestation"
-              placeholder={`e.g. I, ${meta.label}, confirm this Pre-Job Card is correct.`}
-              onChange={(e) => setAttestation(e.target.value)}
-              className="w-full rounded-md border border-line px-2 py-1.5 text-sm text-body" />
+            {/* §3.2 — fixed legal boilerplate + REQUIRED confirmation checkbox (legacy
+                PreJobSignoffModal pattern) + optional notes below; Sign off gated on the checkbox. */}
+            <p data-testid="prejob-attestation-boilerplate"
+              className="mb-3 rounded-md border border-line bg-surface-alt p-2 text-xs leading-relaxed text-body">
+              {boilerplate}
+            </p>
+            <label className="mb-3 flex cursor-pointer items-start gap-2 text-sm text-body">
+              <input type="checkbox" data-testid="prejob-attestation-checkbox" checked={confirmed}
+                onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>I confirm the statement above and authorise this sign-off to be recorded against my user account.</span>
+            </label>
+            <label className="block text-xs text-muted">Additional notes (optional)
+              <textarea value={attestation} rows={2} data-testid="prejob-attestation"
+                onChange={(e) => setAttestation(e.target.value)}
+                className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body" />
+            </label>
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={() => setAttestOpen(false)} className="rounded-md border border-line px-3 py-1.5 text-sm">Cancel</button>
-              <button onClick={() => void doSignoff()} disabled={busy || !attestation.trim()}
+              <button onClick={() => void doSignoff()} disabled={busy || !confirmed}
                 data-testid="prejob-attestation-confirm"
                 className="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
                 <Send size={13} /> Sign off

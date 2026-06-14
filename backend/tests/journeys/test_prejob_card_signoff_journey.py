@@ -82,7 +82,8 @@ def test_planner_signs_then_admin_completes(page: Page, live_server: str, role_u
     page.get_by_test_id("prejob-signoff-btn").click()
     attest = page.get_by_test_id("prejob-attestation")
     expect(attest).to_be_visible(timeout=T)
-    attest.fill("I, Planner, confirm feasibility — chassis fits, gap workable.")
+    attest.fill("I, Planner, confirm feasibility — chassis fits, gap workable.")   # §3.2 — optional notes
+    page.get_by_test_id("prejob-attestation-checkbox").check()                     # §3.2 — required to enable Sign off
     # NO screenshot between fill and click: a full_page shot scrolls the page under the
     # fixed-position modal and destabilises the button (the §3.7 flake class). Instrumented —
     # a failing POST prints its error detail into the CI log.
@@ -106,6 +107,7 @@ def test_planner_signs_then_admin_completes(page: Page, live_server: str, role_u
     attest = page.get_by_test_id("prejob-attestation")
     expect(attest).to_be_visible(timeout=T)
     attest.fill("Commercial spec matches the sale.")
+    page.get_by_test_id("prejob-attestation-checkbox").check()                     # §3.2 — required
     page.get_by_test_id("prejob-attestation-confirm").click()
     expect(page.get_by_text("Pre-Job CONFIRMED", exact=False).first).to_be_visible(timeout=T)
     shot(page, "03-confirmed", journey=JOURNEY)
