@@ -32,9 +32,13 @@ def _purge(db) -> None:
     db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'J434A%'"))
     if auto_ids:
         db.execute(text("DELETE FROM icb_mes.chassis_records WHERE id = ANY(:ids)"), {"ids": auto_ids})
-    db.execute(text("DELETE FROM icb_mes.chassis_records WHERE vin LIKE 'J434A%' OR "
-                    "(created_via='pre_job_card' AND make=:mk AND status IN ('expected','expected_orphaned'))"),
-               {"mk": CHASSIS_TYPE})
+    # The make-based fallback must NOT touch a job-linked (real) chassis — exclude any still
+    # referenced by a production_job (ON DELETE RESTRICT). Our own auto-created rows were already
+    # unlinked + deleted above via auto_ids.
+    db.execute(text("DELETE FROM icb_mes.chassis_records WHERE (vin LIKE 'J434A%' OR "
+                    "(created_via='pre_job_card' AND make=:mk AND status IN ('expected','expected_orphaned'))) "
+                    "AND id NOT IN (SELECT chassis_record_id FROM icb_mes.production_jobs "
+                    "WHERE chassis_record_id IS NOT NULL)"), {"mk": CHASSIS_TYPE})
     db.execute(text("DELETE FROM icb_mes.prejob_templates WHERE name LIKE 'J434A%'"))
     db.commit()
 

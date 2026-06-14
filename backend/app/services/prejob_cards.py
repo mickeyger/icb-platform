@@ -168,6 +168,11 @@ def list_card_summaries(db: Session) -> list[dict]:
         "sales_rep_username": names.get(c.sales_rep_user_id),
         "planner_signoff_at": c.planner_signoff_at,
         "planner_username": names.get(c.planner_user_id),
+        # WO v4.34 §3.9 — the attested chassis spec, so the Planning-ack panel can LOCK
+        # chassis_type + VIN read-only once the card is confirmed with a chassis supplied
+        # (sign-off integrity: no silent rewrite of an attested spec post-confirmation).
+        "chassis_make_model": c.chassis_make_model,
+        "vin_number": c.vin_number,
     } for c in cards]
 
 

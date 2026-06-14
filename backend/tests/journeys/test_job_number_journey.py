@@ -39,7 +39,8 @@ def staged():
         carded = {c.calculation_id for c in db.query(PrejobCard).all()}
         calc = (db.query(CalculationRecord)
                 .filter(~CalculationRecord.id.in_((taken | carded) or {0}),
-                        CalculationRecord.quote_number.isnot(None))
+                        CalculationRecord.quote_number.isnot(None),
+                        CalculationRecord.is_repair.is_(False))   # board ack candidates aren't repairs
                 .order_by(CalculationRecord.id.desc()).first())
         if calc is None:
             pytest.skip("no free calculation on this DB")

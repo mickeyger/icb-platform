@@ -24,8 +24,9 @@ CHASSIS_TYPE = "Hino 500 1627 LWB (EJ5)"
 def _purge(db) -> None:
     from sqlalchemy import text
     db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE body_description LIKE 'J434B%'"))
-    db.execute(text("DELETE FROM icb_mes.chassis_records WHERE created_via='pre_job_card' "
-                    "AND make=:mk AND status IN ('expected','expected_orphaned')"), {"mk": CHASSIS_TYPE})
+    # Target ONLY this journey's chassis (created_by='j434b') — a make-based purge would catch real
+    # pre_job_card chassis (e.g. the #32746 job's), tripping ON DELETE RESTRICT.
+    db.execute(text("DELETE FROM icb_mes.chassis_records WHERE created_by='j434b'"))
     db.execute(text("DELETE FROM icb_mes.prejob_templates WHERE name LIKE 'J434B%'"))
     db.commit()
 

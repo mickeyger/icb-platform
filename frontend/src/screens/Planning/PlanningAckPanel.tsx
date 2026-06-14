@@ -34,19 +34,24 @@ export function PlanningAckPanel({
   // open, then mutated as the planner edits fields. The Acknowledge button only
   // enables once `eta` is non-empty.
   const inHouse = costing?.chassis_supplied_by === 'in-house'
+  // WO v4.34 §3.9 — sign-off integrity: once the linked Pre-Job Card is CONFIRMED with a chassis
+  // supplied, that attested spec is the source of truth. chassis_type + VIN lock read-only on the
+  // ack so a planner can't silently rewrite what Sales + Production already attested to.
+  const card = costing?.prejob_card
+  const chassisLocked = card?.status === 'pre_job_confirmed' && !!card?.chassis_make_model
   const seed: ChassisEtaPayload = useMemo(() => {
     if (!costing) return { chassis_eta: '' }
     const cd = costing.chassis_data ?? {}
     return {
       chassis_eta: costing.chassis_eta ?? '',
-      chassis_vin: cd.chassis_vin ?? '',
-      chassis_model: cd.chassis_model ?? '',
+      chassis_vin: (chassisLocked ? card?.vin_number : cd.chassis_vin) ?? '',
+      chassis_model: (chassisLocked ? card?.chassis_make_model : cd.chassis_model) ?? '',
       customer_dealer: cd.customer_dealer ?? '',
       tail_lift_code: cd.tail_lift_code ?? '',
       chassis_inhouse_bom: cd.chassis_inhouse_bom ?? [],
       job_number: costing.job_number_assigned ?? '',     // WO v4.34 §0.8 — pre-fill the override with the current number
     }
-  }, [costing])
+  }, [costing, chassisLocked, card])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
   useEffect(() => setForm(seed), [seed])
 
@@ -148,6 +153,7 @@ export function PlanningAckPanel({
               form={form}
               setForm={setForm}
               canEdit={canAck}
+              chassisLocked={chassisLocked}
             />
           )}
 
@@ -294,10 +300,12 @@ function ChassisExternalSection({
   form,
   setForm,
   canEdit,
+  chassisLocked,
 }: {
   form: ChassisEtaPayload
   setForm: React.Dispatch<React.SetStateAction<ChassisEtaPayload>>
   canEdit: boolean
+  chassisLocked?: boolean
 }) {
   // Real-world tail-lift catalogue from icb_mock_data.json; chassis types now come from the DDM (§3.7).
   const tailLifts = mockData.tail_lifts
@@ -313,10 +321,24 @@ function ChassisExternalSection({
           <label className="block text-xs">
             <span className="font-semibold text-muted">Chassis type</span>
             {/* WO v4.34 §3.7 — the chassis-type DDM (was the hardcoded icb_mock_data list); stores the
-                display string so it agrees with the Pre-Job Card + Chassis surfaces. */}
-            <ChassisModelSelect testid="planning-ack-chassis-model" value={form.chassis_model}
-              disabled={!canEdit} onChange={(v) => setForm((f) => ({ ...f, chassis_model: v }))} />
-            <span className="mt-1 block text-[10px] text-muted">Pre-filled from the costing; override if the customer has changed their mind.</span>
+                display string so it agrees with the Pre-Job Card + Chassis surfaces.
+                §3.9 — locked read-only once the linked card is confirmed WITH a chassis (sign-off
+                integrity: the attested spec is the source of truth, not the planner's edit). */}
+            {chassisLocked ? (
+              <div data-testid="planning-ack-chassis-locked"
+                   className="mt-1 flex w-full items-center justify-between rounded-md border border-line bg-surface-alt px-2 py-1.5 text-sm text-body">
+                <span>{form.chassis_model || '—'}</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">attested · locked</span>
+              </div>
+            ) : (
+              <ChassisModelSelect testid="planning-ack-chassis-model" value={form.chassis_model}
+                disabled={!canEdit} onChange={(v) => setForm((f) => ({ ...f, chassis_model: v }))} />
+            )}
+            <span className="mt-1 block text-[10px] text-muted">
+              {chassisLocked
+                ? 'From the confirmed Pre-Job Card — locked after sign-off.'
+                : 'Pre-filled from the costing; override if the customer has changed their mind.'}
+            </span>
           </label>
 
           <label className="block text-xs">
@@ -351,14 +373,24 @@ function ChassisExternalSection({
           <Tooltip k="costings_detail.chassis_vin_field">
             <label className="block text-xs">
               <span className="font-semibold text-muted">Chassis VIN</span>
-              <input
-                type="text"
-                value={form.chassis_vin ?? ''}
-                disabled={!canEdit}
-                onChange={(e) => setForm((f) => ({ ...f, chassis_vin: e.target.value }))}
-                placeholder="(filled when the chassis physically arrives)"
-                className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt"
-              />
+              {/* §3.9 — VIN locks read-only with the chassis type once the card is confirmed; the
+                  real VIN is captured later at chassis-received, never rewritten on the ack. */}
+              {chassisLocked ? (
+                <div data-testid="planning-ack-vin-locked"
+                     className="mt-1 w-full rounded-md border border-line bg-surface-alt px-2 py-1.5 font-mono text-sm text-body">
+                  {form.chassis_vin || '—'}
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  data-testid="planning-ack-vin"
+                  value={form.chassis_vin ?? ''}
+                  disabled={!canEdit}
+                  onChange={(e) => setForm((f) => ({ ...f, chassis_vin: e.target.value }))}
+                  placeholder="(filled when the chassis physically arrives)"
+                  className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt"
+                />
+              )}
             </label>
           </Tooltip>
 

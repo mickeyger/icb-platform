@@ -148,6 +148,8 @@ export interface PrejobCardSummary {
   sales_rep_username: string | null
   planner_signoff_at: string | null
   planner_username: string | null
+  chassis_make_model?: string | null   // WO v4.34 §3.9 — attested spec for the Planning-ack lock-down
+  vin_number?: string | null
 }
 
 export interface ChassisBomItem {
