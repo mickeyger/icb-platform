@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X } from 'lucide-react'
 
-import { apiGet, apiPatch, handleApiError } from '../../lib/api'
+import { apiGet, apiPatch, apiPost, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { Card } from '../../components/ui/primitives'
@@ -19,6 +19,22 @@ function ProvenancePill({ via, source }: { via?: string | null; source: string }
   const label = p?.label ?? source.replace(/_/g, ' ')
   const style = p?.style ?? 'bg-surface-alt text-muted'
   return <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${style}`}>{label}</span>
+}
+
+// WO v4.34.1 §3.4b — VIN provenance pill (where a captured VIN came from).
+const VIN_SOURCE: Record<string, string> = {
+  chassis_page_manual: 'VIN · manually captured',
+  vcl: 'VIN · from VCL',
+}
+function VinSourcePill({ source }: { source?: string | null }) {
+  if (!source) return null
+  const label = VIN_SOURCE[source] ?? `VIN · ${source.replace(/_/g, ' ')}`
+  return (
+    <span data-testid="chassis-vin-source"
+          className="inline-block rounded-full bg-primary-light/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+      {label}
+    </span>
+  )
 }
 
 function Field({ label, value }: { label: string; value?: string | null }) {
@@ -78,6 +94,7 @@ export function ChassisDetail() {
   const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
   const [capture, setCapture] = useState<'VCL' | 'DCL' | null>(null)
   const [editing, setEditing] = useState(false)
+  const [capturingVin, setCapturingVin] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -120,8 +137,12 @@ export function ChassisDetail() {
 
       <Card className="mb-4 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h1 className="flex items-center gap-2 text-lg font-bold text-body">
-            <Truck size={20} /> <span className="font-mono">{rec.vin}</span>
+          <h1 className="flex flex-wrap items-center gap-2 text-lg font-bold text-body">
+            <Truck size={20} />
+            {rec.vin
+              ? <span className="font-mono">{rec.vin}</span>
+              : <span className="font-mono text-muted">(no VIN yet)</span>}
+            <VinSourcePill source={rec.vin_source} />
           </h1>
           <div className="flex items-center gap-2">
             <ProvenancePill via={rec.created_via} source={rec.source} />
@@ -130,6 +151,7 @@ export function ChassisDetail() {
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="Customer" value={rec.customer_name} />
+          <Field label="Dealer" value={rec.dealer_name} />
           <Field label="Contact" value={rec.contact_person} />
           <Field label="Telephone" value={rec.telephone} />
           <Field label="Job number" value={rec.job_number} />
@@ -144,6 +166,14 @@ export function ChassisDetail() {
             <button data-testid="chassis-edit" onClick={() => setEditing(true)}
                     className="flex items-center gap-1.5 rounded-md border border-line px-4 py-2.5 text-sm font-semibold text-body hover:bg-surface-alt">
               <Pencil size={16} /> Edit details
+            </button>
+          )}
+          {/* WO v4.34.1 §3.4b (Gap A) — late VIN capture: only when the VIN is still NULL (the
+              backend enforces NULL→value write-once) and the user can edit chassis (planner/admin). */}
+          {canEdit && !rec.vin && (
+            <button data-testid="chassis-capture-vin" onClick={() => setCapturingVin(true)}
+                    className="flex items-center gap-1.5 rounded-md border border-primary bg-primary-light/40 px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary-light">
+              <Pencil size={16} /> Capture VIN
             </button>
           )}
           {canVcl && (
@@ -180,6 +210,10 @@ export function ChassisDetail() {
       {editing && (
         <EditChassisModal rec={rec} onClose={() => setEditing(false)}
                           onSaved={() => { setEditing(false); load() }} />
+      )}
+      {capturingVin && (
+        <CaptureVinModal recordId={rec.id} onClose={() => setCapturingVin(false)}
+                         onSaved={() => { setCapturingVin(false); load() }} />
       )}
       {capture && (
         <VclDclForm
@@ -272,6 +306,60 @@ function EditChassisModal({ rec, onClose, onSaved }: {
           <button data-testid="chassis-edit-save" onClick={save} disabled={saving}
                   className="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
             {saving ? <Spinner size={16} /> : null} Save changes
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** WO v4.34.1 §3.4b (Gap A) — late VIN capture. Shown only while the VIN is NULL; the backend
+ * accepts a NULL→value write once and stamps vin_source='chassis_page_manual'. A 409 (already set,
+ * or duplicate VIN) surfaces as a toast. */
+function CaptureVinModal({ recordId, onClose, onSaved }: {
+  recordId: number
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const toast = useToast()
+  const [vin, setVin] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    if (!vin.trim()) { toast.push({ kind: 'error', message: 'VIN is required.' }); return }
+    setSaving(true)
+    try {
+      await apiPost(`/api/chassis-records/${recordId}/vin`, { vin: vin.trim() })
+      toast.push({ kind: 'ok', message: 'VIN captured.' })
+      onSaved()
+    } catch (e) {
+      handleApiError(e, toast.push)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div data-testid="chassis-capture-vin-form" onClick={(e) => e.stopPropagation()}
+           className="w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-body">Capture VIN</h3>
+          <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={20} /></button>
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          Enter the chassis VIN. It can be set once here while it is still blank — afterwards it is
+          read-only on this page (an attested VIN can't be silently rewritten).
+        </p>
+        <label className="block text-xs"><span className="font-semibold text-muted">VIN <span className="text-status-red">*</span></span>
+          <input data-testid="chassis-capture-vin-input" value={vin} onChange={(e) => setVin(e.target.value)}
+                 autoFocus placeholder="Vehicle ID / VIN"
+                 className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" /></label>
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-md border border-line py-2.5 text-sm font-semibold">Cancel</button>
+          <button data-testid="chassis-capture-vin-save" onClick={save} disabled={saving}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+            {saving ? <Spinner size={16} /> : null} Capture VIN
           </button>
         </div>
       </div>

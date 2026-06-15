@@ -14,6 +14,7 @@ from ..deps import require_permission, require_user
 from ..schemas.chassis import (
     AssemblyAssignRequest, BayOut, ChassisEventCapture, ChassisEventOut, ChassisModelOut,
     ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
+    ChassisVinCapture,
 )
 from ..services import chassis as svc
 
@@ -78,6 +79,15 @@ def create_record(payload: ChassisRecordCreate, db: Session = Depends(get_db),
 def update_record(record_id: int, payload: ChassisRecordUpdate, db: Session = Depends(get_db),
                   user: User = Depends(require_permission("chassis.update"))):
     svc.update_chassis(db, record_id, payload, who=user.username)
+    return svc.get_detail(db, record_id)
+
+
+@router.post("/{record_id}/vin", response_model=ChassisRecordDetail)
+def capture_vin(record_id: int, payload: ChassisVinCapture, db: Session = Depends(get_db),
+                user: User = Depends(require_permission("chassis.update"))):
+    """WO v4.34.1 §3.4b (Gap A) — late VIN capture (planner/admin via chassis.update). The service
+    enforces the NULL→value write-once guard + stamps vin_source='chassis_page_manual'."""
+    svc.capture_vin(db, record_id, payload.vin, who=user.username)
     return svc.get_detail(db, record_id)
 
 

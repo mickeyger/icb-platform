@@ -161,7 +161,9 @@ export interface ChassisBomItem {
 export interface ChassisData {
   chassis_vin?: string
   chassis_model?: string
-  customer_dealer?: string
+  customer_dealer?: string                   // WO v4.34.1 §0.2 — legacy free-text, superseded by dealer_id
+  dealer_id?: number | null                  // WO v4.34.1 §0.3 — structured chassis supplier (customers.is_dealer)
+  dealer_name?: string                       // display label for the picked dealer
   tail_lift_code?: string
   chassis_inhouse_bom?: ChassisBomItem[]
 }

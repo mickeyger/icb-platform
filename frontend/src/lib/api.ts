@@ -76,6 +76,13 @@ export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 
+export const apiPut = <T>(path: string, body?: unknown): Promise<T> =>
+  request<T>(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
+
 export const apiDelete = <T>(path: string): Promise<T> => request<T>(path, { method: 'DELETE' })
 
 /** Multipart upload (FormData). No Content-Type header → the browser sets the multipart boundary;

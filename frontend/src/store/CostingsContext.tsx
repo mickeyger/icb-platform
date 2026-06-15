@@ -59,7 +59,9 @@ export interface ChassisEtaPayload {
   chassis_eta: string                        // ISO date
   chassis_vin?: string
   chassis_model?: string
-  customer_dealer?: string
+  customer_dealer?: string                   // WO v4.34.1 §0.2 — legacy free-text, superseded by dealer_id
+  dealer_id?: number | null                  // WO v4.34.1 §0.3 — structured chassis supplier (customers.is_dealer)
+  dealer_name?: string                       // display label for the picked dealer (not persisted server-side)
   tail_lift_code?: string
   chassis_inhouse_bom?: { category: string; description: string; item_code: string }[]
   job_number?: string                        // WO v4.34 §0.8 — Planning-ack override (SAP-assigned)
@@ -372,6 +374,7 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
           chassis_vin: payload?.chassis_vin,
           chassis_model: payload?.chassis_model,
           customer_dealer: payload?.customer_dealer,
+          dealer_id: payload?.dealer_id ?? null,       // §0.3 — structured chassis supplier → chassis_records.dealer_id
           tail_lift_code: payload?.tail_lift_code,
           chassis_inhouse_bom: payload?.chassis_inhouse_bom,
           job_number: payload?.job_number,             // §0.8 — override (backend ignores if unchanged/locked/retired)
@@ -410,6 +413,8 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
             ...(payload.chassis_vin       !== undefined ? { chassis_vin: payload.chassis_vin } : {}),
             ...(payload.chassis_model     !== undefined ? { chassis_model: payload.chassis_model } : {}),
             ...(payload.customer_dealer   !== undefined ? { customer_dealer: payload.customer_dealer } : {}),
+            ...(payload.dealer_id         !== undefined ? { dealer_id: payload.dealer_id } : {}),
+            ...(payload.dealer_name       !== undefined ? { dealer_name: payload.dealer_name } : {}),
             ...(payload.tail_lift_code    !== undefined ? { tail_lift_code: payload.tail_lift_code } : {}),
             ...(payload.chassis_inhouse_bom !== undefined ? { chassis_inhouse_bom: payload.chassis_inhouse_bom } : {}),
           }

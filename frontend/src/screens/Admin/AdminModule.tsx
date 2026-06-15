@@ -8,6 +8,7 @@ import { useAppData } from '../../store/AppDataContext'
 import { AdminCrudTable } from './AdminCrudTable'
 import { PrejobTemplatesAdmin } from './PrejobTemplatesAdmin'
 import { OutstandingPrejobSignoffsPage } from './OutstandingPrejobSignoffsPage'
+import { CustomersAdmin } from './CustomersAdmin'
 import { ADMIN_ORDER, ADMIN_RESOURCES } from './adminResources'
 
 // WO v4.33.1 §3.1 — custom (non-CRUD) admin screens dispatch by resource key. A future custom
@@ -16,6 +17,7 @@ import { ADMIN_ORDER, ADMIN_RESOURCES } from './adminResources'
 const CUSTOM_ADMIN_SCREENS: Record<string, ComponentType> = {
   'prejob-templates': PrejobTemplatesAdmin,
   'prejob-signoffs': OutstandingPrejobSignoffsPage,
+  customers: CustomersAdmin,                       // WO v4.34.1 §3.5
 }
 
 export function AdminModule() {

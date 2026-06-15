@@ -8,6 +8,7 @@ import { useAppData } from '../../store/AppDataContext'
 import { useCostings, type ChassisCatalogue, type ChassisEtaPayload } from '../../store/CostingsContext'
 import { data as mockData } from '../../data/mockData'
 import { ChassisModelSelect } from '../Chassis/ChassisModelSelect'
+import { DealerSelect } from '../Chassis/DealerSelect'
 import { zar, dmy, hhmm } from '../../lib/format'
 import type { Costing } from '../../data/costingsData'
 
@@ -51,6 +52,8 @@ export function PlanningAckPanel({
       chassis_vin: (vinLocked ? card?.vin_number : cd.chassis_vin) ?? '',
       chassis_model: (chassisLocked ? card?.chassis_make_model : cd.chassis_model) ?? '',
       customer_dealer: cd.customer_dealer ?? '',
+      dealer_id: cd.dealer_id ?? null,                   // WO v4.34.1 §0.3 — structured chassis supplier
+      dealer_name: cd.dealer_name ?? '',
       tail_lift_code: cd.tail_lift_code ?? '',
       chassis_inhouse_bom: cd.chassis_inhouse_bom ?? [],
       job_number: costing.job_number_assigned ?? '',     // WO v4.34 §0.8 — pre-fill the override with the current number
@@ -349,15 +352,20 @@ function ChassisExternalSection({
           </label>
 
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Customer dealer</span>
-            <input
-              type="text"
-              value={form.customer_dealer ?? ''}
+            <span className="font-semibold text-muted">Chassis dealer <span className="text-[10px]">(supplier)</span></span>
+            {/* WO v4.34.1 §3.3 — structured dealer picker (replaces the free-text input). Stores the
+                dealer_id; propagated onto chassis_records.dealer_id at ack. Not part of the §3.9
+                sign-off lock (only chassis_type + VIN lock), so it stays editable here. */}
+            <DealerSelect
+              testid="planning-ack-dealer"
+              value={form.dealer_id}
+              valueName={form.dealer_name}
               disabled={!canEdit}
-              onChange={(e) => setForm((f) => ({ ...f, customer_dealer: e.target.value }))}
-              placeholder="e.g. Rustenburg Toyota"
-              className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm disabled:bg-surface-alt"
+              onChange={(id, name) => setForm((f) => ({ ...f, dealer_id: id, dealer_name: name }))}
             />
+            <span className="mt-1 block text-[10px] text-muted">
+              The dealer that supplied this chassis — from the Customers list (flagged as dealers).
+            </span>
           </label>
 
           <Tooltip k="costings_detail.chassis_eta_picker">

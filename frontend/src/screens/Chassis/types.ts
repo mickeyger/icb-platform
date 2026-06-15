@@ -32,6 +32,9 @@ export interface ChassisRecord {
   source: string
   created_via?: string | null               // WO v4.34 §0.4 — provenance pill
   created_source_ref?: string | null
+  dealer_id?: number | null                 // WO v4.34.1 §0.3 — supplying dealer (customers.is_dealer)
+  dealer_name?: string | null               // WO v4.34.1 §3.4 — resolved cross-schema
+  vin_source?: string | null                // WO v4.34.1 §0.17 — VIN provenance (chassis_page_manual = Gap A)
   event_count: number
   latest_event_date?: string | null
 }

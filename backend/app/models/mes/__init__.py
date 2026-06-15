@@ -49,6 +49,7 @@ CROSS_SCHEMA_FKS = [
     ("stock_counts", "branch_id", "branches", "RESTRICT"),
     ("discrepancies", "raised_to_buyer_user_id", "users", "SET NULL"),
     ("po_suggestions", "raised_by_user_id", "users", "SET NULL"),
+    ("chassis_records", "dealer_id", "customers", "SET NULL"),   # WO v4.34.1 §0.3 (0022)
 ]
 
 
@@ -692,6 +693,7 @@ class ChassisRecord(Base):
     __table_args__ = (
         UniqueConstraint("vin", name="uq_chassis_records_vin"),
         Index("ix_chassis_records_job_number", "job_number"),
+        Index("ix_chassis_records_dealer_id", "dealer_id"),    # WO v4.34.1 §0.3 (0022) — keeps autogenerate clean
         {"schema": "icb_mes"},
     )
     id = Column(Integer, primary_key=True)
@@ -722,6 +724,10 @@ class ChassisRecord(Base):
     # WO v4.34 §0.4 (0020) — pipeline provenance: how + whence this row was created.
     created_via = Column(String(32))                       # pre_job_card | planning_job_create | manual_chassis_menu | legacy_import_v4_28
     created_source_ref = Column(String(64))                # e.g. "A32744/06/2026" or "Planning · Job 32791"
+    # WO v4.34.1 §0.3 — the dealer that SUPPLIED this chassis (cross-schema FK → icb_costings.customers
+    # with is_dealer=true; plain Integer here, FK created in migration 0022 per ADR 0006, SET NULL).
+    dealer_id = Column(Integer)
+    vin_source = Column(String(32))                        # WO v4.34.1 §0.17 — VIN provenance: vcl | chassis_page_manual (Gap A) | …
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     created_by = Column(String(128))

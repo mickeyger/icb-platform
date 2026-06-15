@@ -338,6 +338,11 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                     ChassisRecord.vin == vin, ChassisRecord.id != chassis.id)).first()
                 if not clash:
                     chassis.vin = vin
+            # WO v4.34.1 §0.3 — stamp the planner's chosen chassis supplier onto the linked chassis.
+            # Explicit planner choice → last-write wins; None (field absent) leaves it untouched.
+            dealer_id = (chassis_data or {}).get("dealer_id")
+            if dealer_id is not None:
+                chassis.dealer_id = int(dealer_id)
             chassis.updated_by = actor
     job.status = "planning"
     # hotfix (fix/prejob-card-status-sync) — keep the costing's status in lock-step so the Costings

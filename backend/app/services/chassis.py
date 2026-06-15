@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.database import Customer            # WO v4.34.1 §3.4 — cross-schema dealer-name resolve
 from app.models.mes import (
     AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, ProductionJob,
 )
@@ -55,6 +56,15 @@ def _now():
     return datetime.now(timezone.utc)
 
 
+def _dealer_names(db: Session, dealer_ids) -> dict:
+    """WO v4.34.1 §3.4 — batch-resolve dealer_id → customers.name (cross-schema icb_costings)."""
+    ids = {d for d in dealer_ids if d}
+    if not ids:
+        return {}
+    return {cid: name for cid, name in db.execute(
+        select(Customer.id, Customer.name).where(Customer.id.in_(ids))).all()}
+
+
 def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> list[ChassisRecordOut]:
     stmt = select(ChassisRecord)
     if status:
@@ -86,12 +96,14 @@ def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> lis
             .order_by(ChassisLifecycleEvent.chassis_record_id, ChassisLifecycleEvent.id.desc())
         ).all():
             bay_by_rec.setdefault(rec_id, bay_id)        # first per record = latest (id desc)
+    dealer_names = _dealer_names(db, (r.dealer_id for r in recs))   # §3.4 — batch cross-schema resolve
     out = []
     for r in recs:
         n, latest = agg.get(r.id, (0, None))
         o = ChassisRecordOut.model_validate(r)
         o.event_count, o.latest_event_date = n, latest
         o.current_assembly_bay_id = bay_by_rec.get(r.id)
+        o.dealer_name = dealer_names.get(r.dealer_id)
         out.append(o)
     return out
 
@@ -126,6 +138,7 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     detail = ChassisRecordDetail.model_validate(rec)
     detail.event_count = len(events)
     detail.latest_event_date = max((e.event_date for e in events if e.event_date), default=None)
+    detail.dealer_name = _dealer_names(db, [rec.dealer_id]).get(rec.dealer_id)   # §3.4 — cross-schema resolve
     if rec.status == "in_assembly":                  # current bay derived from the latest event (§0.12)
         aa = [e for e in events if e.event_type == "assembly_assigned"]
         detail.current_assembly_bay_id = max(aa, key=lambda e: e.id).assembly_bay_id if aa else None
@@ -185,6 +198,36 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
         raise HTTPException(status_code=404, detail="chassis record not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(rec, k, v)
+    rec.updated_by = who
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecord:
+    """WO v4.34.1 §3.4b (Gap A) — late VIN capture from the Chassis page.
+
+    The backend NULL-state guard: a VIN write is accepted ONLY when the current value IS NULL —
+    a one-way NULL→value transition. This is the FIRST real backend enforcement of the sign-off
+    integrity that v4.34 implemented frontend-only (ADR 0022 footnote): an attested/known VIN can
+    never be silently rewritten through this path. Stamps vin_source='chassis_page_manual' for
+    provenance, and refuses a value already anchoring another chassis (uq_chassis_records_vin)."""
+    rec = db.get(ChassisRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    vin = (vin or "").strip()
+    if not vin:
+        raise HTTPException(status_code=422, detail="vin is required")
+    if rec.vin:                                            # NULL-state guard — write-once
+        raise HTTPException(status_code=409,
+                            detail=f"VIN already set ({rec.vin}); it cannot be overwritten from the Chassis page")
+    vin = vin[:32]
+    clash = db.execute(select(ChassisRecord.id).where(
+        ChassisRecord.vin == vin, ChassisRecord.id != record_id)).first()
+    if clash:
+        raise HTTPException(status_code=409, detail=f"VIN {vin} already anchors another chassis record")
+    rec.vin = vin
+    rec.vin_source = "chassis_page_manual"
     rec.updated_by = who
     db.commit()
     db.refresh(rec)
