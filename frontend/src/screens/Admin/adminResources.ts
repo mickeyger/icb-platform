@@ -138,6 +138,16 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
     fields: [],
     custom: true,
   },
+  // WO v4.34.1 §3.5 — Customers (searchable 2160-row list + detail + Contacts panel CRUD +
+  // is_dealer flag). Custom screen: master-detail, not the flat AdminCrudTable.
+  customers: {
+    key: 'customers',
+    title: 'Customers',
+    basePath: '/api/customers',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
 }
 
-export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs']
+export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers']
