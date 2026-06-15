@@ -187,6 +187,7 @@ def planning_ack(
         "chassis_vin": body.chassis_vin, "chassis_model": body.chassis_model,
         "customer_dealer": body.customer_dealer, "tail_lift_code": body.tail_lift_code,
         "chassis_inhouse_bom": body.chassis_inhouse_bom,
+        "dealer_id": body.dealer_id,              # WO v4.34.1 §0.3 — structured chassis supplier
     }
     try:
         return _detail(svc.record_planning_ack(

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text as _sa_text, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, UniqueConstraint, event
+from sqlalchemy import create_engine, text as _sa_text, Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Index, UniqueConstraint, event
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -329,8 +329,40 @@ class Customer(Base):
     email         = Column(String(300))
     telephone     = Column(String(100))
     is_active     = Column(Boolean, default=True)
+    # WO v4.34.1 §0.2 — single-table dealer flag: an entity can be BOTH a biller and a chassis
+    # supplier (Burt). Pure dealers are customers rows with is_dealer=true + nullable billing fields.
+    is_dealer     = Column(Boolean, nullable=False, default=False, server_default=_sa_text("false"))
     created_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     calculations  = relationship("CalculationRecord", back_populates="customer")
+    contacts      = relationship("CustomerContact", back_populates="customer",
+                                 cascade="all, delete-orphan")
+
+
+class CustomerContact(Base):
+    """WO v4.34.1 §0.6 — multiple contacts per customer (Nadie's reality). The customer row's
+    email/telephone stay as a denormalised cache (deprecate-not-drop, ADR 0016); the primary
+    contact is the going-forward source of truth. Partial unique index = one is_primary per
+    customer; soft-delete via is_active."""
+    __tablename__ = "customer_contacts"
+    __table_args__ = (
+        Index("ix_customer_contacts_customer", "customer_id"),
+        Index("uq_customer_contacts_one_primary", "customer_id", unique=True,
+              postgresql_where=_sa_text("is_primary")),
+    )
+    id          = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="CASCADE"), nullable=False)
+    name        = Column(String(200))                  # the contact person (nullable; migrated rows have none)
+    role        = Column(String(100))                  # free text in v4.34.1 (§0.12; enum is v4.35+)
+    email       = Column(String(300))
+    telephone   = Column(String(100))
+    is_primary  = Column(Boolean, nullable=False, default=False, server_default=_sa_text("false"))
+    is_active   = Column(Boolean, nullable=False, default=True, server_default=_sa_text("true"))
+    created_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                         onupdate=lambda: datetime.now(timezone.utc))
+    created_by  = Column(String(128))
+    updated_by  = Column(String(128))
+    customer    = relationship("Customer", back_populates="contacts")
 
 
 class TrailerRatio(Base):

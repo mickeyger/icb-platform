@@ -70,6 +70,7 @@ export function ChassisList() {
       if (!ql) return true
       return (r.vin || '').toLowerCase().includes(ql) ||
         (r.customer_name || '').toLowerCase().includes(ql) ||
+        (r.dealer_name || '').toLowerCase().includes(ql) ||
         (r.job_number || '').toLowerCase().includes(ql)
     })
   }, [rows, q, statusFilter])
@@ -128,6 +129,7 @@ export function ChassisList() {
                 <tr>
                   <th className="px-3 py-2 font-semibold">VIN</th>
                   <th className="px-3 py-2 font-semibold">Customer</th>
+                  <th className="px-3 py-2 font-semibold">Dealer</th>
                   <th className="px-3 py-2 font-semibold">Make / Model</th>
                   <th className="px-3 py-2 font-semibold">Job</th>
                   <th className="px-3 py-2 font-semibold">Origin</th>
@@ -137,12 +139,30 @@ export function ChassisList() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r, i) => (
+                {filtered.map((r, i) => {
+                  // WO v4.34.1 §3.4 — same-entity render: when the supplying dealer IS the body
+                  // customer (one customers row, is_dealer=true), badge the Customer cell
+                  // "customer + dealer" rather than repeating the name in both columns.
+                  const sameEntity = !!r.dealer_id && !!r.dealer_name && !!r.customer_name &&
+                    r.dealer_name.trim().toLowerCase() === r.customer_name.trim().toLowerCase()
+                  return (
                   <tr key={r.id} data-testid="chassis-row" data-id={r.id}
                       onClick={() => nav(`/chassis/${r.id}`)}
                       className={`cursor-pointer border-b border-line hover:bg-primary-light/40 ${i % 2 ? 'bg-surface-alt' : 'bg-white'}`}>
                     <td className="px-3 py-2 font-mono text-xs font-semibold">{r.vin || <span className="text-muted">—</span>}</td>
-                    <td className="px-3 py-2">{r.customer_name || '—'}</td>
+                    <td className="px-3 py-2" data-testid="chassis-cell-customer">
+                      {r.customer_name || '—'}
+                      {sameEntity && (
+                        <span className="ml-1.5 rounded-full bg-primary-light/60 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-primary">
+                          customer + dealer
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs" data-testid="chassis-cell-dealer">
+                      {!r.dealer_id ? <span className="text-muted">—</span>
+                        : sameEntity ? <span className="text-muted">= customer</span>
+                        : (r.dealer_name || <span className="text-muted">Dealer #{r.dealer_id}</span>)}
+                    </td>
                     <td className="px-3 py-2">{[r.make, r.model].filter(Boolean).join(' ') || '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs">{r.job_number || '—'}</td>
                     <td className="px-3 py-2"><ProvenancePill via={r.created_via} source={r.source} /></td>
@@ -150,7 +170,8 @@ export function ChassisList() {
                     <td className="px-3 py-2 text-xs text-muted">{r.latest_event_date || '—'}</td>
                     <td className="px-3 py-2"><StatusPill status={r.status} /></td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

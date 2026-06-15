@@ -46,6 +46,9 @@ class ChassisRecordOut(BaseModel):                # list item
     source: str
     created_via: Optional[str] = None             # WO v4.34 §0.4 — provenance pill (pre_job_card | planning_job_create | manual_chassis_menu | legacy_import_v4_28)
     created_source_ref: Optional[str] = None      # e.g. "A32744/06/2026" or "Planning · Job 32791"
+    dealer_id: Optional[int] = None               # WO v4.34.1 §0.3 — supplying dealer (customers.is_dealer)
+    dealer_name: Optional[str] = None             # WO v4.34.1 §3.4 — resolved cross-schema (router/service fills)
+    vin_source: Optional[str] = None              # WO v4.34.1 §0.17 — VIN provenance (vcl | chassis_page_manual | …)
     event_count: int = 0
     latest_event_date: Optional[date] = None
 

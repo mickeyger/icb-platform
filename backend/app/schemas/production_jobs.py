@@ -82,7 +82,10 @@ class PlanningAckRequest(BaseModel):
     # these optional rich fields now persist to production_jobs.chassis_data_json alongside the ETA.
     chassis_vin: Optional[str] = None
     chassis_model: Optional[str] = None
-    customer_dealer: Optional[str] = None
+    customer_dealer: Optional[str] = None        # WO v4.34.1 §0.2 — legacy free-text, superseded by dealer_id below
+    # WO v4.34.1 §0.3 — structured chassis supplier: a customers row with is_dealer=true. Propagated
+    # onto the linked chassis_records.dealer_id at ack (cross-schema FK, SET NULL). None leaves it untouched.
+    dealer_id: Optional[int] = None
     tail_lift_code: Optional[str] = None
     # WO v4.34 §0.8 — optional job-number override (SAP-assigned during the parallel run). None
     # (field absent) keeps the quote-derived value; refused when locked / SAP_RETIRED (§0.9).
