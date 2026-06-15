@@ -284,6 +284,38 @@ class PlanningAck(Base):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 8b. production_jobs_audit — workflow state-transition trail (WO v4.34.2 §0.6).
+#     Append-only; one row per transition. First (only-in-v4.34.2) consumer is the
+#     scheduled → unscheduled revert. previous/new_status are the SCHEDULING state
+#     (slot status), NOT the job lifecycle status — a scheduled job's production_jobs.status
+#     stays 'planning' throughout (ADR 0008 §0.4), so the transition lives on the slot.
+# ─────────────────────────────────────────────────────────────────────────────
+class ProductionJobAudit(Base):
+    __tablename__ = "production_jobs_audit"
+    __table_args__ = (
+        Index("ix_production_jobs_audit_job_id", "production_job_id"),
+        Index("ix_production_jobs_audit_created_at", "created_at"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="RESTRICT"), nullable=False
+    )
+    action = Column(String(32), nullable=False, default="revert_to_unscheduled")  # extensible discriminator
+    previous_status = Column(String(24))           # scheduling state before, e.g. 'scheduled'
+    new_status = Column(String(24))                # scheduling state after,  e.g. 'unscheduled'
+    # the deleted slot's placement — NO FK (the planning_slots row is removed on revert)
+    previous_slot_id = Column(Integer)
+    previous_lane = Column(String(32))
+    previous_bay = Column(String(32))
+    previous_week = Column(Date)
+    user_id = Column(Integer)                      # cross-schema -> icb_costings.users.id (FK SET NULL in 0023)
+    user_name = Column(String(64))                 # snapshot so the trail survives a user rename/delete
+    reason = Column(Text)                          # optional, <=500 chars (server-enforced); empty allowed
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 9. stock_counts — Stores cycle counts.
 # ─────────────────────────────────────────────────────────────────────────────
 class StockCount(Base):
@@ -980,7 +1012,7 @@ class ChassisModel(Base):
 
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
-    "PlanningSlot", "PlanningAck", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
+    "PlanningSlot", "PlanningAck", "ProductionJobAudit", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
     "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
     "LiveDailyCount", "ChassisRegister",
     "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",
