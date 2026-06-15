@@ -151,3 +151,53 @@ def test_reject_returns_to_draft_with_reason_and_resets(api, sent_card):
     # re-submit clears the reason (§0.14 round-trip)
     r = client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={})
     assert r.status_code == 200 and r.json()["reject_reason"] is None
+
+
+def test_confirming_jobless_card_creates_anchor_job(api):
+    """WO v4.34.2 — confirming a Pre-Job Card whose calc has NO production_job auto-creates a minimal
+    one in 'pre_job_confirmed', so the costing ALWAYS reaches Planning's Awaiting-Ack pool (which
+    needs production_job_id != null). Self-contained: own calc + cleanup (anchor job is real)."""
+    client, admin = api
+    from sqlalchemy import text
+    from app.database import CalculationRecord, SessionLocal
+    from app.models.mes import PrejobCard, PrejobTemplate, ProductionJob
+    with SessionLocal() as db:
+        taken = {j.calculation_record_id for j in db.query(ProductionJob)
+                 .filter(ProductionJob.calculation_record_id.isnot(None)).all()}
+        carded = {c.calculation_id for c in db.query(PrejobCard).all()}
+        calc = (db.query(CalculationRecord)
+                .filter(~CalculationRecord.id.in_((taken | carded) or {0}),
+                        CalculationRecord.quote_number.isnot(None),
+                        CalculationRecord.is_repair.isnot(True))
+                .order_by(CalculationRecord.id).first())
+        if calc is None:
+            pytest.skip("no job-free, card-free calculation on this DB")
+        calc_id, calc_orig = calc.id, calc.status
+        tpl = PrejobTemplate(name="P433S Anchor TPL", body_type="chiller", product_line="standard",
+                             header_format="P433S header", sections=[{"name": "S", "items": [{"text": "x"}]}],
+                             is_active=True, created_by="j")
+        db.add(tpl); db.commit(); tpl_id = tpl.id
+    try:
+        r = client.post("/api/prejob-cards", json={"calculation_id": calc_id, "template_id": tpl_id})
+        assert r.status_code == 201, r.text                  # jobless calc — card creation still allowed
+        cid = r.json()["id"]
+        client.patch(f"/api/prejob-cards/{cid}",
+                     json={"body_description": "P433S header", "sales_rep_user_id": admin.id,
+                           "planner_user_id": admin.id, "body_gap_mm": 150})
+        assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
+        with SessionLocal() as db:                            # precondition: still jobless after submit
+            assert db.query(ProductionJob).filter_by(calculation_record_id=calc_id).first() is None
+        client.post(f"/api/prejob-cards/{cid}/signoff/sales", json={"attestation": "ok"})
+        r = client.post(f"/api/prejob-cards/{cid}/signoff/planner", json={"attestation": "ok"})
+        assert r.status_code == 200 and r.json()["status"] == "pre_job_confirmed"
+        with SessionLocal() as db:                            # the anchor job now exists → it will pulse
+            job = db.query(ProductionJob).filter_by(calculation_record_id=calc_id).first()
+            assert job is not None and job.status == "pre_job_confirmed"
+    finally:
+        with SessionLocal() as db:
+            db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE calculation_id=:c"), {"c": calc_id})
+            db.execute(text("DELETE FROM icb_mes.production_jobs WHERE calculation_record_id=:c"), {"c": calc_id})
+            db.execute(text("DELETE FROM icb_mes.prejob_templates WHERE id=:t"), {"t": tpl_id})
+            db.execute(text("UPDATE icb_costings.calculations SET status=:s WHERE id=:c"),
+                       {"s": calc_orig, "c": calc_id})
+            db.commit()
