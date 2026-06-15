@@ -1,11 +1,11 @@
-# ADR 0022 — Pre-Job Card polish + the multi-mounting fridge deferral (v4.33.1)
+# ADR 0022 — Pre-Job Card polish (v4.33.1) + Dealers, multi-contact & VIN late-entry (v4.34.1)
 
 - Status: Accepted
-- Date: 2026-06-14
-- Work Order: v4.33.1 — Pre-Job Card Polish Bucket (bundles v4.33-deferred items + Michael's
-  demo-walkthrough UX catches)
-- Note: a brief polish-bucket ADR (§0.12). The v4.34.1 dealer-DDM work will fold its own section in
-  here when it ships.
+- Date: 2026-06-14 (v4.33.1) · 2026-06-15 (v4.34.1 section appended)
+- Work Order: v4.33.1 — Pre-Job Card Polish Bucket; **v4.34.1 — Dealers via Customer Flag +
+  Multi-Contact + Gap A VIN late-entry** (folded in per the v4.33.1 note below)
+- Note: a brief polish-bucket ADR (§0.12). The **v4.34.1 section is at the bottom** — folded in here
+  as planned rather than minting ADR 0023, since 0022 was reserved for this follow-on.
 
 ## Context
 
@@ -105,3 +105,105 @@ v4.34.1.
   (fresh DB has no templates; no frontend unit runner) — build-verified + exercised by the create
   journey's sorted modal.
 - v4.31/v4.32/v4.33/v4.34 surfaces untouched; `/calculator` byte-identical; CI green both runners.
+
+---
+
+# v4.34.1 — Dealers via customer flag + multi-contact + Gap A VIN late-entry
+
+- Status: Accepted · Date: 2026-06-15 · Work Order: v4.34.1
+
+## Context
+
+Michael surfaced a 28-line dealer list (`Dealers.txt`) and Nadie's reality that a customer has
+several contacts. Investigation (v4.34 era) had found NO structured dealer source and that **Customer
+is already a first-class FK** (`customers` + `calculations.customer_id`). The chassis pipeline (v4.34)
+needed the *supplying dealer* captured at Planning ack. Two follow-ons rode along: multi-contact, and
+**Gap A** — capturing a VIN that wasn't entered at the Pre-Job stage.
+
+## Decisions
+
+1. **Dealers are a FLAG, not a table (§0.2).** `customers.is_dealer` (bool). An entity can be BOTH a
+   biller and a chassis supplier (Burt), so a separate `dealers` table would have forced a fake split
+   and duplicate records. Pure dealers are `is_dealer=true` rows with nullable billing fields. This
+   reversed the v4.34-era "Dealer DDM" plan once the both-roles reality was confirmed.
+2. **`customer_contacts` + one-primary invariant (§0.6).** Multiple contacts per customer; a
+   **partial unique index** `uq_customer_contacts_one_primary (customer_id) WHERE is_primary`
+   enforces one primary in the DB (not app code). `set-primary` demotes-then-promotes with a flush
+   between, because Postgres checks the partial-unique immediately (no DEFERRABLE on a partial index).
+   Soft-delete via `is_active` keeps history.
+3. **Deprecate-not-drop the legacy contact cache (§0.7, ADR 0016).** Migration 0022 backfilled
+   `customers.email/telephone` into a primary `customer_contacts` row (2147 rows) but KEEPS the cache
+   columns — existing read-paths (`/api/customers`) stay valid; the contact table is the new write path.
+4. **Cross-schema `chassis_records.dealer_id` (§0.3, ADR 0006).** Plain `Integer` on the schema-less
+   model; FK to `icb_costings.customers` created in migration 0022 (`SET NULL`), registered in
+   `CROSS_SCHEMA_FKS` + indexed on the model so `alembic check` adds zero net-new drift. Propagated
+   onto the linked chassis at Planning ack (mirrors v4.34's ack→chassis pattern).
+5. **Same-entity render (§3.4).** When one `customers` row is both the body customer and the supplier,
+   the Chassis list badges the Customer cell `customer + dealer` rather than repeating the name.
+6. **Customers admin via the dispatch-map (§3.5).** The third `CUSTOM_ADMIN_SCREENS` entry (the
+   v4.33.1 extension point, decision 2 above) — searchable server-side list over 2160 + a Contacts
+   panel CRUD + an `is_dealer` toggle.
+7. **Dealer seed = prefix-extraction + 4-step fuzzy match (§3.7).** `Dealers.txt` lines are
+   `"<dealer> - <end customer>"`; the dealer is the prefix. De-dup collapses ITC Midrand ×3 + Ronnies
+   ×2 → 25 unique. Match: exact → normalised → prefix (`<dealer>` ⊂ `<dealer> (Pty) Ltd`) → insert.
+   14 exact, 4 prefix, 7 inserted. A committed `dealer_seed_decisions.csv` is the auditable record;
+   the seed is idempotent + forward-only (never un-flags).
+
+## Footnotes
+
+8. **Gap A is the first backend NULL-state enforcement of sign-off integrity.** v4.34's VIN lock was
+   frontend-only; §3.4b's `POST /api/chassis-records/{id}/vin` accepts a VIN ONLY when the current
+   value is NULL (write-once NULL→value), stamping `vin_source='chassis_page_manual'`. *Sign-off
+   integrity was frontend-only through v4.34; this NULL→value write-once guard is the first backend
+   enforcement, pending full attest-and-lock hardening when Job-Card-generation lands (v4.36+).*
+9. **Gap A is gated on `chassis.update` (planner + production + admin), not strict planner/admin
+   (BA-ruled).** The spec said "planner/admin" before it was known production holds `chassis.update`;
+   production legitimately reads the VIN off the plate at chassis arrival. The NULL-state guard makes
+   the broader cluster safe — no one can overwrite a known VIN through this path.
+10. **The v4.33 status-sync gap (hotfix PR #28).** The v4.33 Pre-Job Card flow advanced
+    `production_jobs.status` but never `calculations.status`, which the Costings dashboard reads — so
+    both-signed-off cards showed "Accepted" and never flowed to Planning. Fixed by mirroring the card
+    lifecycle onto the calc (+ a forward-only backfill of 13 confirmed). Two lessons worth keeping:
+    **(a) a fresh seed MASKED the bug** — the seed manufactures confirmed-card-on-accepted-job rows,
+    so the inconsistency only showed after real transitions; **(b) state-machine bugs surface most
+    clearly under state *transitions*, not at initial setup** (the v4.34 "instrument-to-diagnose
+    corrects your hypothesis" pattern, ADR 0021, applied to a workflow gap).
+
+## Deferred / flagged
+
+- **3 pre-existing local `alembic check` FK drift items** (`fk_calculations_sales_rep_user`,
+  `fk_chassis_events_assembly_bay`, `fk_prejob_cards_chassis_record`) — present at clean 0021,
+  env-only-local (pass on CI), NOT introduced by 0022 → **v4.35 housekeeping bundle**.
+- **2 jobless confirmed calcs** (`A9907`) show *Pre-Job Confirmed* but can't reach Planning (no
+  production job — the "partial" accept state) → **v4.34.3 investigation** (likely a silent
+  job-creation failure / partial-accept edge).
+
+## Ledger — v4.34.1 lessons
+
+1. **Flag-over-table when an entity plays two roles** — `is_dealer` avoided splitting Burt into a
+   customer AND a dealer record.
+2. **DB-enforced invariants over app guards** — the partial-unique index makes "one primary" a
+   storage property, not a code convention; the flush-ordered swap is the only app concession.
+3. **Deprecate-not-drop the cache** — the email/telephone columns stay readable while the contact
+   table becomes the write path (ADR 0016 reapplied).
+4. **Auditable seeds** — the fuzzy-match writes its decisions to CSV for human review before trust;
+   prefix-extraction + consolidation are visible, not implicit.
+5. **Backend NULL-state guards are cheap integrity** — a one-way NULL→value transition is the
+   smallest possible write-once lock, and made the permission breadth a non-issue.
+
+## As-shipped (v4.34.1)
+
+- **Chassis** list gains a **Dealer** column (same-entity `customer + dealer` badge); detail gains a
+  **Dealer** field, a **Capture VIN** pencil while the VIN is NULL, and a **VIN-source** pill.
+- **Planning ack** "Customer dealer" free-text → a structured **dealer dropdown** (`is_dealer`
+  customers); the picked dealer lands on the chassis at ack.
+- **Admin → Customers** (new): searchable 2160-list + customer detail + **Contacts** panel CRUD
+  (add / inline-edit / set-primary / soft-delete) + an `is_dealer` toggle.
+- Migration **0022** (cross-schema): `customers.is_dealer`; `customer_contacts` (+ partial-unique +
+  2147-row backfill); `chassis_records.dealer_id` (cross-schema FK, SET NULL) + `vin_source`.
+  Round-trips clean; zero net-new autogenerate drift.
+- **25 dealers** seeded (`is_dealer`); `dealer_seed_decisions.csv` committed.
+- 3 new per-role journeys green (dealer capture, customer contacts, VIN late-entry); backend tests
+  for contacts CRUD + the VIN NULL-guard.
+- **Parallel hotfix PR #28** (prejob calc.status sync) merged separately — see footnote 10.
+- v4.31–v4.34 + v4.33.1 surfaces untouched; `/calculator` byte-identical.
