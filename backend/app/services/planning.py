@@ -11,16 +11,33 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import func, nulls_last, select
 from sqlalchemy.orm import Session
 
 from app.database import CalculationRecord, Customer
-from app.models.mes import ChassisLifecycleEvent, PlanningSlot, ProductionJob
+from app.models.mes import (
+    ChassisLifecycleEvent, PlanningSlot, ProductionJob, ProductionJobAudit, SignOff, Task, WorkOrder,
+)
 from app.schemas.planning import (
     CapacityCell, PlanningBoard, PlanningJobRef, PlanningSlotItem, WeekRef,
 )
 from app.services.errors import (
-    CellOccupiedError, ChassisEtaError, NotFoundError,
+    CellOccupiedError, ChassisEtaError, NotFoundError, RevertNotAllowedError,
+)
+
+# WO v4.34.2 §0.3 — the extensible whitelist of job lifecycle statuses a scheduled job may be reverted
+# FROM. A scheduled job's production_jobs.status stays 'planning' (ADR 0008 §0.4); once it advances
+# (in_production / completed) it is workshop-locked. Future locked-from states simply stay out of this set.
+REVERTIBLE_JOB_STATUSES = ("planning",)
+
+# Latest "reverted-to-unscheduled" timestamp per job — drives the §0.8 recency sort of the pool
+# (most-recently-reverted job floats to the top so the planner can immediately re-place it).
+_LATEST_REVERT = (
+    select(func.max(ProductionJobAudit.created_at))
+    .where(ProductionJobAudit.production_job_id == ProductionJob.id,
+           ProductionJobAudit.new_status == "unscheduled")
+    .correlate(ProductionJob)
+    .scalar_subquery()
 )
 
 
@@ -185,7 +202,9 @@ def _unscheduled_pool(db: Session, *, branch_id=None, exclude_ids=()) -> List[Pl
         stmt = stmt.where(ProductionJob.branch_id == branch_id)
     if exclude_ids:
         stmt = stmt.where(ProductionJob.id.notin_(list(exclude_ids)))
-    return [_job_ref(j, c, cu, vcl) for (j, c, cu, vcl) in db.execute(stmt.order_by(ProductionJob.id)).all()]
+    # WO v4.34.2 §0.8 — most-recently-reverted jobs sort first; never-reverted (NULL) keep id order.
+    stmt = stmt.order_by(nulls_last(_LATEST_REVERT.desc()), ProductionJob.id)
+    return [_job_ref(j, c, cu, vcl) for (j, c, cu, vcl) in db.execute(stmt).all()]
 
 
 def build_board(db: Session, *, branch_id=None, weeks_count=12, lane=None, start=None) -> PlanningBoard:
@@ -283,11 +302,69 @@ def move(db: Session, *, slot_id: int, week: date, bay: str,
     return _slot_item_by_id(db, slot_id)
 
 
-def unschedule(db: Session, *, slot_id: int, user=None) -> dict:
+def _assert_revertible(db: Session, slot: PlanningSlot, job: Optional[ProductionJob]) -> None:
+    """WO v4.34.2 §0.3 — the state safety rules, enforced HERE (the shared chokepoint) so neither the
+    slot-centric DELETE (drag) nor the job-centric POST (modal) can bypass them. Raises
+    RevertNotAllowedError (→409) naming the failed rule. An orphan slot (no job) is allowed through as
+    cleanup — there is nothing downstream to protect."""
+    if slot.status not in ("scheduled",):
+        raise RevertNotAllowedError(
+            f"slot {slot.id} is '{slot.status}', not 'scheduled' — only a scheduled slot can be reverted")
+    if job is None:
+        return
+    if job.status not in REVERTIBLE_JOB_STATUSES:
+        raise RevertNotAllowedError(
+            f"job {job.id} is '{job.status}' — only a job still in planning can be reverted "
+            f"(workshop-active / completed jobs are locked)")
+    started = db.execute(
+        select(WorkOrder.id).where(WorkOrder.production_job_id == job.id,
+                                   WorkOrder.started_at.isnot(None)).limit(1)).first()
+    if started:
+        raise RevertNotAllowedError(f"job {job.id} has started in the workshop — cannot revert")
+    wo_ids = select(WorkOrder.id).where(WorkOrder.production_job_id == job.id)
+    qc = db.execute(
+        select(Task.id).where(Task.work_order_id.in_(wo_ids), Task.completed_at.isnot(None)).limit(1)
+    ).first() or db.execute(
+        select(SignOff.id).where(SignOff.work_order_id.in_(wo_ids)).limit(1)).first()
+    if qc:
+        raise RevertNotAllowedError(f"job {job.id} has a QC check recorded — cannot revert")
+
+
+def unschedule(db: Session, *, slot_id: int, user=None, reason: Optional[str] = None) -> dict:
+    """The single guarded scheduled→unscheduled chokepoint (WO v4.34.2). Both the slot DELETE (drag,
+    reason=None) and the job-centric POST (modal, optional reason) route through here. Applies the §0.3
+    safety rules, writes a production_jobs_audit row (reason optional, ≤500 chars), then deletes the
+    slot — the job returns to the pool. Chassis assignment + sign-offs are untouched (slot-only delete)."""
     slot = db.get(PlanningSlot, slot_id)
     if slot is None:
         raise NotFoundError(f"planning slot {slot_id} not found")
+    job = db.get(ProductionJob, slot.production_job_id) if slot.production_job_id else None
+    _assert_revertible(db, slot, job)
+    clean_reason = (reason or "").strip()[:500] or None    # §0.7 — empty accepted; server-cap at 500
+    if job is not None:                                    # audit the transition BEFORE the slot row goes
+        db.add(ProductionJobAudit(
+            production_job_id=job.id, action="revert_to_unscheduled",
+            previous_status=slot.status, new_status="unscheduled",
+            previous_slot_id=slot.id, previous_lane=slot.lane, previous_bay=slot.bay,
+            previous_week=slot.week,
+            user_id=getattr(user, "id", None), user_name=getattr(user, "username", None),
+            reason=clean_reason))
     jid = slot.production_job_id
-    db.delete(slot)                    # DELETE the assignment row; job returns to the pool
+    db.delete(slot)                    # DELETE the assignment row only (chassis + sign-offs preserved)
     db.commit()
     return {"unscheduled_slot_id": slot_id, "production_job_id": jid}
+
+
+def revert_to_unscheduled(db: Session, *, production_job_id: int, user=None,
+                          reason: Optional[str] = None) -> dict:
+    """WO v4.34.2 §3.2 — job-centric entry for the explicit revert modal. Resolves the job's (single)
+    planning slot and delegates to the guarded `unschedule` chokepoint. 404 if the job is unknown;
+    RevertNotAllowedError (→409) if it isn't scheduled."""
+    job = db.get(ProductionJob, production_job_id)
+    if job is None:
+        raise NotFoundError(f"production job {production_job_id} not found")
+    slot = db.execute(
+        select(PlanningSlot).where(PlanningSlot.production_job_id == production_job_id)).scalars().first()
+    if slot is None:
+        raise RevertNotAllowedError(f"production job {production_job_id} is not scheduled")
+    return unschedule(db, slot_id=slot.id, user=user, reason=reason)

@@ -6,13 +6,14 @@ Create Date: 2026-06-15
 
 Adds icb_mes.production_jobs_audit — an append-only trail for production-job workflow transitions.
 First (and, in v4.34.2, only) consumer: the scheduled → unscheduled revert. The same-schema FK
-production_job_id → icb_mes.production_jobs (ON DELETE RESTRICT — audit history is sacred) rides on
-the model and is built by create_all; the cross-schema user_id → icb_costings.users FK (SET NULL — the
-trail survives a user delete) is created here, mirroring the 0017 prejob-card user-FK pattern (so it is
-NOT added to CROSS_SCHEMA_FKS, which 0003 consumes before this table exists).
+production_job_id → icb_mes.production_jobs (ON DELETE CASCADE — matches the other job-children
+work_orders/planning_acks; jobs have no prod delete path so the table is effectively append-only) rides
+on the model and is built by create_all; the cross-schema user_id → icb_costings.users FK (SET NULL —
+the trail survives a user delete) is created here, mirroring the 0017 prejob-card user-FK pattern (so it
+is NOT added to CROSS_SCHEMA_FKS, which 0003 consumes before this table exists).
 
 Inspector-guarded throughout; up→down→up round-trips clean (0023 is the head, so downgrade drops the
-audit table before any earlier migration drops production_jobs — no RESTRICT violation).
+audit table first).
 """
 from typing import Sequence, Union
 

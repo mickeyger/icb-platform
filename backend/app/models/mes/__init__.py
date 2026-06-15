@@ -298,8 +298,11 @@ class ProductionJobAudit(Base):
         {"schema": "icb_mes"},
     )
     id = Column(Integer, primary_key=True)
+    # ON DELETE CASCADE — matches the other job-children (work_orders, planning_acks). Production jobs
+    # have no delete endpoint in prod, so this only ever fires in test teardown (where the trail rides
+    # along with its job); the audit table is otherwise append-only.
     production_job_id = Column(
-        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="RESTRICT"), nullable=False
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="CASCADE"), nullable=False
     )
     action = Column(String(32), nullable=False, default="revert_to_unscheduled")  # extensible discriminator
     previous_status = Column(String(24))           # scheduling state before, e.g. 'scheduled'

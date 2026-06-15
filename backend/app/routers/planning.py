@@ -88,8 +88,12 @@ def move_slot(slot_id: int, body: MoveRequest, db: Session = Depends(get_db),
 @router.delete("/{slot_id}")
 def unschedule_slot(slot_id: int, db: Session = Depends(get_db),
                     user: User = Depends(require_permission("planning.unschedule"))):
-    """Unschedule (delete the slot row); the job returns to the unscheduled pool."""
+    """Unschedule (delete the slot row); the job returns to the unscheduled pool. This is the drag-to-pool
+    path — no reason captured (§0.7). The §0.3 safety rules + audit live in the shared svc.unschedule
+    chokepoint, so drag is guarded identically to the explicit revert."""
     try:
         return svc.unschedule(db, slot_id=slot_id, user=user)
     except svc.NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except svc.RevertNotAllowedError as e:
+        raise HTTPException(status_code=409, detail=str(e))

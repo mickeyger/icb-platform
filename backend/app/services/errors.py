@@ -20,5 +20,9 @@ class CellOccupiedError(ServiceError):
     """Target planning cell is already occupied (-> 409)."""
 
 
+class RevertNotAllowedError(ServiceError):
+    """Scheduled → unscheduled revert blocked by a state safety rule (-> 409). WO v4.34.2 §0.3."""
+
+
 __all__ = ["ServiceError", "NotFoundError", "InvalidStateError",
-           "ChassisEtaError", "CellOccupiedError"]
+           "ChassisEtaError", "CellOccupiedError", "RevertNotAllowedError"]
