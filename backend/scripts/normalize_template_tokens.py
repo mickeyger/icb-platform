@@ -99,6 +99,10 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--include-active", action="store_true")
     args = ap.parse_args()
+    if not args.dry_run:                              # --dry-run rolls back; only gate real writes.
+        from scripts._environment_guard import confirm_if_shared_db
+        confirm_if_shared_db("normalize_template_tokens",
+                             destroys="rewrite Pre-Job template tokens in place (UPDATE rows).")
     rows = run(dry_run=args.dry_run, include_active=args.include_active)
     for r in rows:
         print(f"{r['template']:<45} {r['count']:>2} fix(es): {'; '.join(r['fixes'])}")

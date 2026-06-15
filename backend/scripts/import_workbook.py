@@ -177,6 +177,9 @@ def _dt_iso(s):
 
 # ── DB helpers ───────────────────────────────────────────────────────────────
 def _truncate(db):
+    # WO v4.34.4 §3.2 — one-shot full wipe of icb_mes. HARD-refuse unless DATABASE_URL is a *_test DB.
+    from scripts._environment_guard import require_test_db
+    require_test_db("import_workbook (TRUNCATE icb_mes + reload)")
     db.execute(sa_text(
         "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
         + " RESTART IDENTITY CASCADE"))

@@ -72,6 +72,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true", help="report only; write nothing")
     args = ap.parse_args()
+    # WO v4.34.4 §3.2 — a reconcile script: HARD-refuse unless DATABASE_URL is a *_test DB.
+    # ("No reconcile scripts running ever again on the shared dev DB.") Applies even to --dry-run.
+    from scripts._environment_guard import require_test_db
+    require_test_db("backfill_prejob_calc_status (reconcile calc/job status)")
     s = backfill(dry_run=args.dry_run)
     print(f"\n[backfill] cards considered={s['cards']}  calcs advanced={s['calc_advanced']}  "
           f"jobs advanced={s['job_advanced']}")

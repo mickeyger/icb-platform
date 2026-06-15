@@ -80,6 +80,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    # WO v4.34.4 §3.2 — a reconcile script: HARD-refuse unless DATABASE_URL is a *_test DB.
+    # ("No reconcile scripts running ever again on the shared dev DB.") The seed calls
+    # ensure_jobs_for_carded_calcs() directly (not main()), so the in-seed re-anchor stays unaffected.
+    from scripts._environment_guard import require_test_db
+    require_test_db("backfill_prejob_job_anchor (reconcile carded-calc jobs)")
     db = SessionLocal()
     try:
         s = ensure_jobs_for_carded_calcs(db, commit=not args.dry_run)

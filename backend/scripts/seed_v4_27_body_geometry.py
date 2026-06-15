@@ -88,6 +88,9 @@ def seed_body_geometry(db, *, who: str = "seed_v4.27") -> dict:
 
 
 def main():
+    from scripts._environment_guard import confirm_if_shared_db
+    confirm_if_shared_db("seed_v4_27_body_geometry",
+                         destroys="DELETE each body type's Vacuum BOM rules + lookups, then re-insert the derived set.")
     db = SessionLocal()
     try:
         counts = seed_body_geometry(db)

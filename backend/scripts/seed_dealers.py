@@ -127,6 +127,8 @@ def main():
     ap.add_argument("--out", default=str(_HERE / "dealer_seed_decisions.csv"))
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    from scripts._environment_guard import announce_target   # additive: insert/flag dealers, never deletes
+    announce_target("seed_dealers")
     r = seed(Path(args.file), Path(args.out), dry_run=args.dry_run)
     s = r["stats"]
     print(f"[seed_dealers] {'DRY-RUN — ' if args.dry_run else ''}28 lines -> {s['unique']} unique dealers")

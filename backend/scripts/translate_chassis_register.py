@@ -115,6 +115,10 @@ def translate(db, *, who: str = "translate_v4.28") -> dict:
 
 
 def main():
+    from scripts._environment_guard import confirm_if_shared_db
+    confirm_if_shared_db("translate_chassis_register",
+                         destroys="DELETE all source='register' chassis_records and CASCADE their lifecycle "
+                                  "events + photos, then re-import from the Truck Register.")
     db = SessionLocal()
     try:
         rep = translate(db)
