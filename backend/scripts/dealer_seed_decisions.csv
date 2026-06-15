@@ -1,0 +1,26 @@
+dealer,match_type,customer_id,customer_name,source_lines
+Africa Mobility,prefix,73,Africa Mobility Solutions (Pty) Ltd,Africa Mobility
+BB Truck Middelburg,exact,196,BB Truck Middelburg,BB Truck Middelburg - Daily Fruit
+Clearwater Toyota,exact,403,Clearwater Toyota,Clearwater Toyota - Transpharm
+Eastvaal Toyota Potchefstroom,prefix,556,Eastvaal Toyota Potchefstroom (Pty) Ltd,Eastvaal Toyota Potchefstroom
+ELT Group,exact,586,Elt Group,ELT Group - Ruah Brother
+FAW Bloemfontein,prefix,647,Faw Bloemfontein Pty Ltd,FAW Bloemfontein
+Hino East Rand,exact,844,Hino East Rand,Hino East Rand
+Hino Honeydew,exact,846,Hino Honeydew,Hino Honeydew
+Hino Isando,exact,848,Hino Isando,Hino Isando
+Intertoy Toyota,exact,973,Intertoy Toyota,Intertoy Toyota - Rossouw Meat
+Ispho Capital T/A Hino Pomona,exact,2193,Ispho Capital T/A Hino Pomona,Ispho Capital T/A Hino Pomona - LMC
+Isuzu Isando,exact,977,Isuzu Isando,Isuzu Isando
+Isuzu TC Midrand,exact,2194,Isuzu TC Midrand,Isuzu TC Midrand
+Isuzu Trucks PTA,exact,2195,Isuzu Trucks PTA,Isuzu Trucks PTA
+ITC Midrand,exact,2196,ITC Midrand,ITC Midrand - Cultiver | ITC Midrand - Eggspert Eggs | ITC Midrand - Petit Forestier
+Leyland Truck & Car,exact,2197,Leyland Truck & Car,Leyland Truck & Car
+Malalane Toyota,exact,1203,Malalane Toyota,Malalane Toyota
+Midvaal Commercial Vehicles,prefix,1284,Midvaal Commercial Vehicles (Pty) Ltd,Midvaal Commercial Vehicles - ETTC Group
+NTT Toyota Delmas,exact,1425,NTT Toyota Delmas,NTT Toyota Delmas - CJ Distribution
+Remo Motors,exact,2198,Remo Motors,Remo Motors
+Ronnies Motors,exact,1647,Ronnies Motors,Ronnies Motors - Douglasdale Dairy | Ronnies Motors - Kempston Vehicle Leasing
+Rustenburg Toyota,exact,1677,Rustenburg Toyota,Rustenburg Toyota
+Secunda Toyota,exact,1729,Secunda Toyota,Secunda Toyota - Romans Pizza
+UD Trucks Lichtenburg,exact,2002,UD Trucks Lichtenburg,UD Trucks Lichtenburg - Laubstar
+Westvaal Nelspruit,exact,2199,Westvaal Nelspruit,Westvaal Nelspruit
