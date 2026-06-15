@@ -47,9 +47,10 @@ def api(app_mod):
 
 @pytest.fixture
 def seeded(api):
-    """A free calculation (no production job), two P433C templates (2.0 + legacy, both active,
-    same body/size so §0.6 ranking is observable), and the ids needed by the tests."""
-    from app.database import CalculationRecord, SessionLocal
+    """A free calculation with a P433C 'accepted' production job behind it (WO v4.34.2 — create_card
+    now requires a job, mirroring the UI gate), two P433C templates (2.0 + legacy, both active, same
+    body/size so §0.6 ranking is observable), and the ids the tests need."""
+    from app.database import Branch, CalculationRecord, SessionLocal
     from app.models.mes import PrejobTemplate, ProductionJob
     sections = [{"name": "GRP SECTION", "items": [{"text": "External dimensions ..."}]},
                 {"name": "SUB FRAME SECTION", "items": [{"text": "Body gap - TBC"}]},
@@ -75,12 +76,15 @@ def seeded(api):
         t_draft = PrejobTemplate(name="P433C Draft (must not list)", body_type="freezer",
                                  size_category="big", product_line="standard",
                                  sections=sections, is_active=False, created_by="t")
-        db.add_all([t_legacy, t_20, t_draft])
+        branch = db.query(Branch).order_by(Branch.id).first()
+        job = ProductionJob(calculation_record_id=calc.id, branch_id=branch.id, source="quote",
+                            status="accepted", job_number="P433C01")   # the card needs an anchoring job
+        db.add_all([t_legacy, t_20, t_draft, job])
         db.commit()
         # submit-for-check now advances the linked REAL calc's status (fix/prejob-card-status-sync);
         # capture it to restore on teardown (v4.27 — leave real icb_costings data untouched).
         calc_id, calc_orig_status = calc.id, calc.status
-        result = {"calc_id": calc.id, "calc_user_id": calc.user_id,
+        result = {"calc_id": calc.id, "calc_user_id": calc.user_id, "job_id": job.id,
                   "tpl_20": t_20.id, "tpl_legacy": t_legacy.id, "tpl_draft": t_draft.id}
     yield result
     with SessionLocal() as db:
@@ -166,17 +170,11 @@ def test_sections_shape_validated_on_patch(api, seeded):
 
 
 def test_submit_drives_accepted_job_to_pre_job_sent(api, seeded):
-    """§0.21 positive path on a P433C-owned job (no real job is touched)."""
-    from app.database import Branch, SessionLocal
-    from app.models.mes import PrejobCard, ProductionJob
+    """§0.21 positive path on the P433C-owned 'accepted' job from the fixture (no real job touched)."""
+    from app.database import SessionLocal
+    from app.models.mes import ProductionJob
     card = _make_card(api, seeded)
-    with SessionLocal() as db:
-        branch = db.query(Branch).order_by(Branch.id).first()
-        job = ProductionJob(calculation_record_id=seeded["calc_id"], branch_id=branch.id,
-                            source="quote", status="accepted", job_number="P433C01")
-        db.add(job)
-        db.commit()
-        jid = job.id
+    jid = seeded["job_id"]                                    # WO v4.34.2 — seeded now provides the job
     planner = api.get("/api/prejob-cards/user-options?kind=planner").json()[0]
     api.patch(f"/api/prejob-cards/{card['id']}",
               json={"sales_rep_user_id": planner["id"], "planner_user_id": planner["id"],

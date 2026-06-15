@@ -333,6 +333,34 @@ def _sync_calc_status(db: Session, calc_id: int, status: str) -> None:
         calc.status = status
 
 
+def _ensure_anchor_job(db: Session, calc_id: int, now: datetime) -> None:
+    """WO v4.34.2 — guarantee a confirmed Pre-Job Card anchors a production_job so it ALWAYS surfaces
+    as an "Awaiting Ack" card in Planning (the live pool needs production_job_id != null). Creates a
+    MINIMAL job in 'pre_job_confirmed' when none exists for the calc; no-op otherwise. Deliberately a
+    direct insert rather than accept_calculation — that function commits on its own and runs
+    branch/BOM logic + a repairs-skip guard; here we only need the anchor row, atomically inside the
+    sign_off transaction. Branch = the calc's, else the configured default. Idempotent."""
+    if _job_for_calc(db, calc_id) is not None:
+        return
+    calc = db.get(CalculationRecord, calc_id)
+    if calc is None:
+        return
+    from app.config import settings
+    from app.database import Branch
+    from app.services.production_jobs import _job_number_from_quote
+    branch_id = getattr(calc, "branch_id", None)
+    if branch_id is None:
+        row = db.execute(select(Branch).where(Branch.code == settings.DEFAULT_BRANCH_CODE)).scalar_one_or_none()
+        branch_id = row.id if row else None
+    if branch_id is None:
+        return                                            # no branch resolvable — leave jobless (rare)
+    db.add(ProductionJob(
+        calculation_record_id=calc_id, branch_id=branch_id,
+        job_number=_job_number_from_quote(calc.quote_number),
+        job_number_source="quote_derived", source="quote", status="pre_job_confirmed",
+        accepted_at=now, pre_job_sent_at=now, pre_job_confirmed_at=now))
+
+
 def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = False) -> PrejobCard:
     """Stage A→B/C — §0.8 gate + §0.21 legacy status drive."""
     # §3.2 — FOR UPDATE row-lock: under READ COMMITTED a concurrent second submit blocks here,
@@ -499,6 +527,12 @@ def sign_off(db: Session, card_id: int, role: str, attestation: str, user) -> Pr
     if card.sales_rep_signoff_at is not None and card.planner_signoff_at is not None:
         card.status = "pre_job_confirmed"              # Stage D — auto on the second sign-off
         _sync_calc_status(db, card.calculation_id, "pre_job_confirmed")   # hotfix — Costings shows Pre-Job Confirmed
+        # WO v4.34.2 — guarantee the confirmed card ANCHORS a production_job, so it ALWAYS pulses as
+        # "Awaiting Ack" in Planning (whose pool needs production_job_id != null). The normal UI flow
+        # already creates the job at accept, so this only fires for a jobless card (a re-seed orphaned
+        # it, or a direct-API path). Direct minimal insert — NOT accept_calculation (avoids its
+        # commit/BOM-gen + repair guards); runs in this sign_off transaction.
+        _ensure_anchor_job(db, card.calculation_id, now)
         job = _job_for_calc(db, card.calculation_id)
         if job is not None and job.status in ("accepted", "pre_job_sent"):
             job.status = "pre_job_confirmed"

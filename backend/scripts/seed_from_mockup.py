@@ -414,6 +414,13 @@ def seed(reset: bool = False) -> None:
             ))
         counts["suppliers"] = len(sups)
 
+        # WO v4.34.2 — a re-seed TRUNCATEs production_jobs but NOT prejob_cards, which orphans any
+        # surviving (user-created) card from its job and makes confirmed cards invisible to Planning.
+        # Re-anchor: ensure every sent_for_check/confirmed card's calc has a job in the matching status.
+        from scripts.backfill_prejob_job_anchor import ensure_jobs_for_carded_calcs
+        anchor = ensure_jobs_for_carded_calcs(db, commit=False)
+        counts["prejob job re-anchor"] = f"{anchor['created']} created / {anchor['checked']} cards checked"
+
         db.commit()
 
         print("\n[seed] Complete. Row counts:")
