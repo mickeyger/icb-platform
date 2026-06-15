@@ -18,11 +18,20 @@ Three tiers, matched to the real blast radius of each script (see docs/scripting
 Keyed on db-NAME, not hostname — dev/test/CI all share localhost (WO v4.34.4 §3.0). All three delegate the
 name resolution to ``app.db_guard`` (the single source of truth, also used by the pytest session guard).
 """
+import getpass
 import os
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 # Confirm-tier escape hatch for non-interactive contexts (does NOT apply to the hard-refuse tier).
 _CONFIRM_ENV = "ICB_ALLOW_SHARED_DB_WRITE"
+
+# WO v4.34.4 (BA ask, post-merge-review): every Tier-2 confirm that ALLOWS a scoped-destructive op
+# against a NON-test DB is the residual risk surface (a fat-finger 'y' or a stale ICB_ALLOW_SHARED_DB_WRITE
+# in the shell). Record each one. backend/scripts_audit.log is gitignored (*.log) — an operational trail,
+# not a committed artifact.
+_AUDIT_LOG = Path(__file__).resolve().parent.parent / "scripts_audit.log"
 
 
 def _url():
@@ -35,6 +44,24 @@ def _target() -> str:
     from app.db_guard import resolve_db_name, resolve_host
     url = _url()
     return f"host={resolve_host(url)} db={resolve_db_name(url)}"
+
+
+def _audit_confirm(context: str, *, mode: str) -> None:
+    """Append one tab-delimited line recording a Tier-2 confirm that allowed a scoped-destructive op
+    against a non-test DB: timestamp, operator, script, args, the env-flag value, and the target.
+    Best-effort — a logging failure NEVER blocks the operation (the gate is the confirm, not the log)."""
+    try:
+        try:
+            user = getpass.getuser()
+        except Exception:                                  # noqa: BLE001 — getuser can fail in odd shells
+            user = "?"
+        env = os.environ.get(_CONFIRM_ENV)
+        line = (f"{datetime.now(timezone.utc).isoformat()}\tuser={user}\tscript={context}\tmode={mode}\t"
+                f"{_CONFIRM_ENV}={env!r}\targv={sys.argv}\ttarget={_target()}\n")
+        with _AUDIT_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+    except Exception as exc:                               # noqa: BLE001 — audit logging must never block
+        print(f"[env-guard] WARNING: could not write {_AUDIT_LOG.name}: {exc}")
 
 
 def require_test_db(context: str) -> str:
@@ -58,11 +85,13 @@ def confirm_if_shared_db(context: str, *, destroys: str) -> None:
               f"            This will: {destroys}")
     if os.environ.get(_CONFIRM_ENV) == "1":
         print(f"{banner}\n            {_CONFIRM_ENV}=1 set — proceeding.")
+        _audit_confirm(context, mode="env")
         return
     if sys.stdin is not None and sys.stdin.isatty():
         print(banner)
         ans = input("            Type 'y' to proceed against the shared dev DB: ").strip().lower()
         if ans == "y":
+            _audit_confirm(context, mode="interactive")
             return
         raise RuntimeError(f"[env-guard] REFUSED: {context} was not confirmed against the shared dev DB.")
     raise RuntimeError(

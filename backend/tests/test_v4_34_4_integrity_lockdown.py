@@ -191,6 +191,10 @@ def test_reconcile_script_hostname_guard(monkeypatch):
         eg.confirm_if_shared_db("seed_v4_28", destroys="delete mock chassis")
     monkeypatch.setenv("ICB_ALLOW_SHARED_DB_WRITE", "1")
     eg.confirm_if_shared_db("seed_v4_28", destroys="delete mock chassis")    # opt-in → no raise
+    # BA ask — the env-opt-in confirm (the residual risk surface) is written to the audit trail.
+    audit = eg._AUDIT_LOG.read_text(encoding="utf-8") if eg._AUDIT_LOG.exists() else ""
+    assert any("script=seed_v4_28" in ln and "mode=env" in ln and "ICB_ALLOW_SHARED_DB_WRITE='1'" in ln
+               for ln in audit.splitlines())
     # Tier 3 (additive): announce only, never raises even on dev.
     eg.announce_target("seed_dealers")
 

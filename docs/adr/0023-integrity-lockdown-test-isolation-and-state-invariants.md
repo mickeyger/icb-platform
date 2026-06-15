@@ -61,7 +61,10 @@ discipline.**
      `seed_fridge_units`, `seed_medical_waste_template`, `import_prejob_templates`).
    Guards sit at the CLI entry (or the TRUNCATE statement), so internal composition (e.g. the seed
    calling `ensure_jobs_for_carded_calcs`) and a fresh-empty-DB bootstrap are unaffected. Full matrix:
-   `docs/scripting/environment_guard.md`.
+   `docs/scripting/environment_guard.md`. **Tier 2 is the residual risk surface** (fat-finger `y` /
+   stale `ICB_ALLOW_SHARED_DB_WRITE`), so every Tier-2 confirm that allows a scoped-destructive op
+   against a non-test DB is appended to `backend/scripts_audit.log` (operator, UTC timestamp, script,
+   args, env-flag value, target — gitignored, best-effort). (BA ask, post-merge-review.)
 
 3. **Three service-layer state-machine invariants (§3.3)** — new `app/services/integrity.py`:
    - **Invariant 1 — a confirmed Pre-Job Card always anchors a production_job.**
@@ -96,6 +99,18 @@ discipline.**
    (ADR 0011) and the superuser password is local-only, so `icb_test` can't be created in a dev session
    — the positive path (suite green on `icb_test`) is **CI-verified**. The negative path (everything
    refusing the shared dev DB) is verified locally and is the acute-risk reduction.
+
+### Pattern note — same-transaction reads under `autoflush=False`
+
+> Service-layer invariants that read state set within the same transaction must call `db.flush()`
+> before the read. `SessionLocal` is configured with `autoflush=False`, so pending inserts/updates are
+> not visible to subsequent queries within the same session until explicitly flushed. The Invariant 1
+> (confirmed-card-anchored) implementation flushes before assertion. Future invariant work must follow
+> the same pattern.
+
+(Recorded because this exact gotcha produced a CI-only regression during this WO: the Invariant-1
+assertion queried for the just-added anchor job before it was flushed, saw `None`, and wrongly raised
+HTTP 500 — fixed by flushing first. The first CI run caught it; the fix touched only the new assertion.)
 
 ## Consequences
 

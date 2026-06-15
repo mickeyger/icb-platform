@@ -19,6 +19,14 @@ against the shared dev DB") turned into code, after a script-driven re-seed cont
 `ICB_ALLOW_SHARED_DB_WRITE=1` in the environment for a deliberate, non-interactive dev-DB run. With
 neither (e.g. piped/CI), it **fails safe** and refuses — it never silently proceeds.
 
+**Tier 2 audit trail.** The middle tier is the residual risk surface (a fat-finger `y`, or a stale
+`ICB_ALLOW_SHARED_DB_WRITE=1` left in a shell). Every Tier-2 confirm that *allows* a scoped-destructive
+op against a non-test DB appends one tab-delimited line to `backend/scripts_audit.log` (gitignored
+`*.log` — an operational trail, not a committed artifact): UTC timestamp, operator (`getpass.getuser`),
+script, `mode` (`env`/`interactive`), the `ICB_ALLOW_SHARED_DB_WRITE` value, `argv`, and the target
+`host=…/db=…`. Logging is best-effort — a write failure warns but never blocks the operation. (Tier-1
+refusals and Tier-3 announces are not logged; a refusal is already loud, and Tier 3 is non-destructive.)
+
 There is **no override for tier 1.** A TRUNCATE-all or a calc/job reconcile can only ever run against a
 `*_test` database. To run one, point `DATABASE_URL` at your test DB (see [docs/testing/setup.md](../testing/setup.md)).
 
