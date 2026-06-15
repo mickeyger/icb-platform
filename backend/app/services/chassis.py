@@ -204,6 +204,36 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
     return rec
 
 
+def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecord:
+    """WO v4.34.1 §3.4b (Gap A) — late VIN capture from the Chassis page.
+
+    The backend NULL-state guard: a VIN write is accepted ONLY when the current value IS NULL —
+    a one-way NULL→value transition. This is the FIRST real backend enforcement of the sign-off
+    integrity that v4.34 implemented frontend-only (ADR 0022 footnote): an attested/known VIN can
+    never be silently rewritten through this path. Stamps vin_source='chassis_page_manual' for
+    provenance, and refuses a value already anchoring another chassis (uq_chassis_records_vin)."""
+    rec = db.get(ChassisRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    vin = (vin or "").strip()
+    if not vin:
+        raise HTTPException(status_code=422, detail="vin is required")
+    if rec.vin:                                            # NULL-state guard — write-once
+        raise HTTPException(status_code=409,
+                            detail=f"VIN already set ({rec.vin}); it cannot be overwritten from the Chassis page")
+    vin = vin[:32]
+    clash = db.execute(select(ChassisRecord.id).where(
+        ChassisRecord.vin == vin, ChassisRecord.id != record_id)).first()
+    if clash:
+        raise HTTPException(status_code=409, detail=f"VIN {vin} already anchors another chassis record")
+    rec.vin = vin
+    rec.vin_source = "chassis_page_manual"
+    rec.updated_by = who
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
 def capture_event(db: Session, record_id: int, event_type: str, payload, who: str) -> ChassisLifecycleEvent:
     if event_type not in ("VCL", "DCL"):
         raise HTTPException(status_code=422, detail="event_type must be VCL or DCL")

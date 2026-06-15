@@ -88,6 +88,13 @@ class ChassisRecordUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class ChassisVinCapture(BaseModel):
+    """WO v4.34.1 §3.4b (Gap A) — late VIN capture on the Chassis page. Deliberately separate from
+    ChassisRecordUpdate (which has NO vin field): the VIN is write-once, guarded server-side to a
+    NULL→value transition only, stamping vin_source='chassis_page_manual'."""
+    vin: str
+
+
 class ChassisModelOut(BaseModel):
     """WO v4.34 §3.7 — one chassis-type DDM entry feeding the make/model dropdowns (Planning ack,
     Pre-Job Card, Chassis +New/edit). Read-only in v4.34; admin CRUD is v4.35."""
