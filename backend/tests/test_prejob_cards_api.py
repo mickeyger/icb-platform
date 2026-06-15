@@ -59,9 +59,11 @@ def seeded(api):
                  .filter(ProductionJob.calculation_record_id.isnot(None)).all()}
         calc = (db.query(CalculationRecord)
                 .filter(~CalculationRecord.id.in_(taken or {0}))
+                .filter(CalculationRecord.status == "accepted")       # fresh New-Build costing —
+                .filter(CalculationRecord.is_repair.isnot(True))      # the submit job-drive skips repairs
                 .order_by(CalculationRecord.id).first())
         if calc is None:
-            pytest.skip("no job-free calculation on this DB")
+            pytest.skip("no fresh accepted New-Build calculation on this DB")
         t_legacy = PrejobTemplate(name="P433C Big Test Body (legacy)", body_type="freezer",
                                   size_category="big", product_line="rhinorange_legacy",
                                   header_format="P433C header", sections=sections,
@@ -75,8 +77,17 @@ def seeded(api):
                                  sections=sections, is_active=False, created_by="t")
         db.add_all([t_legacy, t_20, t_draft])
         db.commit()
-        return {"calc_id": calc.id, "calc_user_id": calc.user_id,
-                "tpl_20": t_20.id, "tpl_legacy": t_legacy.id, "tpl_draft": t_draft.id}
+        # submit-for-check now advances the linked REAL calc's status (fix/prejob-card-status-sync);
+        # capture it to restore on teardown (v4.27 — leave real icb_costings data untouched).
+        calc_id, calc_orig_status = calc.id, calc.status
+        result = {"calc_id": calc.id, "calc_user_id": calc.user_id,
+                  "tpl_20": t_20.id, "tpl_legacy": t_legacy.id, "tpl_draft": t_draft.id}
+    yield result
+    with SessionLocal() as db:
+        c = db.get(CalculationRecord, calc_id)
+        if c is not None:
+            c.status = calc_orig_status
+            db.commit()
 
 
 def test_template_options_rank_rhinorange_20_first_and_hide_drafts(api, seeded):

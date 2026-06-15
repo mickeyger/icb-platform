@@ -318,6 +318,21 @@ def update_card(db: Session, card_id: int, data: dict, user) -> PrejobCard:
     return card
 
 
+def _sync_calc_status(db: Session, calc_id: int, status: str) -> None:
+    """Keep calculations.status — the single column the Costings dashboard + its status chips read
+    (routers/calculator.py) — in lock-step with the Pre-Job Card lifecycle.
+
+    Hotfix (fix/prejob-card-status-sync): the v4.33 card flow drove production_jobs.status but left
+    calculations.status at 'accepted', so a both-signed-off card still showed 'Accepted' on the
+    dashboard and never appeared under Pre-Job Sent / Pre-Job Confirmed (nor flowed toward Planning).
+    Mirrors the card lifecycle onto the costing: sent_for_check→pre_job_sent, pre_job_confirmed, and
+    reject keeps it at pre_job_sent (the job stays in the pipeline). Never resurrects a declined
+    costing. Runs inside the caller's transaction (no commit here)."""
+    calc = db.get(CalculationRecord, calc_id)
+    if calc is not None and calc.status != "declined":
+        calc.status = status
+
+
 def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = False) -> PrejobCard:
     """Stage A→B/C — §0.8 gate + §0.21 legacy status drive."""
     # §3.2 — FOR UPDATE row-lock: under READ COMMITTED a concurrent second submit blocks here,
@@ -343,6 +358,7 @@ def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = Fal
     card.status = "sent_for_check"
     card.sent_for_check_at = _now()
     card.reject_reason = None                          # §0.14 — re-submit clears the old reason
+    _sync_calc_status(db, card.calculation_id, "pre_job_sent")   # hotfix — Costings shows Pre-Job Sent
 
     # §3.6 — records-copy PDF snapshot (§0.11: the email attachment source). Rendered by the
     # SAME function the Preview button uses; failure here must never block the submit.
@@ -482,6 +498,7 @@ def sign_off(db: Session, card_id: int, role: str, attestation: str, user) -> Pr
 
     if card.sales_rep_signoff_at is not None and card.planner_signoff_at is not None:
         card.status = "pre_job_confirmed"              # Stage D — auto on the second sign-off
+        _sync_calc_status(db, card.calculation_id, "pre_job_confirmed")   # hotfix — Costings shows Pre-Job Confirmed
         job = _job_for_calc(db, card.calculation_id)
         if job is not None and job.status in ("accepted", "pre_job_sent"):
             job.status = "pre_job_confirmed"
@@ -543,6 +560,9 @@ def reject(db: Session, card_id: int, role: str, reason: str, user) -> PrejobCar
     card.planner_signoff_at = None
     card.planner_attestation = None
     card.sent_for_check_at = None
+    # hotfix — the job stays pre_job_sent (re-check pending), so keep the costing there too, not back
+    # at 'accepted'. The pipeline is preserved; Planning still gates on pre_job_confirmed.
+    _sync_calc_status(db, card.calculation_id, "pre_job_sent")
     # WO v4.34 §3.4 (§0.6) — release the chassis this card auto-created (orphan it if unreferenced).
     _release_auto_created_chassis(db, card)
     db.commit()
