@@ -71,6 +71,7 @@ def assert_confirmed_card_anchored(db: Session, calc_id: int) -> None:
     production_job backs it. Called from sign_off AFTER _ensure_anchor_job, so this only fires in the
     pathological case where the anchor could not be created (e.g. no branch resolvable) — turning a
     silent Planning-invisible confirm into a clean, atomic failure."""
+    db.flush()   # SessionLocal is autoflush=False — flush so a just-added (pending) anchor job is visible
     card = _card_for_calc(db, calc_id)
     if card is None or card.status != "pre_job_confirmed":
         return
