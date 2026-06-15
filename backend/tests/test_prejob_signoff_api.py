@@ -43,7 +43,10 @@ def api(app_mod):
 
 @pytest.fixture
 def sent_card(api):
-    """A P433S card in sent_for_check, with a P433S 'accepted' job behind it (§0.21 path)."""
+    """A P433S card in sent_for_check, with a P433S 'accepted' job behind it (§0.21 path).
+
+    The card flow now also advances the linked REAL calculation's status (fix/prejob-card-status-sync),
+    so we capture + restore calc.status on teardown (v4.27 — leave real icb_costings data untouched)."""
     client, admin = api
     from app.database import Branch, CalculationRecord, SessionLocal
     from app.models.mes import PrejobTemplate, ProductionJob
@@ -52,9 +55,12 @@ def sent_card(api):
                  .filter(ProductionJob.calculation_record_id.isnot(None)).all()}
         calc = (db.query(CalculationRecord)
                 .filter(~CalculationRecord.id.in_(taken or {0}))
+                .filter(CalculationRecord.status == "accepted")       # fresh New-Build costing —
+                .filter(CalculationRecord.is_repair.isnot(True))      # the submit job-drive skips repairs
                 .order_by(CalculationRecord.id).first())
         if calc is None:
-            pytest.skip("no job-free calculation on this DB")
+            pytest.skip("no fresh accepted New-Build calculation on this DB")
+        calc_id, calc_orig_status = calc.id, calc.status   # capture to restore on teardown
         tpl = PrejobTemplate(
             name="P433S TPL", body_type="chiller", product_line="standard", is_active=True,
             header_format="P433S header",
@@ -64,7 +70,7 @@ def sent_card(api):
                             status="accepted", job_number="P433S01")
         db.add_all([tpl, job])
         db.commit()
-        calc_id, tpl_id, job_id = calc.id, tpl.id, job.id
+        tpl_id, job_id = tpl.id, job.id
 
     r = client.post("/api/prejob-cards", json={"calculation_id": calc_id, "template_id": tpl_id})
     assert r.status_code == 201, r.text
@@ -74,14 +80,22 @@ def sent_card(api):
                        "planner_user_id": admin.id, "body_gap_mm": 150})
     r = client.post(f"/api/prejob-cards/{card['id']}/submit-for-check", json={})
     assert r.status_code == 200, r.text
-    return {"card_id": card["id"], "job_id": job_id}
+    yield {"card_id": card["id"], "job_id": job_id, "calc_id": calc_id}
+    with SessionLocal() as db:                              # restore the real calc's status (v4.27)
+        c = db.get(CalculationRecord, calc_id)
+        if c is not None:
+            c.status = calc_orig_status
+            db.commit()
 
 
 def test_both_signoffs_confirm_and_drive_job_status_only(api, sent_card):
     client, admin = api
-    from app.database import SessionLocal
+    from app.database import CalculationRecord, SessionLocal
     from app.models.mes import ProductionJob
     cid = sent_card["card_id"]
+    # fix/prejob-card-status-sync — submit already moved the costing into the pipeline
+    with SessionLocal() as db:
+        assert db.get(CalculationRecord, sent_card["calc_id"]).status == "pre_job_sent"
     # empty attestation 422
     assert client.post(f"/api/prejob-cards/{cid}/signoff/sales",
                        json={"attestation": "  "}).status_code == 422
@@ -104,6 +118,8 @@ def test_both_signoffs_confirm_and_drive_job_status_only(api, sent_card):
         assert j.status == "pre_job_confirmed" and j.pre_job_confirmed_at is not None  # §0.21
         assert j.pre_job_signoff_sales_at is None        # honesty: signoff columns untouched
         assert j.pre_job_signoff_production_at is None
+        # fix/prejob-card-status-sync — costing reflects Pre-Job Confirmed (dashboard + Planning ack candidate)
+        assert db.get(CalculationRecord, sent_card["calc_id"]).status == "pre_job_confirmed"
     # signing a confirmed card 409s
     assert client.post(f"/api/prejob-cards/{cid}/signoff/planner",
                        json={"attestation": "late"}).status_code == 409
@@ -125,6 +141,10 @@ def test_reject_returns_to_draft_with_reason_and_resets(api, sent_card):
     assert "Body gap unworkable" in body["reject_reason"]
     assert body["sales_rep_signoff_at"] is None          # earlier sign-off reset — both re-check
     assert body["sent_for_check_at"] is None
+    # fix/prejob-card-status-sync — rejected card stays IN the pipeline (job/costing pre_job_sent), not 'accepted'
+    from app.database import CalculationRecord, SessionLocal
+    with SessionLocal() as db:
+        assert db.get(CalculationRecord, sent_card["calc_id"]).status == "pre_job_sent"
     # reject on a draft 409s
     assert client.post(f"/api/prejob-cards/{cid}/reject/planner",
                        json={"reason": "x"}).status_code == 409
