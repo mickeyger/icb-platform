@@ -70,5 +70,7 @@ def seed() -> dict:
 
 
 if __name__ == "__main__":
+    from scripts._environment_guard import announce_target   # additive: insert-when-absent (draft template)
+    announce_target("seed_medical_waste_template")
     print(seed())
     sys.exit(0)

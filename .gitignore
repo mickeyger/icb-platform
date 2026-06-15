@@ -23,12 +23,23 @@ dist/
 *.sqlite
 *.sqlite3
 *.bak*
+# WO v4.34.4 §3.4 (from the Phase-1 audit, b36946a) — NEVER commit DB dumps (real ICB data).
+*.dump
+backend/.db_snapshots/
 # WO v4.28 — chassis photo store (local FS; off-repo, §5.3 swap to file-store later)
 backend/uploads/
 
 # ---- Local operational source workbooks (off-repo; the ETL reads these by path,
 #      same policy as v4.20's fajecoza_grp_costings.sql — large binaries + real ICB data) ----
 latest documents/
+# WO v4.34.4 §3.4 — local-only generated/source artifacts (off-repo, same policy):
+#   .uat-gen/   UAT-doc generator toolet (carries its own node_modules)
+#   emails/     real customer correspondence + quote attachments (PII / real ICB data)
+#   transcripts/ process-narration source recordings
+# NOTE: docs/screenshots/journeys/ is DELIBERATELY tracked (committed journey deliverables) — not ignored.
+.uat-gen/
+emails/
+transcripts/
 
 # ---- Logs ----
 logs/

@@ -320,6 +320,9 @@ def main() -> int:
     ap.add_argument("--update", action="store_true",
                     help="refresh existing DRAFT rows from the files (never touches active)")
     args = ap.parse_args()
+    if not args.dry_run:    # additive: imports drafts, skips existing/active — announce the target.
+        from scripts._environment_guard import announce_target
+        announce_target("import_prejob_templates")
     rows = import_templates(Path(args.folder), dry_run=args.dry_run, update=args.update)
     widths = {k: max(len(str(r[k])) for r in rows + [dict.fromkeys(rows[0], k)]) for k in rows[0]}
     hdr = "  ".join(k.upper().ljust(widths[k]) for k in rows[0])

@@ -69,5 +69,7 @@ def seed() -> dict:
 
 
 if __name__ == "__main__":
+    from scripts._environment_guard import announce_target   # additive: insert-when-(manufacturer,model)-absent
+    announce_target("seed_fridge_units")
     print(seed())
     sys.exit(0)

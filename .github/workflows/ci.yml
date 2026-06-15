@@ -19,7 +19,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     env:
-      DATABASE_URL: postgresql+psycopg://icb_app:icb_app_dev@localhost:5432/icb
+      # WO v4.34.4 §3.1 — CI runs against the ISOLATED test DB (icb_test), same as local dev. The
+      # db-name guard (app/db_guard.py) refuses any destructive op unless DATABASE_URL ends in `_test`.
+      DATABASE_URL: postgresql+psycopg://icb_app:icb_app_dev@localhost:5432/icb_test
       SESSION_SECRET: ci-test-secret-not-for-production
     steps:
       - uses: actions/checkout@v5
@@ -59,6 +61,11 @@ jobs:
 
       - name: Bootstrap database (deploy/postgres/init.sql)
         run: psql "${{ steps.postgres.outputs.connection-uri }}" -f deploy/postgres/init.sql
+
+      # WO v4.34.4 §3.1 — create the isolated test DB the suite + seed run against (CI's DATABASE_URL
+      # points at icb_test; the db-name guard refuses anything else).
+      - name: Bootstrap isolated test database (deploy/postgres/init_test.sql)
+        run: psql "${{ steps.postgres.outputs.connection-uri }}" -f deploy/postgres/init_test.sql
 
       - name: Build frontend
         working-directory: frontend

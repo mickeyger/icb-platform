@@ -80,6 +80,9 @@ def seed_spec_options(db, *, who: str = "seed_v4.26") -> dict:
 
 
 def main():
+    from scripts._environment_guard import confirm_if_shared_db
+    confirm_if_shared_db("seed_v4_26_spec_options",
+                         destroys="DELETE the Vacuum Materials spec options, then re-insert the catalogue.")
     db = SessionLocal()
     try:
         rep = seed_spec_options(db)

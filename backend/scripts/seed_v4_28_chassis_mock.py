@@ -72,6 +72,11 @@ def seed_chassis_mock(db, *, who: str = "seed_v4.28_mock") -> dict:
 
 
 def main() -> None:
+    # Guard the CLI entry only — seed_from_mockup calls seed_chassis_mock(db) directly (already gated by
+    # its own TRUNCATE guard), so the in-seed mock re-seed is unaffected.
+    from scripts._environment_guard import confirm_if_shared_db
+    confirm_if_shared_db("seed_v4_28_chassis_mock",
+                         destroys="DELETE all source='mock' chassis_records, then re-insert the mock fleet.")
     db = SessionLocal()
     try:
         counts = seed_chassis_mock(db)

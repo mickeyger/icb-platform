@@ -236,6 +236,9 @@ def main():
         sys.exit(f"[sap-mock] inventory not found: {inv}")
     if not price.exists():
         sys.exit(f"[sap-mock] price workbook not found: {price}")
+    from scripts._environment_guard import confirm_if_shared_db
+    confirm_if_shared_db("import_inventory_to_sap_mock",
+                         destroys="UPSERT + soft-delete the icb_sap mock (OITM/OITW/OWHS) from the workbooks.")
     report = run(inv, price)
     print("\n[import_inventory_to_sap_mock] Complete. Load report:")
     for k, v in report.items():

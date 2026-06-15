@@ -75,6 +75,9 @@ def seed_rules(db, *, who: str = "seed_v4.25") -> dict:
 
 
 def main():
+    from scripts._environment_guard import confirm_if_shared_db
+    confirm_if_shared_db("seed_v4_25_rules",
+                         destroys="DELETE the Freezer/Vacuum BOM rules + lookups for this section, then re-insert.")
     db = SessionLocal()
     try:
         counts = seed_rules(db)

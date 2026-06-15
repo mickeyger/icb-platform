@@ -131,6 +131,10 @@ def _chassis_records_present(db) -> bool:
 
 
 def _truncate_mes(db):
+    # WO v4.34.4 §3.2 — the destructive vector. HARD-refuse unless DATABASE_URL is an isolated *_test DB,
+    # so a re-seed can never TRUNCATE the shared dev DB again. (Fresh-empty seeding never reaches here.)
+    from scripts._environment_guard import require_test_db
+    require_test_db("seed_from_mockup (TRUNCATE icb_mes + icb_sap landing)")
     db.execute(sa_text(
         "TRUNCATE " + ", ".join(f"icb_mes.{t}" for t in _MES_TABLES)
         + " RESTART IDENTITY CASCADE"
