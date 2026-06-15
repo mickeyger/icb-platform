@@ -278,7 +278,7 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
     # §3.3 — lock the job row so concurrent acks serialize (the loser re-reads 'planning' and 422s
     # before the chassis auto-create); makes the job-FK idempotency guard race-safe.
     db.execute(select(ProductionJob).where(ProductionJob.id == job_id).with_for_update())
-    job, _, _, _ = get_with_costing(db, job_id)
+    job, calc, _, _ = get_with_costing(db, job_id)
     if job.status != "pre_job_confirmed":
         raise WrongStatusForTransitionError(
             f"job {job_id} is '{job.status}'; planning-ack requires 'pre_job_confirmed'")
@@ -340,6 +340,10 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                     chassis.vin = vin
             chassis.updated_by = actor
     job.status = "planning"
+    # hotfix (fix/prejob-card-status-sync) — keep the costing's status in lock-step so the Costings
+    # dashboard shows 'Planning' and the costing surfaces as an unscheduled Planning card.
+    if calc is not None and calc.status != "declined":
+        calc.status = "planning"
     db.commit()
     return get_with_costing(db, job_id)
 
