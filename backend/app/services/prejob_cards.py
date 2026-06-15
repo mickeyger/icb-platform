@@ -538,6 +538,11 @@ def sign_off(db: Session, card_id: int, role: str, attestation: str, user) -> Pr
             job.status = "pre_job_confirmed"
             if job.pre_job_confirmed_at is None:
                 job.pre_job_confirmed_at = now
+        # WO v4.34.4 §3.3 Invariant 1 — a confirmed card MUST anchor a job (else invisible to Planning).
+        # Hard assertion inside the txn: if _ensure_anchor_job couldn't create one (no branch), fail the
+        # confirm atomically rather than shipping a Planning-invisible "confirmed" card.
+        from app.services.integrity import assert_confirmed_card_anchored
+        assert_confirmed_card_anchored(db, card.calculation_id)
     db.commit()
     db.refresh(card)
     return card
