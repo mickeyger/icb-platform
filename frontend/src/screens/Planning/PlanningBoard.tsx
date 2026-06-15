@@ -770,7 +770,7 @@ function BoardSkeleton() {
 // legacy ack pool + chassis tick are NOT here (dead in live per §0.5; 2C-3). ────
 function LivePlanningBoard() {
   const nav = useNavigate()
-  const { board, schedule, move, unschedule, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
+  const { board, schedule, move, unschedule, revertToUnscheduled, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
   const panRef = useMiddleButtonPan<HTMLDivElement>()   // WO v4.29 — middle-button drag-to-pan
   const { profile, hasPermission } = useAppData()
   // WO v4.19: planning-ack + chassis-received route through the rewired
@@ -1127,6 +1127,17 @@ function LivePlanningBoard() {
             slot={openSlot}
             canTick={canTickChassis}
             onMarkReceived={() => markSlotChassisReceived(openSlot)}
+            // WO v4.34.2 — explicit revert affordance. Hidden unless planner/admin AND the job is still
+            // in 'planning' (client-side hide of the obvious case; the §0.3 rules are server-enforced).
+            canRevert={canUnschedule && openSlot.job?.status === 'planning'}
+            onRevert={async (reason) => {
+              const jid = openSlot.job?.id
+              if (jid == null) return
+              try {
+                await revertToUnscheduled(jid, reason)
+                setOpenSlot(null)            // success → close; pool now shows it at top (§0.8)
+              } catch { /* 409/422 surfaced by the context toast */ }
+            }}
             onViewProduction={() => {
               // WO v4.32 §3.5 — D7 re-enabled: carry the job into the wired dashboard.
               const jn = openSlot.job?.job_number
@@ -1186,12 +1197,16 @@ function SourceBadge({ source }: { source: string }) {
 function LiveSlotDetail({
   slot,
   canTick,
+  canRevert,
   onMarkReceived,
+  onRevert,
   onViewProduction,
 }: {
   slot: PlanningSlot
   canTick: boolean
+  canRevert: boolean
   onMarkReceived: () => void | Promise<void>
+  onRevert: (reason: string) => void | Promise<void>
   onViewProduction: () => void
 }) {
   const job = slot.job!
@@ -1201,9 +1216,15 @@ function LiveSlotDetail({
   const receivedVia = job.chassis_received_source === 'vcl' ? 'via VCL'
     : job.chassis_received_source === 'legacy' ? 'legacy record' : null
   const [busy, setBusy] = useState(false)
+  const [revertReason, setRevertReason] = useState('')
+  const [revertBusy, setRevertBusy] = useState(false)
   async function tick() {
     setBusy(true)
     try { await onMarkReceived() } finally { setBusy(false) }
+  }
+  async function doRevert() {
+    setRevertBusy(true)
+    try { await onRevert(revertReason) } finally { setRevertBusy(false) }
   }
   return (
     <div className="space-y-3 text-sm">
@@ -1250,6 +1271,33 @@ function LiveSlotDetail({
           </div>
         )}
       </div>
+
+      {/* WO v4.34.2 §3.3 — explicit "Move back to Unscheduled" (planner/admin; job still 'planning').
+          Optional reason (≤500 chars). Routes through the SAME guarded chokepoint as drag-to-pool;
+          chassis + sign-offs are preserved. Drag-to-pool stays available as the quick path. */}
+      {canRevert && (
+        <div className="space-y-2 rounded-md border border-line p-3" data-testid="revert-section">
+          <div className="text-xs font-semibold uppercase text-muted">Re-plan</div>
+          <textarea
+            value={revertReason}
+            onChange={(e) => setRevertReason(e.target.value.slice(0, 500))}
+            maxLength={500}
+            rows={2}
+            placeholder="Why move this back? (optional)"
+            data-testid="revert-reason"
+            className="w-full rounded-md border border-line bg-surface p-2 text-sm"
+          />
+          <button
+            onClick={doRevert}
+            disabled={revertBusy}
+            data-testid="revert-to-unscheduled"
+            title="Move this job off the board, back to the Unscheduled pool (chassis + sign-offs kept)"
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-status-amber py-2 font-semibold text-status-amber hover:bg-status-amber/10 disabled:opacity-60"
+          >
+            {revertBusy ? <Spinner size={14} /> : <span aria-hidden>↩</span>} Move back to Unscheduled
+          </button>
+        </div>
+      )}
 
       {/* WO v4.31 §3.2 — job-card enrichment: chassis (latest VCL) + BOM lines + bay context. Read-only. */}
       <JobCardSections jobId={job.id} />
