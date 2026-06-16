@@ -128,6 +128,15 @@ async def _admin_validation_handler(request: Request, exc: AdminValidationError)
 @app.exception_handler(AdminConflictError)
 async def _admin_conflict_handler(request: Request, exc: AdminConflictError):
     return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+# WO v4.36a §0.13 — chassis-integrity validation failures carry their own HTTP status (422 / 409).
+from .services.chassis_integrity import ChassisIntegrityError  # noqa: E402
+
+
+@app.exception_handler(ChassisIntegrityError)
+async def _chassis_integrity_handler(request: Request, exc: ChassisIntegrityError):
+    return JSONResponse({"detail": str(exc)}, status_code=getattr(exc, "status_code", 422))
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 # CORS for the Icecold Bodies MES React mockup (Vite dev 5173, Vite preview 4173).
 # Lets the mockup fetch /api/calculations + the new pre-job-card endpoints during
