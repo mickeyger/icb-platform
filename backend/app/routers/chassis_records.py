@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    AssemblyAssignRequest, BayOut, BodyAttachedRequest, ChassisEventCapture, ChassisEventOut,
-    ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut,
-    ChassisRecordUpdate, ChassisVinCapture,
+    AssemblyAssignRequest, BayOut, BodyAttachedRequest, ChassisCreateResult, ChassisEventCapture,
+    ChassisEventOut, ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail,
+    ChassisRecordOut, ChassisRecordUpdate, ChassisVinCapture,
 )
 from ..services import chassis as svc
 
@@ -68,11 +68,19 @@ def get_record(record_id: int, db: Session = Depends(get_db), user: User = Depen
     return svc.get_detail(db, record_id)
 
 
-@router.post("", response_model=ChassisRecordDetail, status_code=201)
+@router.post("", response_model=ChassisCreateResult, status_code=201)
 def create_record(payload: ChassisRecordCreate, db: Session = Depends(get_db),
                   user: User = Depends(require_permission("chassis.create"))):
+    """WO v4.36a §0.6/§0.7/§0.8 — Add-Chassis: strict-VIN + atomic job link + merge-into-placeholder, OR
+    AUTO-ADOPT when the VIN already belongs to a live chassis (adopted=True → AdoptionNotificationModal)."""
     rec = svc.create_chassis(db, payload, who=user.username)
-    return svc.get_detail(db, rec.id)
+    adopted = bool(getattr(rec, "adopted", False))
+    message = (
+        f"VIN {rec.vin} is already on chassis {rec.id} (customer {rec.customer_name or '—'}). "
+        "This job has been linked to that chassis; its details have been adopted."
+    ) if adopted else None
+    return ChassisCreateResult(chassis=svc.get_detail(db, rec.id), adopted=adopted,
+                               adopted_chassis_id=(rec.id if adopted else None), message=message)
 
 
 @router.patch("/{record_id}", response_model=ChassisRecordDetail)

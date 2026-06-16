@@ -116,6 +116,13 @@ def production_kpis(
             "as_of": now.isoformat()}
 
 
+@router.get("/unlinked")
+def list_unlinked_jobs(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """WO v4.36a §0.6 — production jobs with no chassis linked yet, for the Add-Chassis job dropdown.
+    Registered BEFORE /{job_id} so 'unlinked' isn't parsed as a job id."""
+    return svc.list_unlinked_jobs(db)
+
+
 @router.get("/{job_id}", response_model=ProductionJobDetail)
 def get_production_job(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Full detail for one job + WO v4.31 §3.2 read-only enrichment: current BOM lines, chassis

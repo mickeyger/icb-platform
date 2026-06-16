@@ -166,19 +166,93 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     return detail
 
 
+def _job_customer_name(db: Session, job) -> "str | None":
+    """Best-effort customer name for a production job (job → calc → customer), for §0.9 consistency."""
+    if job is None or not getattr(job, "calculation_record_id", None):
+        return None
+    from app.database import CalculationRecord, Customer
+    calc = db.get(CalculationRecord, job.calculation_record_id)
+    cid = getattr(calc, "customer_id", None) if calc else None
+    cust = db.get(Customer, cid) if cid else None
+    return cust.name if cust else None
+
+
 def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
-    vin = (payload.vin or "").strip()
-    if not vin:
-        raise HTTPException(status_code=422, detail="vin is required")
-    if db.execute(select(ChassisRecord.id).where(ChassisRecord.vin == vin)).first():
-        raise HTTPException(status_code=409, detail=f"chassis with VIN {vin} already exists")
-    rec = ChassisRecord(vin=vin[:32], source="manual", status="received",
-                        created_via="manual_chassis_menu",       # WO v4.34 §0.4 — provenance
-                        created_by=who, updated_by=who,
-                        **payload.model_dump(exclude={"vin"}, exclude_none=True))
+    """WO v4.36a §0.6/§0.7 — Add-Chassis with full integrity: strict VIN format + uniqueness, required
+    make/model, validated dealer, customer-consistency, and the ATOMIC job link (the MICKEYTEST fix —
+    sets production_jobs.chassis_record_id in the same transaction). If the selected job already carries a
+    LIVE placeholder chassis, MERGE-INTO-PLACEHOLDER (update-in-place) — never a duplicate row, never an
+    FK-swap that would strand the placeholder as an anchorless 'expected' chassis (§3.0 concern ii)."""
+    from app.services import chassis_integrity as ci
+    vin = ci.validate_vin_format(payload.vin)                    # 422 on bad format
+    if vin is None:
+        raise ci.ChassisIntegrityError("VIN is required", status_code=422)
+    make = (payload.make or "").strip()
+    if not make:
+        raise ci.ChassisIntegrityError("Chassis make/model is required", status_code=422)
+    dealer_id = ci.validate_dealer(db, getattr(payload, "dealer_id", None))
+    job = ci.validate_job_link(db, getattr(payload, "production_job_id", None))
+    existing = ci.resolve_existing_chassis(db, vin)              # §0.8 — does this VIN already live somewhere?
+    if job is not None:                                          # §0.9 — customer consistency (vs whoever we'd link)
+        ci.validate_customer_consistency(
+            (existing.customer_name if existing is not None else payload.customer_name),
+            _job_customer_name(db, job))
+    # §0.8 AUTO-ADOPT — the VIN already belongs to a LIVE chassis: link the job to it (don't mint a duplicate)
+    # and flag the result so the router raises the AdoptionNotificationModal. 409 only on a genuine conflict.
+    if existing is not None:
+        if job is None:
+            raise ci.ChassisIntegrityError(
+                f"VIN {vin} is already on chassis {existing.id} (customer {existing.customer_name or '—'}). "
+                "Open that chassis, or pick a job to link it to.", status_code=409)
+        if job.chassis_record_id not in (None, existing.id):
+            raise ci.ChassisIntegrityError(
+                f"Job {job.job_number or job.id} already has a different chassis. Use Merge Chassis to swap.",
+                status_code=409)
+        if job.chassis_record_id is None:
+            job.chassis_record_id = existing.id                 # adopt — link the job to the existing chassis
+        existing.updated_by = who
+        db.commit()
+        db.refresh(existing)
+        existing.adopted = True                                 # transient signal (§0.8) → AdoptionNotificationModal
+        return existing
+    # §0.6 MERGE-INTO-PLACEHOLDER (update-in-place): VIN is NEW + the job already has a live placeholder →
+    # stamp the real VIN/make onto it rather than minting a duplicate or FK-swapping (which would orphan it).
+    if job is not None and job.chassis_record_id is not None:
+        ph = db.get(ChassisRecord, job.chassis_record_id)
+        if ph is not None and ph.deleted_at is None:
+            if ph.vin and ci.normalize_vin(ph.vin) != vin:
+                raise ci.ChassisIntegrityError(
+                    f"Job {job.job_number or job.id} already has chassis VIN {ph.vin}. "
+                    "Use Merge Chassis to swap the chassis.", status_code=409)
+            ph.vin = vin                                        # VIN is new (existing is None) → unique-safe
+            ph.vin_source = ph.vin_source or "chassis_page_manual"
+            ph.make = make
+            if payload.customer_name:
+                ph.customer_name = payload.customer_name
+            if dealer_id is not None:
+                ph.dealer_id = dealer_id
+            if ph.status == "expected":
+                ph.status = "received"                          # the placeholder now has a real chassis
+            ph.updated_by = who
+            db.commit()
+            db.refresh(ph)
+            ph.adopted = False
+            return ph
+    # Fresh chassis + atomic job link in ONE transaction (no partial-failure orphan — §3.0 atomicity note).
+    rec = ChassisRecord(
+        vin=vin, make=make, status="received", source="manual", created_via="manual_chassis_menu",
+        vin_source="chassis_page_manual", customer_name=payload.customer_name,
+        contact_person=payload.contact_person, telephone=payload.telephone, model=payload.model,
+        description=payload.description, notes=payload.notes, dealer_id=dealer_id,
+        job_number=(job.job_number if job is not None else payload.job_number),
+        created_by=who, updated_by=who)
     db.add(rec)
+    db.flush()                                                   # id for the FK link, same txn
+    if job is not None:
+        job.chassis_record_id = rec.id                           # THE MICKEYTEST fix — atomic job↔chassis link
     db.commit()
     db.refresh(rec)
+    rec.adopted = False
     return rec
 
 

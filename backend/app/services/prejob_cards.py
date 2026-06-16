@@ -118,26 +118,46 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
     propagates so the whole submit rolls back atomically (the chassis is the pipeline foundation,
     unlike the cosmetic PDF snapshot)."""
     make_model = (card.chassis_make_model or "").strip()[:64]   # chassis.make is VARCHAR(64); the card field is 128
+    # WO v4.36a §0.4 — validate + propagate the Pre-Job-attested VIN to the chassis (was dropped: vin=None).
+    # Write-time-only strict format (422 on bad format); NULL/blank exempt ('expected' carry NULL until VCL).
+    from app.services import chassis_integrity as ci
+    vin = ci.validate_vin_format(card.vin_number)
     if card.chassis_record_id is not None:
         ch = db.get(ChassisRecord, card.chassis_record_id)      # sync an auto-created 'expected' row with card edits
         if ch is not None and ch.created_via == "pre_job_card" and ch.status == "expected":
             if make_model:
                 ch.make = make_model
             ch.body_gap_mm = card.body_gap_mm
+            if vin and not ch.vin:                              # §0.4 propagation — write-once NULL→value
+                ci.validate_vin_uniqueness(db, vin, exclude_id=ch.id)
+                ch.vin = vin
+                ch.vin_source = ch.vin_source or "pre_job_card"
         return                                             # already linked — idempotent (sync only, no new row)
     if not make_model:
         return                                             # §3.2 case 2 — empty make/model: graceful no-op
     job = _job_for_calc(db, card.calculation_id)
+    if vin:                                                # §0.8 — a known VIN already on a live chassis → adopt it
+        existing_vin = ci.resolve_existing_chassis(db, vin)
+        if existing_vin is not None:
+            card.chassis_record_id = existing_vin.id
+            if job is not None and job.chassis_record_id is None:
+                job.chassis_record_id = existing_vin.id
+            return
     existing = _chassis_for_job(db, job)
     if existing is not None:                               # §3.2 case A4 — adopt the job's chassis, don't duplicate
         card.chassis_record_id = existing.id
-        if existing.created_via == "pre_job_card" and existing.status == "expected" and make_model:
-            existing.make = make_model                     # keep an auto-created 'expected' row synced
+        if existing.created_via == "pre_job_card" and existing.status == "expected":
+            if make_model:
+                existing.make = make_model                 # keep an auto-created 'expected' row synced
+            if vin and not existing.vin:                   # §0.4 — propagate VIN onto the adopted 'expected' row
+                ci.validate_vin_uniqueness(db, vin, exclude_id=existing.id)
+                existing.vin = vin
+                existing.vin_source = existing.vin_source or "pre_job_card"
         return                                             # (real/foreign chassis: job wins, no sync — §3.2 review #3)
     calc = db.get(CalculationRecord, card.calculation_id)
     from app.services.chassis import create_expected_chassis
     chassis = create_expected_chassis(                     # §0.5 shared insert (identical at §3.3)
-        db, make=make_model, vin=None,                     # §3.2 case 3 — VIN unknown until VCL receive
+        db, make=make_model, vin=vin,                      # §0.4 — propagate the attested VIN (was vin=None)
         body_gap_mm=card.body_gap_mm, created_via="pre_job_card",
         created_source_ref=_source_ref(calc, card), who=getattr(user, "username", None))
     card.chassis_record_id = chassis.id

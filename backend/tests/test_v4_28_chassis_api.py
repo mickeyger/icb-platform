@@ -47,8 +47,16 @@ class _FakeUpload:
         self.file = io.BytesIO(data)
 
 
+def _vin(suffix=""):
+    # WO v4.36a — these fixtures pre-dated strict-VIN enforcement; build a conformant 17-char ISO-3779 VIN
+    # (no I/O/Q), keeping the ZZTESTV428 prefix for cleanup/search. Strip I/O/Q from the tag, pad to 17.
+    s = "".join(ch for ch in suffix.upper() if ch not in "IOQ")
+    return (f"{_VIN_PREFIX}{s}".ljust(17, "0"))[:17]
+
+
 def _create(db, suffix, **kw):
-    return svc.create_chassis(db, ChassisRecordCreate(vin=f"{_VIN_PREFIX}{suffix}", **kw), _WHO)
+    kw.setdefault("make", "HINO")   # WO v4.36a §0.7 — AC now requires make/model server-side
+    return svc.create_chassis(db, ChassisRecordCreate(vin=_vin(suffix), **kw), _WHO)
 
 
 # ── create / read ────────────────────────────────────────────────────────────
@@ -59,7 +67,7 @@ def test_create_sets_manual_source_and_received_status():
             rec = _create(db, "A", customer_name="Test Cust", make="HINO")
             assert rec.source == "manual" and rec.status == "received"
             detail = svc.get_detail(db, rec.id)
-            assert detail.vin == f"{_VIN_PREFIX}A"
+            assert detail.vin == _vin("A")
             assert detail.event_count == 0 and detail.events == []
         finally:
             _cleanup_chassis(db)
@@ -84,7 +92,7 @@ def test_list_finds_by_vin_query():
         _cleanup_chassis(db)
         try:
             rec = _create(db, "CLIST", customer_name="Findable Co")
-            found = svc.list_chassis(db, q=f"{_VIN_PREFIX}CLIST")
+            found = svc.list_chassis(db, q=_vin("CLIST"))
             assert any(r.id == rec.id for r in found)
         finally:
             _cleanup_chassis(db)

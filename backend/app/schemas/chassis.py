@@ -67,6 +67,10 @@ class ChassisRecordDetail(ChassisRecordOut):
 class ChassisRecordCreate(BaseModel):
     vin: str
     job_number: Optional[str] = None
+    # WO v4.36a §0.6/§0.7 — the selected job to link (from the unlinked-jobs dropdown; atomically sets
+    # production_jobs.chassis_record_id) + the supplying dealer (validated is_dealer=true).
+    production_job_id: Optional[int] = None
+    dealer_id: Optional[int] = None
     customer_name: Optional[str] = None
     contact_person: Optional[str] = None
     telephone: Optional[str] = None
@@ -86,6 +90,16 @@ class ChassisRecordUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+
+class ChassisCreateResult(BaseModel):
+    """WO v4.36a §0.8 — the Add-Chassis result envelope. `adopted` = the VIN matched an existing live chassis
+    and the selected job was linked to it (the frontend then shows the AdoptionNotificationModal with
+    `message` + `chassis`); otherwise a fresh chassis (or a placeholder updated in-place) was created."""
+    chassis: ChassisRecordDetail
+    adopted: bool = False
+    adopted_chassis_id: Optional[int] = None
+    message: Optional[str] = None
 
 
 class ChassisVinCapture(BaseModel):

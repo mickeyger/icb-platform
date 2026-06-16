@@ -120,7 +120,7 @@ def test_ack_propagates_job_number_and_vin_to_chassis():
     from app.database import Branch, CalculationRecord, SessionLocal, User
     from app.models.mes import ChassisRecord, ProductionJob
     from app.services import production_jobs as svc
-    vin = "P434CACKVIN01"
+    vin = "P434CACKVN0000001"   # WO v4.36a — conformant 17-char ISO-3779 (was 'P434CACKVIN01')
     with SessionLocal() as db:
         _purge(db)
         taken = {j.calculation_record_id for j in db.query(ProductionJob)
