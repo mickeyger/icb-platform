@@ -139,13 +139,13 @@ def test_planner_creates_manual_chassis(page: Page, live_server: str, role_users
     expect(page.get_by_test_id("chassis-list")).to_be_visible(timeout=T)
     page.get_by_test_id("chassis-new").click()
     expect(page.get_by_test_id("chassis-create-form")).to_be_visible(timeout=T)
-    page.get_by_test_id("chassis-create-vin").fill("J434AMANUAL01")
+    page.get_by_test_id("chassis-create-vin").fill("J434AMANUAL000001")
     page.get_by_test_id("chassis-create-make").select_option(label=CHASSIS_TYPE)
     with page.expect_response(
             lambda r: r.url.endswith("/api/chassis-records") and r.request.method == "POST", timeout=T) as ri:
         page.get_by_test_id("chassis-create-save").click()
     assert ri.value.status == 201, f"create failed HTTP {ri.value.status}: {ri.value.text()[:300]}"
-    page.get_by_test_id("chassis-search").fill("J434AMANUAL01")
+    page.get_by_test_id("chassis-search").fill("J434AMANUAL000001")
     page.wait_for_timeout(400)
     row = page.get_by_test_id("chassis-row").first
     expect(row).to_be_visible(timeout=T)
