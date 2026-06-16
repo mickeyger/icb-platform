@@ -30,17 +30,23 @@ def _kpi_attached_today() -> int:
         return compute_production_kpis(db)["bodies_attached_today"]
 
 
-def _invariants_clean() -> bool:
+def _invariant_violations() -> int:
+    """Total v4.34.4 invariant violations across the DB. We assert the body_attached action introduces
+    NO NEW ones (a before/after delta) — NOT that the seed is globally clean: the icb_test seed
+    (seed_from_mockup) predates these invariants, whereas the v4.35 demo DB is gated clean."""
     from app.database import SessionLocal
     from app.services import integrity
     with SessionLocal() as db:
-        return integrity.run_health_checks(db)["clean"]
+        r = integrity.run_health_checks(db)
+        return (len(r["invariant_1_confirmed_cards_without_job"])
+                + len(r["invariant_2_calc_status_strays"])
+                + len(r["invariant_3_anchorless_chassis"]))
 
 
 def test_mark_body_attached_end_to_end(page: Page, live_server: str) -> None:
     s = h.make_assembly_job()                          # an in-assembly bay awaiting attachment
     kpi_before = _kpi_attached_today()
-    assert _invariants_clean()                         # clean baseline
+    viol_before = _invariant_violations()              # baseline (seed may carry pre-existing ones)
 
     admin_session(page)
     page.get_by_test_id("nav-production_dashboard").click()
@@ -62,7 +68,7 @@ def test_mark_body_attached_end_to_end(page: Page, live_server: str) -> None:
     assert h.body_attached_event_count(s["chassis_id"]) == 1
     assert h.chassis_status(s["chassis_id"]) == "in_assembly"
     assert _kpi_attached_today() == kpi_before + 1
-    assert _invariants_clean()
+    assert _invariant_violations() == viol_before      # body_attached introduced NO new violation
 
     # The Assembly tab "Body Attached (today)" section now lists the job.
     page.get_by_test_id("team-tab-assembly").click()
