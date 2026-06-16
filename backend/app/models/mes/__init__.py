@@ -319,6 +319,32 @@ class ProductionJobAudit(Base):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 8c. production_job_bay_events — JOB-centric bay events (WO v4.35 §0.19, STRETCH).
+#     Distinct from chassis_lifecycle_events (chassis-centric): this records that a JOB's panels
+#     arrived in a bay ('panels_arrived_in_bay'), the panel-side of the merge. The chassis side stays
+#     on chassis_lifecycle_events ('assembly_assigned'). When BOTH point at the same bay + the job's
+#     chassis, the bay is "ready to merge" (see services.chassis.compute_bay_merge_readiness).
+# ─────────────────────────────────────────────────────────────────────────────
+class ProductionJobBayEvent(Base):
+    __tablename__ = "production_job_bay_events"
+    __table_args__ = (
+        Index("ix_production_job_bay_events_job_bay", "production_job_id", "bay_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    production_job_id = Column(
+        Integer, ForeignKey("icb_mes.production_jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    bay_id = Column(
+        Integer, ForeignKey("icb_mes.assembly_bays.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type = Column(String(32), nullable=False)   # 'panels_arrived_in_bay' (ALLOWED_BAY_EVENT_TYPES)
+    user_id = Column(Integer)                          # cross-schema -> icb_costings.users.id (FK SET NULL in 0024)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 9. stock_counts — Stores cycle counts.
 # ─────────────────────────────────────────────────────────────────────────────
 class StockCount(Base):
@@ -1015,7 +1041,8 @@ class ChassisModel(Base):
 
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
-    "PlanningSlot", "PlanningAck", "ProductionJobAudit", "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
+    "PlanningSlot", "PlanningAck", "ProductionJobAudit", "ProductionJobBayEvent",
+    "StockCount", "Discrepancy", "POSuggestion", "DemandLine",
     "MesMaterial", "StockPosition", "Supplier", "SessionBranch",
     "LiveDailyCount", "ChassisRegister",
     "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",

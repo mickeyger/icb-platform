@@ -57,6 +57,11 @@ CHASSIS_CHECKLIST_TEMPLATES = {
 # which stays 'in_assembly' (status promotion is a v4.36+ workshop-tablet concern).
 ALLOWED_EVENT_TYPES = {"VCL", "DCL", "assembly_assigned", "body_attached"}
 
+# WO v4.35 §3.3b (STRETCH) — the JOB-side bay events live in a SEPARATE table (production_job_bay_events)
+# with their OWN allowlist; deliberately NOT folded into ALLOWED_EVENT_TYPES so a job-bay event can never
+# slip into the chassis_lifecycle_events insert path (ADR 0025 footnote C — audit/event tables by entity).
+ALLOWED_BAY_EVENT_TYPES = {"panels_arrived_in_bay"}
+
 # event_type -> the chassis_records.status it WRITES. Phase markers (assembly_assigned via
 # assign_assembly_bay; body_attached) are intentionally absent — they don't move the status column.
 _STATUS_FOR = {"VCL": "in_workshop", "DCL": "dispatched"}
@@ -404,32 +409,31 @@ def current_occupants(db: Session) -> dict:
 
 
 def assembly_bays_utilisation(db: Session) -> list:
-    """WO v4.32 §0.4 — the 5 assembly bays + per-bay utilisation (occupant chassis/job + since).
-    Additive extension of the v4.31 /bays/assembly response: BayOut gains optional occupant
-    fields; v4.31 consumers (useBayModel reads id/code/label) are unaffected."""
+    """WO v4.32 §0.4 / v4.35 §3.3b — the 5 assembly bays + per-bay utilisation and 6-state. BayOut.state
+    is derived by compute_bay_merge_readiness (the SINGLE source of truth, shared with the §3.3b auto-merge
+    prompt): empty · pre_assembly · ready_to_merge · awaiting_attachment · attached_today · post_attached.
+    Additive extension of the v4.31 /bays/assembly response — v4.31 consumers (useBayModel reads id/code/
+    label) are unaffected; occupant fields stay optional."""
     from app.schemas.chassis import BayOut
-    occupants = current_occupants(db)
-    attached = _latest_body_attached_dates(db, [o["chassis_id"] for o in occupants.values()])
-    today = date.today()
+    occupants = current_occupants(db)                # batched once; passed into the per-bay helper
     out = []
     for bay in list_assembly_bays(db):
         o = BayOut.model_validate(bay)
+        r = compute_bay_merge_readiness(db, bay.id, occupants=occupants)
+        o.state = r["state"]
+        o.body_attached_on = r["body_attached_on"]
         occ = occupants.get(bay.id)
-        if not occ:
-            o.state = "empty"                        # WO v4.35 §0.20 — no occupant
-            out.append(o)
-            continue
-        o.occupied = True
-        o.occupant_chassis_id = occ["chassis_id"]
-        o.occupant_vin = occ["vin"]
-        o.occupant_customer = occ["customer_name"]
-        o.occupant_job_id = occ["job_id"]
-        o.occupant_job_number = occ["job_number"]
-        o.since = occ["since"]
-        att = attached.get(occ["chassis_id"])
-        o.body_attached_on = att
-        o.state = ("awaiting_attachment" if att is None
-                   else "attached_today" if att >= today else "post_attached")
+        if occ:
+            o.occupied = True
+            o.occupant_chassis_id = occ["chassis_id"]
+            o.occupant_vin = occ["vin"]
+            o.occupant_customer = occ["customer_name"]
+            o.occupant_job_id = occ["job_id"]
+            o.occupant_job_number = occ["job_number"]
+            o.since = occ["since"]
+        elif r["state"] == "pre_assembly":           # panels staged; chassis not yet on the bay (§3.3b)
+            o.occupant_job_id = r["production_job_id"]
+            o.occupant_job_number = r["production_job_number"]
         out.append(o)
     return out
 
@@ -447,6 +451,59 @@ def _latest_body_attached_dates(db: Session, chassis_ids: list) -> dict:
     ).all():
         out.setdefault(cid, ev_date)                 # first per chassis = latest (id desc)
     return out
+
+
+def _panels_for_bay(db: Session, bay_id: int):
+    """(production_job_id, job_number) of the panels currently in a bay, or (None, None) — the latest
+    'panels_arrived_in_bay' event for the bay (WO v4.35 §3.3b)."""
+    from app.models.mes import ProductionJobBayEvent
+    row = db.execute(
+        select(ProductionJobBayEvent.production_job_id, ProductionJob.job_number)
+        .join(ProductionJob, ProductionJob.id == ProductionJobBayEvent.production_job_id)
+        .where(ProductionJobBayEvent.bay_id == bay_id,
+               ProductionJobBayEvent.event_type == "panels_arrived_in_bay")
+        .order_by(ProductionJobBayEvent.id.desc()).limit(1)
+    ).first()
+    return (row[0], row[1]) if row else (None, None)
+
+
+def compute_bay_merge_readiness(db: Session, bay_id: int, *, occupants=None) -> dict:
+    """WO v4.35 §3.3b (§0.19–0.21) — THE single source of truth for a bay's merge state, shared by the
+    6-state tile derivation (assembly_bays_utilisation) AND the auto-merge prompt firing logic, so the two
+    never diverge (BA-ratified). 'ready' (state 'ready_to_merge') ⟺ the bay holds the job's panels
+    (panels_arrived_in_bay) AND its chassis (assembly_assigned, the SAME production job) AND the body is not
+    attached yet. The match is by job identity: the panels event's production_job IS the chassis occupant's
+    job — and the occupant job is the one whose production_jobs.chassis_record_id is the assembly_assigned
+    chassis, so this is exactly the BA's "chassis_record_id matches the chassis of the assembly_assigned
+    event" condition. Pass `occupants` (current_occupants) to avoid re-querying it per bay.
+
+    States: empty (nothing) · pre_assembly (panels, no chassis) · ready_to_merge (matched, no body) ·
+    awaiting_attachment (chassis, no matching panels, no body) · attached_today · post_attached."""
+    occ = (occupants if occupants is not None else current_occupants(db)).get(bay_id)
+    panels_job_id, panels_job_number = _panels_for_bay(db, bay_id)
+    att = _latest_body_attached_dates(db, [occ["chassis_id"]]).get(occ["chassis_id"]) if occ else None
+    occ_job_id = occ["job_id"] if occ else None
+    matched = panels_job_id is not None and occ_job_id is not None and panels_job_id == occ_job_id
+    today = date.today()
+    if occ is None:
+        state = "pre_assembly" if panels_job_id is not None else "empty"
+    elif att is not None:
+        state = "attached_today" if att >= today else "post_attached"
+    elif matched:
+        state = "ready_to_merge"
+    else:
+        state = "awaiting_attachment"
+    return {
+        "state": state,
+        "ready": state == "ready_to_merge",
+        "has_panels": panels_job_id is not None,
+        "has_chassis": occ is not None,
+        "matched": matched,
+        "body_attached_on": att,
+        "production_job_id": occ_job_id if occ else panels_job_id,
+        "production_job_number": (occ["job_number"] if occ else panels_job_number),
+        "chassis_id": occ["chassis_id"] if occ else None,
+    }
 
 
 def _latest_cycle(db: Session, record_id: int) -> int:
@@ -506,6 +563,55 @@ def record_body_attached(db: Session, record_id: int, production_job_id: int, wh
     if job.chassis_record_id is None:
         job.chassis_record_id = record_id            # complete the body↔chassis link (the merge)
     rec.updated_by = who                             # touch only; status stays 'in_assembly' (DEV-2)
+    db.commit()
+    db.refresh(evt)
+    return evt
+
+
+def record_panels_arrived_in_bay(db: Session, production_job_id: int, bay_id: int, *,
+                                 user_id=None, notes=None, event_type: str = "panels_arrived_in_bay"):
+    """WO v4.35 §3.3b — the panels-arrived chokepoint (the JOB-side of the merge; mirrors
+    record_body_attached). Writes to production_job_bay_events (NOT chassis_lifecycle_events). Validation:
+    (1) event_type allowlisted; (2) job + active bay exist; (3) a job's panels live in exactly ONE bay —
+    re-drop → 409 (idempotency / double-linkage); (4) a bay holds exactly ONE job's panels — drop on a bay
+    already holding another job's panels → 409 (busy-bay). The backend is the source of truth; the UI does
+    not gate these — it surfaces the 409 remediation text (§3.3b consideration 1 & 2)."""
+    from app.models.mes import ProductionJobBayEvent
+    if event_type not in ALLOWED_BAY_EVENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"event type '{event_type}' is not allowed")
+    job = db.get(ProductionJob, production_job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="production job not found")
+    bay = db.get(AssemblyBay, bay_id)
+    if bay is None or not bay.is_active:
+        raise HTTPException(status_code=404, detail="assembly bay not found")
+    job_ref = job.job_number or job.id
+    # (3) double-linkage / idempotency — the job's panels are already in a bay
+    existing = db.execute(
+        select(ProductionJobBayEvent).where(
+            ProductionJobBayEvent.production_job_id == production_job_id,
+            ProductionJobBayEvent.event_type == "panels_arrived_in_bay")
+        .order_by(ProductionJobBayEvent.id.desc())).scalars().first()
+    if existing is not None:
+        prior = db.get(AssemblyBay, existing.bay_id)
+        prior_code = prior.code if prior else f"bay {existing.bay_id}"
+        if existing.bay_id == bay_id:
+            raise HTTPException(status_code=409,
+                                detail=f"panels for job {job_ref} are already in {prior_code}")
+        raise HTTPException(status_code=409,
+                            detail=(f"panels for job {job_ref} are already in {prior_code} — "
+                                    "move them back before assigning to another bay"))
+    # (4) busy-bay — the bay already holds another job's panels
+    other = db.execute(
+        select(ProductionJobBayEvent).where(
+            ProductionJobBayEvent.bay_id == bay_id,
+            ProductionJobBayEvent.event_type == "panels_arrived_in_bay")
+        .order_by(ProductionJobBayEvent.id.desc())).scalars().first()
+    if other is not None:
+        raise HTTPException(status_code=409, detail=f"{bay.code} already holds panels for another job")
+    evt = ProductionJobBayEvent(production_job_id=production_job_id, bay_id=bay_id,
+                                event_type=event_type, user_id=user_id, notes=notes)
+    db.add(evt)
     db.commit()
     db.refresh(evt)
     return evt

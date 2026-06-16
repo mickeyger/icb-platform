@@ -21,6 +21,7 @@ from ..schemas.production_jobs import (
     bom_to_out, to_detail, to_list_item,
 )
 from ..schemas.planning import RevertRequest
+from ..schemas.chassis import PanelsArrivedRequest
 from ..services import chassis as chassis_svc
 from ..services import planning as planning_svc
 from ..services import production_jobs as svc
@@ -235,6 +236,22 @@ def chassis_received_untick(job_id: int, db: Session = Depends(get_db),
         return _detail(svc.unmark_chassis_received(db, job_id, user))
     except svc.NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{job_id}/panels-arrived-in-bay", status_code=201)
+def panels_arrived_in_bay(job_id: int, payload: PanelsArrivedRequest, db: Session = Depends(get_db),
+                          user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v4.35 §3.3b (STRETCH) — record a job's panels arriving in an assembly bay (the Planning Board
+    panel-drag-to-bay; the JOB-side of the merge). Gated on `chassis.assembly_assign` (planner/production/
+    admin; workshop read-only — Q5). The one-bay-per-job's-panels + one-job's-panels-per-bay rules live in
+    the single chokepoint services.chassis.record_panels_arrived_in_bay (409 with remediation text — the
+    backend is the source of truth, the UI does not gate). Returns the created event plus the bay's
+    resulting merge-readiness so the UI can fire the auto-merge prompt without a round-trip."""
+    evt = chassis_svc.record_panels_arrived_in_bay(db, job_id, payload.bay_id, user_id=user.id,
+                                                    notes=payload.notes)
+    merge = chassis_svc.compute_bay_merge_readiness(db, payload.bay_id)
+    return {"event_id": evt.id, "production_job_id": evt.production_job_id, "bay_id": evt.bay_id,
+            "event_type": evt.event_type, "merge": merge}
 
 
 @router.get("/{job_id}/timeline", response_model=list[TimelineEvent])
