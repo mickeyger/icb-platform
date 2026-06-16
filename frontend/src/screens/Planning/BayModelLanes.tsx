@@ -282,7 +282,9 @@ export function BayModelLanes() {
           {bays.length === 0 && <div className="text-sm text-muted">No assembly bays.</div>}
         </div>
         <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
-          Drop a chassis or a scheduled job’s panels · body attaches when both meet (same job).
+          {canAssign
+            ? 'Drop a chassis or a scheduled job’s panels · body attaches when both meet (same job).'
+            : 'A job’s chassis and its panels meet here · the body attaches when both are in the bay.'}
         </div>
       </Card>
 

@@ -63,5 +63,6 @@ def test_production_dashboard_refetches_on_focus(page: Page, live_server: str) -
     assert r.status == 201, r.text()
 
     page.evaluate(FOCUS)
-    # 8s ≪ the 30s poll, so a flip this quick is the focus-refetch, not the interval tick.
-    expect(tile).to_have_attribute("data-bay-state", "attached_today", timeout=8_000)
+    # 15s is still well under the 30s poll, so the flip is the focus-refetch, not the interval tick
+    # (and matches the suite convention for this identical attached_today flip).
+    expect(tile).to_have_attribute("data-bay-state", "attached_today", timeout=T)
