@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChassisPhotoOut(BaseModel):
@@ -123,6 +123,12 @@ class AssemblyAssignRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class BodyAttachedRequest(BaseModel):
+    """WO v4.35 §0.5 — mark the body attached to the chassis in its assembly bay."""
+    production_job_id: int
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
 class BayOut(BaseModel):
     """A parking or assembly bay (master reference data, WO v4.31 §0.3).
 
@@ -144,3 +150,8 @@ class BayOut(BaseModel):
     occupant_job_id: Optional[int] = None
     occupant_job_number: Optional[str] = None
     since: Optional[date] = None                  # assembly_assigned event_date (business date)
+    # ── WO v4.35 §0.20 — the MUST-SHIP 4-state bay machine (event-derived). The 2 panels-event
+    # states (pre_assembly / ready_to_merge) are STRETCH; for MUST-SHIP a bay is one of:
+    # 'empty' | 'awaiting_attachment' | 'attached_today' | 'post_attached'.
+    state: Optional[str] = None
+    body_attached_on: Optional[date] = None       # latest body_attached event_date for the occupant

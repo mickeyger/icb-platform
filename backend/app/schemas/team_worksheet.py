@@ -36,6 +36,9 @@ class WorksheetSections(BaseModel):
     scheduled: List[WorksheetItem] = []
     in_flight: List[WorksheetItem] = []
     blocking: List[WorksheetItem] = []
+    # WO v4.35 §0.7 (DEV-6) — a 4th, nullable section (default []) so the uniform contract holds for the
+    # four teams that don't populate it; only the Assembly tab fills it ("Body Attached (today)").
+    body_attached_today: List[WorksheetItem] = []
 
 
 class TeamWorksheet(BaseModel):

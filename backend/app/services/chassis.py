@@ -409,20 +409,106 @@ def assembly_bays_utilisation(db: Session) -> list:
     fields; v4.31 consumers (useBayModel reads id/code/label) are unaffected."""
     from app.schemas.chassis import BayOut
     occupants = current_occupants(db)
+    attached = _latest_body_attached_dates(db, [o["chassis_id"] for o in occupants.values()])
+    today = date.today()
     out = []
     for bay in list_assembly_bays(db):
         o = BayOut.model_validate(bay)
         occ = occupants.get(bay.id)
-        if occ:
-            o.occupied = True
-            o.occupant_chassis_id = occ["chassis_id"]
-            o.occupant_vin = occ["vin"]
-            o.occupant_customer = occ["customer_name"]
-            o.occupant_job_id = occ["job_id"]
-            o.occupant_job_number = occ["job_number"]
-            o.since = occ["since"]
+        if not occ:
+            o.state = "empty"                        # WO v4.35 §0.20 — no occupant
+            out.append(o)
+            continue
+        o.occupied = True
+        o.occupant_chassis_id = occ["chassis_id"]
+        o.occupant_vin = occ["vin"]
+        o.occupant_customer = occ["customer_name"]
+        o.occupant_job_id = occ["job_id"]
+        o.occupant_job_number = occ["job_number"]
+        o.since = occ["since"]
+        att = attached.get(occ["chassis_id"])
+        o.body_attached_on = att
+        o.state = ("awaiting_attachment" if att is None
+                   else "attached_today" if att >= today else "post_attached")
         out.append(o)
     return out
+
+
+def _latest_body_attached_dates(db: Session, chassis_ids: list) -> dict:
+    """{chassis_id: latest body_attached event_date} for the given chassis (WO v4.35 §0.20 derivation)."""
+    if not chassis_ids:
+        return {}
+    out: dict = {}
+    for cid, ev_date in db.execute(
+        select(ChassisLifecycleEvent.chassis_record_id, ChassisLifecycleEvent.event_date)
+        .where(ChassisLifecycleEvent.chassis_record_id.in_(chassis_ids),
+               ChassisLifecycleEvent.event_type == "body_attached")
+        .order_by(ChassisLifecycleEvent.chassis_record_id, ChassisLifecycleEvent.id.desc())
+    ).all():
+        out.setdefault(cid, ev_date)                 # first per chassis = latest (id desc)
+    return out
+
+
+def _latest_cycle(db: Session, record_id: int) -> int:
+    return db.execute(select(func.max(ChassisLifecycleEvent.cycle_number))
+                      .where(ChassisLifecycleEvent.chassis_record_id == record_id)).scalar() or 1
+
+
+def _has_event(db: Session, record_id: int, etype: str, cycle: int) -> bool:
+    return db.execute(
+        select(ChassisLifecycleEvent.id).where(
+            ChassisLifecycleEvent.chassis_record_id == record_id,
+            ChassisLifecycleEvent.event_type == etype,
+            ChassisLifecycleEvent.cycle_number == cycle).limit(1)).first() is not None
+
+
+def record_body_attached(db: Session, record_id: int, production_job_id: int, who: str,
+                         notes=None) -> ChassisLifecycleEvent:
+    """WO v4.35 §3.2 — the body_attached chokepoint (DEV-2 PHASE-only: logs the event, chassis_records
+    .status stays 'in_assembly'). Pre-conditions (§0.4): the chassis has a prior assembly_assigned event
+    (it's on a bay), and the linked production_job is 'in_production' (actor permission is gated at the
+    router). Validation (§0.22): no double-linkage, and the swap rule via the planner-attestation SIGNAL
+    (DEV-1) — if the job's Pre-Job Card attested a VIN at planning-ack (vin_number set AND
+    planner_signoff_at set), the chassis VIN must match. Idempotent: 409 if already attached this cycle."""
+    from app.models.mes import PrejobCard
+    rec = db.get(ChassisRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    job = db.get(ProductionJob, production_job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="production job not found")
+    if job.status != "in_production":
+        raise HTTPException(status_code=422,
+                            detail=f"job {job.job_number or job.id} is '{job.status}', not 'in_production' "
+                                   "— a body can only be attached to a job in production")
+    cycle = _latest_cycle(db, record_id)
+    if not _has_event(db, record_id, "assembly_assigned", cycle):
+        raise HTTPException(status_code=422,
+                            detail="chassis is not on an assembly bay — assign it to a bay first")
+    if _has_event(db, record_id, "body_attached", cycle):
+        raise HTTPException(status_code=409, detail="body already attached for this chassis cycle")
+    if job.chassis_record_id not in (None, record_id):
+        raise HTTPException(status_code=409,
+                            detail=f"job {job.job_number or job.id} is already linked to a different chassis")
+    # §0.22 swap rule — DEV-1 signal: a Pre-Job Card VIN attested at planning ack locks the chassis.
+    card = db.execute(select(PrejobCard).where(PrejobCard.calculation_id == job.calculation_record_id)
+                      .order_by(PrejobCard.id.desc())).scalars().first()
+    if card is not None and card.vin_number and card.planner_signoff_at is not None:
+        if (rec.vin or "") != card.vin_number:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"Cannot attach this chassis — planner attested to VIN {card.vin_number} at "
+                        f"planning ack (this chassis is VIN {rec.vin or 'unknown'})."))
+    evt = ChassisLifecycleEvent(chassis_record_id=record_id, cycle_number=cycle,
+                                event_type="body_attached", event_date=date.today(),
+                                notes=notes, created_by=who)
+    db.add(evt)
+    if job.chassis_record_id is None:
+        job.chassis_record_id = record_id            # complete the body↔chassis link (the merge)
+    rec.updated_by = who                             # touch only; status stays 'in_assembly' (DEV-2)
+    db.commit()
+    db.refresh(evt)
+    return evt
 
 
 def add_photos(db: Session, record_id: int, event_id: int, files, who: str) -> list[ChassisPhotoOut]:

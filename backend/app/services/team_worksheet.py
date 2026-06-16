@@ -156,7 +156,36 @@ def _assembly_team(db: Session, branch_id) -> WorksheetSections:
                                  since=occ["since"])
         in_flight.append(item)
     return WorksheetSections(scheduled=[], in_flight=in_flight,
-                             blocking=_rework_blocking(db, "assembly"))
+                             blocking=_rework_blocking(db, "assembly"),
+                             body_attached_today=_body_attached_today(db, branch_id))
+
+
+def _body_attached_today(db: Session, branch_id) -> list:
+    """WO v4.35 §0.7 — Assembly-tab "Body Attached (today)" rows: chassis whose latest body_attached
+    event is dated today, with their linked job (event-derived; DEV-2 phase-only). Branch-filtered
+    "where attributable" (a chassis with no linked job is shown for every branch)."""
+    today = _today()
+    rows = db.execute(
+        select(ChassisRecord.id, ChassisRecord.vin, ChassisRecord.customer_name)
+        .join(ChassisLifecycleEvent, ChassisLifecycleEvent.chassis_record_id == ChassisRecord.id)
+        .where(ChassisLifecycleEvent.event_type == "body_attached",
+               ChassisLifecycleEvent.event_date == today)
+    ).all()
+    if not rows:
+        return []
+    job_ctx = _jobs_for_chassis(db, [r[0] for r in rows])
+    out = []
+    for cid, vin, cust in rows:
+        job, customer_name, calc = job_ctx.get(cid, (None, None, None))
+        if not _branch_visible(job, branch_id):
+            continue
+        if job is not None:
+            out.append(_job_item(job, customer_name, calc, location="Assembly",
+                                 status="body_attached", since=today, chassis_vin=vin))
+        else:
+            out.append(WorksheetItem(chassis_vin=vin, customer=cust, location="Assembly",
+                                     status="body_attached", since=today))
+    return out
 
 
 def _parking_team(db: Session, for_date: date_type,
