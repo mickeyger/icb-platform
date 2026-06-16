@@ -28,6 +28,21 @@ def api_post(page, base: str, path: str, body: dict):
                              headers={"X-CSRF-Token": csrf(page), "Origin": base})
 
 
+def open_production(page) -> None:
+    """Navigate to the Production Dashboard robustly (CI ubuntu can be slow / transiently hit the
+    live→mock fallback). Assert the nav is mounted, click, wait generously for the KPI strip, and
+    reload-retry once if the dashboard came up before its live fetch resolved."""
+    from playwright.sync_api import expect
+    nav = page.get_by_test_id("nav-production_dashboard")
+    expect(nav).to_be_visible(timeout=15_000)
+    nav.click()
+    try:
+        page.wait_for_selector("[data-testid='production-kpis']", timeout=20_000)
+    except Exception:
+        page.reload()
+        page.wait_for_selector("[data-testid='production-kpis']", timeout=20_000)
+
+
 # ── lifecycle factories (P435-marked) ──────────────────────────────────────────
 def _free_bay(db):
     """An assembly bay with no current in_assembly occupant (so the occupancy/state assertions are

@@ -23,10 +23,7 @@ def _clean():
 
 
 def _open_production(page: Page) -> None:
-    nav = page.get_by_test_id("nav-production_dashboard")
-    expect(nav).to_be_visible(timeout=T)
-    nav.click()
-    page.wait_for_selector("[data-testid='production-kpis']", timeout=T)
+    h.open_production(page)                             # robust nav (visible → click → wait → reload-retry)
 
 
 def _tile(page: Page, bay_code: str):

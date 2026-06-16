@@ -49,8 +49,7 @@ def test_mark_body_attached_end_to_end(page: Page, live_server: str) -> None:
     viol_before = _invariant_violations()              # baseline (seed may carry pre-existing ones)
 
     admin_session(page)
-    page.get_by_test_id("nav-production_dashboard").click()
-    page.wait_for_selector("[data-testid='production-kpis']", timeout=T)
+    h.open_production(page)                             # robust nav (visible → click → wait → reload-retry)
     tile = page.locator(f"[data-testid='production-bay-tile'][data-bay-code='{s['bay_code']}']")
     expect(tile).to_have_attribute("data-bay-state", "awaiting_attachment", timeout=T)
 
