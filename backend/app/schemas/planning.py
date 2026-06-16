@@ -27,6 +27,7 @@ class PlanningJobRef(BaseModel):
     chassis_received_signal: Optional[datetime] = None
     chassis_received_source: Optional[str] = None
     planned_start_date: Optional[datetime] = None
+    chassis_vin: Optional[str] = None       # WO v4.35 §3.3+ — linked chassis VIN (None when unlinked)
 
 
 class PlanningSlotItem(BaseModel):

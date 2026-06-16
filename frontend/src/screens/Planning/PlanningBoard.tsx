@@ -1079,6 +1079,11 @@ function LivePlanningBoard() {
                             >
                               <span className="flex-1">
                                 <span className="font-mono text-xs font-semibold">{cell.job.job_number}</span>
+                                {/* WO v4.35 §3.3+ — chassis VIN (VIN-to-VIN matching); full on hover. */}
+                                {cell.job.vin && (
+                                  <span className="block truncate font-mono text-[10px] text-muted"
+                                        title={cell.job.vin} data-testid="slot-vin">{cell.job.vin}</span>
+                                )}
                                 <span className="block truncate text-[11px] text-muted">{cell.job.customer}</span>
                               </span>
                               <span className="flex items-center gap-1">

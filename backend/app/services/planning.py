@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.database import CalculationRecord, Customer
 from app.models.mes import (
-    ChassisLifecycleEvent, PlanningSlot, ProductionJob, ProductionJobAudit, SignOff, Task, WorkOrder,
+    ChassisLifecycleEvent, ChassisRecord, PlanningSlot, ProductionJob, ProductionJobAudit,
+    SignOff, Task, WorkOrder,
 )
 from app.schemas.planning import (
     CapacityCell, PlanningBoard, PlanningJobRef, PlanningSlotItem, WeekRef,
@@ -36,6 +37,15 @@ _LATEST_REVERT = (
     select(func.max(ProductionJobAudit.created_at))
     .where(ProductionJobAudit.production_job_id == ProductionJob.id,
            ProductionJobAudit.new_status == "unscheduled")
+    .correlate(ProductionJob)
+    .scalar_subquery()
+)
+
+# WO v4.35 §3.3+ — the linked chassis VIN, rides the board read in one round-trip so slot + pool cards
+# can show the VIN (VIN-to-VIN matching with the Production page + the assembly bays). NULL when unlinked.
+_CHASSIS_VIN = (
+    select(ChassisRecord.vin)
+    .where(ChassisRecord.id == ProductionJob.chassis_record_id)
     .correlate(ProductionJob)
     .scalar_subquery()
 )
@@ -130,7 +140,7 @@ def _bay_sort_key(bay: str):
 
 
 # ── reads ─────────────────────────────────────────────────────────────────────
-def _job_ref(job: ProductionJob, calc, customer, vcl_date=None) -> PlanningJobRef:
+def _job_ref(job: ProductionJob, calc, customer, vcl_date=None, chassis_vin=None) -> PlanningJobRef:
     result = json.loads(calc.result_json) if calc and calc.result_json else {}
     dims = json.loads(calc.dimensions_json) if calc and calc.dimensions_json else {}
     # WO v4.29 D3 read-bridge (§0.3): the chassis-received signal prefers the latest VCL event
@@ -154,20 +164,22 @@ def _job_ref(job: ProductionJob, calc, customer, vcl_date=None) -> PlanningJobRe
         chassis_received_at=job.chassis_received_at,
         chassis_received_signal=received_signal, chassis_received_source=received_source,
         planned_start_date=job.planned_start_date,
+        chassis_vin=chassis_vin,                # WO v4.35 §3.3+
     )
 
 
-def _slot_item(slot, job, calc, customer, vcl_date=None) -> PlanningSlotItem:
+def _slot_item(slot, job, calc, customer, vcl_date=None, chassis_vin=None) -> PlanningSlotItem:
     return PlanningSlotItem(
         id=slot.id, week=slot.week, week_iso=(_iso(slot.week) if slot.week else None),
         bay=slot.bay, lane=slot.lane, slot_position=slot.slot_position, status=slot.status,
-        production_job=(_job_ref(job, calc, customer, vcl_date) if job is not None else None),
+        production_job=(_job_ref(job, calc, customer, vcl_date, chassis_vin) if job is not None else None),
     )
 
 
 def _slot_select(*, branch_id=None, lane=None, week=None, status=None):
     stmt = (select(PlanningSlot, ProductionJob, CalculationRecord, Customer,
-                   _LATEST_VCL.label("vcl_date"))      # WO v4.29 D3 read-bridge
+                   _LATEST_VCL.label("vcl_date"),      # WO v4.29 D3 read-bridge
+                   _CHASSIS_VIN.label("chassis_vin"))  # WO v4.35 §3.3+
             .join(ProductionJob, PlanningSlot.production_job_id == ProductionJob.id, isouter=True)
             .join(CalculationRecord, ProductionJob.calculation_record_id == CalculationRecord.id, isouter=True)
             .join(Customer, CalculationRecord.customer_id == Customer.id, isouter=True))
@@ -194,7 +206,8 @@ def _slot_item_by_id(db: Session, slot_id: int) -> Optional[PlanningSlotItem]:
 
 def _unscheduled_pool(db: Session, *, branch_id=None, exclude_ids=()) -> List[PlanningJobRef]:
     stmt = (select(ProductionJob, CalculationRecord, Customer,
-                   _LATEST_VCL.label("vcl_date"))      # WO v4.29 D3 read-bridge
+                   _LATEST_VCL.label("vcl_date"),      # WO v4.29 D3 read-bridge
+                   _CHASSIS_VIN.label("chassis_vin"))  # WO v4.35 §3.3+
             .join(CalculationRecord, ProductionJob.calculation_record_id == CalculationRecord.id, isouter=True)
             .join(Customer, CalculationRecord.customer_id == Customer.id, isouter=True)
             .where(ProductionJob.status == "planning"))
@@ -204,7 +217,7 @@ def _unscheduled_pool(db: Session, *, branch_id=None, exclude_ids=()) -> List[Pl
         stmt = stmt.where(ProductionJob.id.notin_(list(exclude_ids)))
     # WO v4.34.2 §0.8 — most-recently-reverted jobs sort first; never-reverted (NULL) keep id order.
     stmt = stmt.order_by(nulls_last(_LATEST_REVERT.desc()), ProductionJob.id)
-    return [_job_ref(j, c, cu, vcl) for (j, c, cu, vcl) in db.execute(stmt).all()]
+    return [_job_ref(j, c, cu, vcl, vin) for (j, c, cu, vcl, vin) in db.execute(stmt).all()]
 
 
 def build_board(db: Session, *, branch_id=None, weeks_count=12, lane=None, start=None) -> PlanningBoard:

@@ -39,6 +39,7 @@ export interface PlanningJob {
   // column) + its source ('vcl' | 'legacy' | null) for the receipt tooltip.
   chassis_received_signal: string | null
   chassis_received_source: string | null
+  vin: string | null         // WO v4.35 §3.3+ — linked chassis VIN (None when unlinked)
 }
 
 export interface PlanningSlot {
@@ -103,6 +104,7 @@ export interface ApiPlanningJobRef {
   chassis_received_signal: string | null   // WO v4.29 D3 read-bridge
   chassis_received_source: string | null   // 'vcl' | 'legacy' | null
   planned_start_date: string | null
+  chassis_vin: string | null               // WO v4.35 §3.3+
 }
 
 export interface ApiPlanningSlotItem {
