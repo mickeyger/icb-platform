@@ -20,6 +20,24 @@ export const STATUS_STYLES: Record<StatusName, StatusStyle> = {
   'Planning':          { pillBg: 'bg-[#06B6D4]',    pillText: 'text-white', border: 'border-[#06B6D4]',    hex: '#06B6D4' },
 }
 
+// Neutral fallback for a costing whose status is OUTSIDE the sales-pipeline vocabulary — e.g. one whose
+// production job has advanced to 'In Production' / 'Completed' (backend maps the production_jobs enum
+// through to mes_status). Without this, STATUS_STYLES[unknown] is undefined and reading .pillBg
+// white-screens the whole Costings dashboard. (WO v4.35 §3.3b hotfix — found during the demo click-around.)
+export const DEFAULT_STATUS_STYLE: StatusStyle = {
+  pillBg: 'bg-status-grey', pillText: 'text-white', border: 'border-status-grey', hex: '#94A3B8',
+}
+
+/** Style for any status string, tolerant of values not in STATUS_STYLES (→ neutral grey pill). */
+export function styleForStatus(status: string): StatusStyle {
+  return (STATUS_STYLES as Record<string, StatusStyle>)[status] ?? DEFAULT_STATUS_STYLE
+}
+
+/** Human label — the backend may send a title-cased enum with an underscore (e.g. 'In_Production'). */
+export function prettyStatus(status: string): string {
+  return status.replace(/_/g, ' ')
+}
+
 export function statusFilterTooltipKey(status: StatusName): string {
   switch (status) {
     case 'Pending':           return 'costings_dashboard.filter_status_pending'
@@ -43,7 +61,7 @@ export function StatusPillCosting({
   status: StatusName
   pulsing?: boolean
 }) {
-  const s = STATUS_STYLES[status]
+  const s = styleForStatus(status)
   // Flag B (WO v4.19 §0.4): "Accepted" = recorded in the orderbook, NOT dispatched
   // to departments (that's "Pre-Job Sent"). Clarify the record-event semantics on
   // hover rather than relabel the pill.
@@ -58,7 +76,7 @@ export function StatusPillCosting({
         pulsing ? 'animate-pulseRing' : ''
       }`}
     >
-      {status}
+      {prettyStatus(status)}
     </span>
   )
 }
