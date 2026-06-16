@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WeekRef(BaseModel):
@@ -73,3 +73,9 @@ class MoveRequest(BaseModel):
     bay: str
     lane: Optional[str] = None
     slot_position: Optional[int] = None
+
+
+class RevertRequest(BaseModel):
+    """WO v4.34.2 §0.7 — optional reason for a scheduled → unscheduled revert. ≤500 chars
+    (Pydantic enforces → 422); empty/omitted is accepted (one-click revert for fast reshuffles)."""
+    reason: Optional[str] = Field(default=None, max_length=500)

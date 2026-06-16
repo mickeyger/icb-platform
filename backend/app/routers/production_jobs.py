@@ -20,7 +20,9 @@ from ..schemas.production_jobs import (
     ProductionJobInProgressItem, ProductionJobListItem, TimelineEvent,
     bom_to_out, to_detail, to_list_item,
 )
+from ..schemas.planning import RevertRequest
 from ..services import chassis as chassis_svc
+from ..services import planning as planning_svc
 from ..services import production_jobs as svc
 
 router = APIRouter(prefix="/api/production-jobs", tags=["production-jobs"])
@@ -53,6 +55,22 @@ def list_production_jobs(
     for it in items:
         it.sap_retired = retired
     return items
+
+
+@router.post("/{job_id}/revert-to-unscheduled")
+def revert_to_unscheduled(job_id: int, body: RevertRequest, db: Session = Depends(get_db),
+                          user: User = Depends(require_permission("planning.unschedule"))):
+    """WO v4.34.2 — move a SCHEDULED job back to the Unscheduled pool (planner/admin; workshop/sales
+    lack `planning.unschedule` → 403). The explicit, reason-capturing path; delegates to the SAME guarded
+    planning.unschedule chokepoint as the drag-to-pool DELETE, so the §0.3 safety rules + audit apply to
+    both. Chassis assignment + sign-offs are preserved (slot-only delete)."""
+    try:
+        return planning_svc.revert_to_unscheduled(
+            db, production_job_id=job_id, user=user, reason=body.reason)
+    except planning_svc.NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except planning_svc.RevertNotAllowedError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 # WO v4.32 §0.4 — the two dashboard aggregations. Both are literal paths and MUST be declared
