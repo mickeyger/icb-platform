@@ -79,10 +79,32 @@ export const CHASSIS_PROVENANCE: Record<string, { label: string; style: string }
 }
 
 // WO v4.31 §0.3 — a parking or assembly bay (mirrors backend schemas/chassis.py BayOut).
+/** WO v4.35 §3.3b — the assembly-bay 6-state machine (event-derived; backend
+ *  services.chassis.compute_bay_merge_readiness is the single source of truth). The first four are
+ *  MUST-SHIP; 'pre_assembly' + 'ready_to_merge' are the STRETCH panels-event states. */
+export type BayState =
+  | 'empty'
+  | 'pre_assembly'
+  | 'ready_to_merge'
+  | 'awaiting_attachment'
+  | 'attached_today'
+  | 'post_attached'
+
 export interface Bay {
   id: number
   code: string
   label?: string | null
   sort_order?: number | null
   is_active: boolean
+  // WO v4.32 §0.4 / v4.35 §0.20 + §3.3b — assembly-bay utilisation + state (present on /bays/assembly
+  // only; parking bays omit these). Additive — v4.31 consumers read id/code/label only.
+  occupied?: boolean
+  occupant_chassis_id?: number | null
+  occupant_vin?: string | null
+  occupant_customer?: string | null
+  occupant_job_id?: number | null
+  occupant_job_number?: string | null
+  since?: string | null
+  state?: BayState | null
+  body_attached_on?: string | null
 }

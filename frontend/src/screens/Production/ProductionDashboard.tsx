@@ -19,13 +19,18 @@ import { JobCardSections } from '../Planning/JobCardSections'
 import { useCostings } from '../../store/CostingsContext'
 import { useAppData } from '../../store/AppDataContext'
 import { handleApiError } from '../../lib/api'
+import { useRefetchOnFocus } from '../../lib/useRefetchOnFocus'
 import { hhmm, dmy } from '../../lib/format'
 import { useProductionDashboard, type BayState, type UtilisedBay } from './useProductionDashboard'
 import { TeamWorksheetTabs } from './TeamWorksheetTabs'
 
-// WO v4.35 §0.20 — the MUST-SHIP 4-state bay visual language (the 2 panels-event states are STRETCH).
+// WO v4.35 §0.20 + §3.3b — the bay visual language. The first four are MUST-SHIP; 'pre_assembly' +
+// 'ready_to_merge' are the STRETCH panels-event states (surface only once a job's panels are dragged to a
+// bay on the Planning Board). Same vocabulary on the Planning bay lanes (BayModelLanes).
 const BAY_STATE_UI: Record<BayState, { label: string; tile: string; badge?: string; badgeClass?: string }> = {
   empty:               { label: 'Available', tile: 'cursor-default border border-dashed border-line bg-surface-alt/40' },
+  pre_assembly:        { label: 'Panels arrived', tile: 'border border-line border-l-4 border-l-sky-500 bg-sky-50 hover:border-primary', badge: 'Panels in bay', badgeClass: 'bg-sky-100 text-sky-700' },
+  ready_to_merge:      { label: 'Ready to merge', tile: 'border border-line border-l-4 border-l-violet-500 bg-violet-50 hover:border-primary', badge: '↔ Ready to merge', badgeClass: 'bg-violet-100 text-violet-700' },
   awaiting_attachment: { label: 'Awaiting attachment', tile: 'border border-line border-l-4 border-l-status-amber bg-white hover:border-primary', badge: 'Awaiting', badgeClass: 'bg-status-amber/15 text-status-amber' },
   attached_today:      { label: 'Body attached today', tile: 'border border-line border-l-4 border-l-status-green bg-status-green/10 hover:border-primary', badge: '🔗 Attached today', badgeClass: 'bg-status-green/20 text-status-green' },
   post_attached:       { label: 'Finishing', tile: 'border border-line border-l-4 border-l-primary bg-primary/5 hover:border-primary', badge: '🔗 Attached', badgeClass: 'bg-primary/15 text-primary' },
@@ -39,7 +44,8 @@ export function ProductionDashboard() {
   const { hasPermission } = useAppData()
   const canMarkAttached = hasPermission('chassis.assembly_assign')   // §0.5 — planner/admin/production
   const repairs = costings.filter((c) => c.quote_type === 'Repair')
-  const { mode, kpis, bays, refreshedAt, markBodyAttached } = useProductionDashboard()
+  const { mode, kpis, bays, refreshedAt, refresh, markBodyAttached } = useProductionDashboard()
+  useRefetchOnFocus(refresh)         // WO v4.35 §3.3b — cross-page sync (3 surfaces): refetch on tab focus
   const [bay, setBay] = useState<UtilisedBay | null>(null)
   const [highlightBayId, setHighlightBayId] = useState<number | null>(null)
   const [attachNotes, setAttachNotes] = useState('')

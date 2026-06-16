@@ -19,6 +19,7 @@ import { usePlanning } from '../../store/PlanningContext'
 import { useToast } from '../../components/ui/toast'
 import { Spinner, Skeleton, EmptyState, LastUpdated } from '../../components/ui/feedback'
 import { ApiError } from '../../lib/api'
+import { useRefetchOnFocus } from '../../lib/useRefetchOnFocus'
 import { getChassisState, type ChassisState, type PlanningJob, type PlanningSlot, type PlanningWeekCol } from '../../lib/types'
 
 // v4.5 — local extension of SlotAssignment that may carry a per-cell override
@@ -771,6 +772,7 @@ function BoardSkeleton() {
 function LivePlanningBoard() {
   const nav = useNavigate()
   const { board, schedule, move, unschedule, revertToUnscheduled, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
+  useRefetchOnFocus(refresh)        // WO v4.35 §3.3b — cross-page sync: the board refetches on tab focus
   const panRef = useMiddleButtonPan<HTMLDivElement>()   // WO v4.29 — middle-button drag-to-pan
   const { profile, hasPermission } = useAppData()
   // WO v4.19: planning-ack + chassis-received route through the rewired
@@ -1070,8 +1072,20 @@ function LivePlanningBoard() {
                               onDragStart={(e) => {
                                 if (!canSchedule) { e.preventDefault(); return }
                                 setDragSlot(cell)
+                                // WO v4.35 §3.3b — also expose this scheduled job's panels for a drop onto an
+                                // assembly bay (BayModelLanes). DataTransfer keeps the two components decoupled;
+                                // the CustomEvent drives the bay drop-target highlight. The existing dragSlot
+                                // (reschedule / unschedule) is untouched — this is a third, additive target.
+                                if (cell.job) {
+                                  e.dataTransfer.setData('application/x-panel-job', String(cell.job.id))
+                                  e.dataTransfer.effectAllowed = 'copyMove'
+                                  document.dispatchEvent(new CustomEvent('icb:panel-drag', { detail: { active: true } }))
+                                }
                               }}
-                              onDragEnd={() => setDragSlot(null)}
+                              onDragEnd={() => {
+                                setDragSlot(null)
+                                document.dispatchEvent(new CustomEvent('icb:panel-drag', { detail: { active: false } }))
+                              }}
                               title={cell.job.customer}
                               className={`flex w-full items-center gap-1 rounded border-l-4 border-status-green bg-white px-1.5 py-1 text-left hover:border-primary ${
                                 canSchedule ? 'cursor-grab active:cursor-grabbing' : ''

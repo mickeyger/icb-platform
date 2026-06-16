@@ -12,12 +12,18 @@ import type { Bay, ChassisRecord } from '../Chassis/types'
 
 export interface BayModel {
   mode: 'loading' | 'live' | 'mock'
-  bays: Bay[]                                    // the 5 assembly bays (sorted)
+  bays: Bay[]                                    // the 5 assembly bays (sorted) — carry the 6-state + occupant
   parking: ChassisRecord[]                       // booked-in, not yet on a bay (status in_workshop)
   occupantByBay: Record<number, ChassisRecord>   // assembly bay id -> the chassis currently on it
-  refresh: () => Promise<void>
-  /** parking -> assembly. Re-throws ApiError(409) (bay occupied) so the caller can flash an inline reject. */
-  assign: (recordId: number, bayId: number) => Promise<void>
+  refresh: () => Promise<Bay[]>                  // resolves with the freshly fetched bay rows
+  /** parking -> assembly. Re-throws ApiError(409) (bay occupied) so the caller can flash an inline reject.
+   *  Resolves with the post-assign bay rows so the caller can detect a completed merge (ready_to_merge). */
+  assign: (recordId: number, bayId: number) => Promise<Bay[]>
+  /** WO v4.35 §3.3b — panels -> assembly bay (the JOB-side of the merge). Re-throws ApiError(409)
+   *  (idempotency / busy-bay) for the inline reject; resolves with the post-drop bay rows. */
+  markPanelsArrived: (productionJobId: number, bayId: number) => Promise<Bay[]>
+  /** WO v4.35 §3.3b — the auto-merge confirm: record body_attached for the bay's occupant chassis. */
+  markBodyAttached: (chassisId: number, productionJobId: number, notes?: string) => Promise<void>
 }
 
 export function useBayModel(pushToast: PushToast): BayModel {
@@ -26,7 +32,7 @@ export function useBayModel(pushToast: PushToast): BayModel {
   const [parking, setParking] = useState<ChassisRecord[]>([])
   const [occupantByBay, setOccupantByBay] = useState<Record<number, ChassisRecord>>({})
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<Bay[]> => {
     try {
       const [bayRows, chassis] = await Promise.all([
         apiGet<Bay[]>('/api/chassis-records/bays/assembly'),
@@ -45,11 +51,13 @@ export function useBayModel(pushToast: PushToast): BayModel {
       setParking(pool)
       setOccupantByBay(occ)
       setMode('live')
+      return bayRows
     } catch {
       setBays([])
       setParking([])
       setOccupantByBay({})
       setMode('mock')
+      return []
     }
   }, [])
 
@@ -58,10 +66,10 @@ export function useBayModel(pushToast: PushToast): BayModel {
   }, [refresh])
 
   const assign = useCallback(
-    async (recordId: number, bayId: number) => {
+    async (recordId: number, bayId: number): Promise<Bay[]> => {
       try {
         await apiPost(`/api/chassis-records/${recordId}/assembly`, { assembly_bay_id: bayId })
-        await refresh()
+        return await refresh()
       } catch (e) {
         handleApiError(e, pushToast) // 409 (occupied) re-throws → caller shows an inline reject
         throw e
@@ -70,5 +78,30 @@ export function useBayModel(pushToast: PushToast): BayModel {
     [refresh, pushToast],
   )
 
-  return { mode, bays, parking, occupantByBay, refresh, assign }
+  const markPanelsArrived = useCallback(
+    async (productionJobId: number, bayId: number): Promise<Bay[]> => {
+      try {
+        await apiPost(`/api/production-jobs/${productionJobId}/panels-arrived-in-bay`, { bay_id: bayId })
+        return await refresh()
+      } catch (e) {
+        handleApiError(e, pushToast) // 409 (idempotency / busy-bay) re-throws → caller flashes a reject
+        throw e
+      }
+    },
+    [refresh, pushToast],
+  )
+
+  const markBodyAttached = useCallback(
+    // Thin — the merge-confirm modal owns error handling (so a 409 swap-rule message isn't double-toasted).
+    async (chassisId: number, productionJobId: number, notes?: string): Promise<void> => {
+      await apiPost(`/api/chassis-records/${chassisId}/body-attached`, {
+        production_job_id: productionJobId,
+        notes: (notes ?? '').trim() || null,
+      })
+      await refresh()
+    },
+    [refresh],
+  )
+
+  return { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached }
 }

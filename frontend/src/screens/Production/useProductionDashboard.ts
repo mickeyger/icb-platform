@@ -4,7 +4,7 @@
 // useBayModel live/mock fallback idiom; the §0.3 30s tick lives here so the screen stays dumb.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost } from '../../lib/api'
-import type { Bay } from '../Chassis/types'
+import type { Bay, BayState } from '../Chassis/types'
 
 export interface ProductionKpis {
   units_in_production: number
@@ -18,22 +18,12 @@ export interface ProductionKpis {
   as_of: string
 }
 
-/** WO v4.35 §0.20 — the MUST-SHIP 4-state assembly bay machine. */
-export type BayState = 'empty' | 'awaiting_attachment' | 'attached_today' | 'post_attached'
+// WO v4.35 §3.3b — BayState now lives in Chassis/types.ts (the 6-state machine, shared with the Planning
+// bay lanes). Re-exported so existing `import { type BayState } from './useProductionDashboard'` holds.
+export type { BayState }
 
-/** v4.31 Bay + the v4.32 §0.4 utilisation extension (additive — defined locally so the
- *  v4.31 Chassis/types.ts surface stays untouched). */
-export type UtilisedBay = Bay & {
-  occupied: boolean
-  occupant_chassis_id?: number | null
-  occupant_vin?: string | null
-  occupant_customer?: string | null
-  occupant_job_id?: number | null
-  occupant_job_number?: string | null
-  since?: string | null
-  state?: BayState | null                // WO v4.35 §0.20
-  body_attached_on?: string | null
-}
+/** v4.31 Bay + the §0.4 utilisation fields (now on Bay itself); a utilised bay always carries `occupied`. */
+export type UtilisedBay = Bay & { occupied: boolean }
 
 const REFRESH_MS = 30_000               // §0.3 lock: keep the 30s pattern, no faster polling
 
