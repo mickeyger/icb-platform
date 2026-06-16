@@ -121,7 +121,11 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
     # WO v4.36a §0.4 — validate + propagate the Pre-Job-attested VIN to the chassis (was dropped: vin=None).
     # Write-time-only strict format (422 on bad format); NULL/blank exempt ('expected' carry NULL until VCL).
     from app.services import chassis_integrity as ci
-    vin = ci.validate_vin_format(card.vin_number)
+    # WO v4.36a §0.4 — propagate the card VIN to the chassis ONLY when it's strict-conforming; a
+    # legacy/inherited non-conforming card VIN is NOT re-validated here (D-VIN: never re-validate stored
+    # rows) and never 422s the submit. The interactive format gate lives in update_card (the VIN edit).
+    raw = ci.normalize_vin(card.vin_number)
+    vin = raw if (raw and ci.VIN_RE.match(raw)) else None
     if card.chassis_record_id is not None:
         ch = db.get(ChassisRecord, card.chassis_record_id)      # sync an auto-created 'expected' row with card edits
         if ch is not None and ch.created_via == "pre_job_card" and ch.status == "expected":
@@ -320,6 +324,11 @@ def update_card(db: Session, card_id: int, data: dict, user) -> PrejobCard:
     unknown = set(data) - _DRAFT_EDITABLE
     if unknown:
         raise HTTPException(status_code=422, detail=f"not editable: {', '.join(sorted(unknown))}")
+    if data.get("vin_number"):
+        # WO v4.36a §0.4 — strict VIN format at the interactive edit (the capture point — a freshly typed
+        # bad VIN is rejected 422 here); the normalized value is stored. NULL/blank clears it (allowed).
+        from app.services import chassis_integrity as ci
+        data["vin_number"] = ci.validate_vin_format(data["vin_number"])
     if "template_id" in data and data["template_id"] is not None:
         tpl = db.get(PrejobTemplate, data["template_id"])
         if tpl is None or not tpl.is_active:

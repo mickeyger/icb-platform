@@ -16,6 +16,7 @@ from app.database import Branch, SessionLocal
 from app.models.mes import ChassisRecord, ProductionJob
 from app.schemas.chassis import ChassisEventCapture, ChassisRecordCreate, ChassisRecordUpdate
 from app.services import chassis as svc
+from app.services.chassis_integrity import ChassisIntegrityError
 from app.services import file_store
 from app.services import production_jobs as pj_svc
 
@@ -79,9 +80,9 @@ def test_duplicate_vin_raises_409():
         try:
             _create(db, "B")
             try:
-                _create(db, "B")
+                _create(db, "B")   # WO v4.36a — dup VIN with no job to adopt onto → 409 (no longer adoptable)
                 raise AssertionError("expected 409 on duplicate VIN")
-            except HTTPException as e:
+            except ChassisIntegrityError as e:
                 assert e.status_code == 409
         finally:
             _cleanup_chassis(db)
