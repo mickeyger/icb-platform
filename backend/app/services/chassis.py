@@ -49,6 +49,16 @@ CHASSIS_CHECKLIST_TEMPLATES = {
         {"key": "signoff_name", "label": "Dispatch sign-off (name)", "type": "text"},
     ],
 }
+# WO v4.35 §3.1 (DEV-4) — the canonical chassis lifecycle event types. event_type has NO DB CHECK
+# constraint (VARCHAR(24), validated app-side), so this set is the single source of truth; every
+# event-insertion path validates against it before db.add(). 'assembly_assigned' is written by
+# assign_assembly_bay(); 'body_attached' (WO v4.35) is written by record_body_attached() — a PHASE
+# marker (DEV-2): it is logged as an event but deliberately does NOT change chassis_records.status,
+# which stays 'in_assembly' (status promotion is a v4.36+ workshop-tablet concern).
+ALLOWED_EVENT_TYPES = {"VCL", "DCL", "assembly_assigned", "body_attached"}
+
+# event_type -> the chassis_records.status it WRITES. Phase markers (assembly_assigned via
+# assign_assembly_bay; body_attached) are intentionally absent — they don't move the status column.
 _STATUS_FOR = {"VCL": "in_workshop", "DCL": "dispatched"}
 
 
