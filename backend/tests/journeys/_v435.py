@@ -1,0 +1,190 @@
+"""WO v4.35 §3.6 — shared helpers for the body_attached journey suites.
+
+Kept out of _common.py (which every journey imports) to limit blast radius. Provides: CSRF-aware
+page.request POSTs (the SPA's fetch idiom), P435-marked lifecycle factories, a free-bay finder, and a
+self-healing purge. The journey server shares this DB, so factory rows are visible to the browser.
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime, timezone
+
+MARK = "P435"
+
+
+# ── CSRF-aware API (mirrors the SPA fetch wrapper; the session row carries the token) ──
+def csrf(page) -> str:
+    from app.database import SessionLocal, UserSession
+    sid = next((c["value"] for c in page.context.cookies() if c["name"] == "session_id"), None)
+    assert sid, "no session_id cookie — autologin did not establish a session"
+    with SessionLocal() as db:
+        row = db.get(UserSession, sid)
+        assert row is not None, "session row missing"
+        return row.csrf_token or ""
+
+
+def api_post(page, base: str, path: str, body: dict):
+    return page.request.post(f"{base}{path}", data=body,
+                             headers={"X-CSRF-Token": csrf(page), "Origin": base})
+
+
+def api_delete(page, base: str, path: str):
+    return page.request.delete(f"{base}{path}", headers={"X-CSRF-Token": csrf(page), "Origin": base})
+
+
+def open_production(page) -> None:
+    """Navigate to the Production Dashboard robustly (CI ubuntu can be slow / transiently hit the
+    live→mock fallback). Assert the nav is mounted, click, wait generously for the KPI strip, and
+    reload-retry once if the dashboard came up before its live fetch resolved."""
+    from playwright.sync_api import expect
+    nav = page.get_by_test_id("nav-production_dashboard")
+    expect(nav).to_be_visible(timeout=15_000)
+    nav.click()
+    try:
+        page.wait_for_selector("[data-testid='production-kpis']", timeout=20_000)
+    except Exception:
+        page.reload()
+        page.wait_for_selector("[data-testid='production-kpis']", timeout=20_000)
+
+
+# ── lifecycle factories (P435-marked) ──────────────────────────────────────────
+def _free_bay(db):
+    """An assembly bay with no current in_assembly occupant (so the occupancy/state assertions are
+    deterministic). Skips the test if all 5 are occupied on this DB."""
+    import pytest
+    from app.services.chassis import current_occupants, list_assembly_bays
+    occ = current_occupants(db)
+    for bay in list_assembly_bays(db):
+        if bay.id not in occ:
+            return bay
+    pytest.skip("no free assembly bay on this DB")
+
+
+def make_assembly_job(*, attached: bool = False, attested_vin: "str | None" = None,
+                      vin: "str | None" = None, job_status: str = "in_production") -> dict:
+    """A P435 job whose chassis is on a (free) assembly bay (VCL + assembly_assigned events).
+    attached=True adds a body_attached event today. attested_vin sets a confirmed Pre-Job Card attesting
+    that VIN (the DEV-1 swap-rule signal). job_status sets BOTH calc + job status (default in_production;
+    'planning' exercises the 16-Jun loosened body_attached pre-condition). Returns ids + bay + vin."""
+    from app.database import Branch, CalculationRecord, SessionLocal
+    from app.models.mes import (
+        ChassisLifecycleEvent, ChassisRecord, PrejobCard, PrejobTemplate, ProductionJob,
+    )
+    tag = uuid.uuid4().hex[:6]
+    vin = vin or f"{MARK}{tag}"
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        jhb = db.query(Branch).order_by(Branch.id).first()
+        bay = _free_bay(db)
+        bay_id, bay_code = bay.id, bay.code
+        calc = CalculationRecord(quote_number=f"{MARK}-{tag}", status=job_status, branch_id=jhb.id,
+                                 dimensions_json='{"body_type": "Chiller"}',
+                                 result_json='{"selling_zar": 1000.0}')
+        db.add(calc); db.flush()
+        ch = ChassisRecord(make=f"{MARK} Test", model="X", vin=vin, status="in_assembly", source="manual",
+                           created_via="manual_chassis_menu", created_by="t")
+        db.add(ch); db.flush()
+        job = ProductionJob(calculation_record_id=calc.id, branch_id=jhb.id, status=job_status,
+                            job_number=f"{MARK}{tag}", chassis_record_id=ch.id)
+        db.add(job); db.flush()
+        db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="VCL",
+                                     event_date=(now.date()), created_by="t"))
+        db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="assembly_assigned",
+                                     assembly_bay_id=bay_id, event_date=now.date(), created_by="t"))
+        if attached:
+            db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="body_attached",
+                                         event_date=now.date(), created_by="t"))
+        if attested_vin is not None:
+            tpl = db.query(PrejobTemplate).filter_by(is_active=True).first()
+            db.add(PrejobCard(
+                calculation_id=calc.id, template_id=(tpl.id if tpl else None),
+                body_description=f"{MARK} card", sections=[{"name": "S", "items": [{"text": "x"}]}],
+                vin_number=attested_vin, status="pre_job_confirmed", planner_signoff_at=now,
+                planner_attestation="attested at ack"))
+        db.commit()
+        return {"chassis_id": ch.id, "job_id": job.id, "bay_id": bay_id, "bay_code": bay_code,
+                "calc_id": calc.id, "vin": vin}
+
+
+def assign_unlinked_chassis() -> dict:
+    """A P435 chassis assembly_assigned to a free bay with NO production job linked — the unlinked-occupant
+    case (WO v4.35 §3.3b). Production must show the 'no job linked' hint, not a dead Mark-body-attached
+    button. Returns chassis_id + bay."""
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent, ChassisRecord
+    tag = uuid.uuid4().hex[:6]
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        bay = _free_bay(db)
+        bay_id, bay_code = bay.id, bay.code
+        ch = ChassisRecord(make=f"{MARK} Test", model="X", vin=f"{MARK}NOJOB{tag}", status="in_assembly",
+                           source="manual", created_via="manual_chassis_menu", created_by="t")
+        db.add(ch); db.flush()
+        db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="VCL",
+                                     event_date=now.date(), created_by="t"))
+        db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="assembly_assigned",
+                                     assembly_bay_id=bay_id, event_date=now.date(), created_by="t"))
+        db.commit()
+        return {"chassis_id": ch.id, "bay_id": bay_id, "bay_code": bay_code}
+
+
+def body_attached_event_count(chassis_id: int) -> int:
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent
+    from sqlalchemy import select
+    with SessionLocal() as db:
+        return len(db.execute(
+            select(ChassisLifecycleEvent.id).where(
+                ChassisLifecycleEvent.chassis_record_id == chassis_id,
+                ChassisLifecycleEvent.event_type == "body_attached")).all())
+
+
+def chassis_status(chassis_id: int) -> str:
+    from app.database import SessionLocal
+    from app.models.mes import ChassisRecord
+    with SessionLocal() as db:
+        return db.get(ChassisRecord, chassis_id).status
+
+
+def job_status(job_id: int) -> str:
+    from app.database import SessionLocal
+    from app.models.mes import ProductionJob
+    with SessionLocal() as db:
+        return db.get(ProductionJob, job_id).status
+
+
+def panels_event_count(production_job_id: int) -> int:
+    from app.database import SessionLocal
+    from app.models.mes import ProductionJobBayEvent
+    from sqlalchemy import select
+    with SessionLocal() as db:
+        return len(db.execute(
+            select(ProductionJobBayEvent.id).where(
+                ProductionJobBayEvent.production_job_id == production_job_id,
+                ProductionJobBayEvent.event_type == "panels_arrived_in_bay")).all())
+
+
+def bay_merge_state(bay_id: int) -> str:
+    """The §3.3b 6-state of a bay (via the single-source-of-truth helper) — for DB-side assertions."""
+    from app.database import SessionLocal
+    from app.services.chassis import compute_bay_merge_readiness
+    with SessionLocal() as db:
+        return compute_bay_merge_readiness(db, bay_id)["state"]
+
+
+def purge():
+    from app.database import SessionLocal
+    from sqlalchemy import text
+    with SessionLocal() as db:
+        # FK-safe: events + cards (→ chassis SET NULL / calc RESTRICT) then jobs, then chassis, then calcs.
+        db.execute(text("DELETE FROM icb_mes.chassis_lifecycle_events WHERE chassis_record_id IN "
+                        "(SELECT id FROM icb_mes.chassis_records WHERE make LIKE 'P435%')"))
+        db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE body_description LIKE 'P435%'"))
+        db.execute(text("DELETE FROM icb_mes.production_job_bay_events WHERE production_job_id IN "
+                        "(SELECT id FROM icb_mes.production_jobs WHERE job_number LIKE 'P435%')"))
+        db.execute(text("DELETE FROM icb_mes.planning_slots WHERE production_job_id IN "
+                        "(SELECT id FROM icb_mes.production_jobs WHERE job_number LIKE 'P435%')"))
+        db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'P435%'"))
+        db.execute(text("DELETE FROM icb_mes.chassis_records WHERE make LIKE 'P435%'"))
+        db.execute(text("DELETE FROM icb_costings.calculations WHERE quote_number LIKE 'P435%'"))
+        db.commit()

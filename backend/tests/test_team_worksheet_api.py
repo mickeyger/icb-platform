@@ -149,7 +149,9 @@ def test_uniform_contract_all_five_teams(api):
         body = api.get(f"/api/production/team-worksheet?team={team}").json()
         assert body["team"] == team
         assert body["date"] == _now().date().isoformat()      # defaults to today
-        assert set(body["sections"]) == {"scheduled", "in_flight", "blocking"}
+        # WO v4.35 §0.7 (DEV-6) — the uniform contract gains a 4th nullable section; all 5 teams
+        # carry it (empty [] except Assembly, which populates "Body Attached (today)").
+        assert set(body["sections"]) == {"scheduled", "in_flight", "blocking", "body_attached_today"}
 
 
 def test_vacuum_and_press_slot_weeks(api, seeded):

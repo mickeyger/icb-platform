@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChassisPhotoOut(BaseModel):
@@ -123,6 +123,19 @@ class AssemblyAssignRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class BodyAttachedRequest(BaseModel):
+    """WO v4.35 §0.5 — mark the body attached to the chassis in its assembly bay."""
+    production_job_id: int
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class PanelsArrivedRequest(BaseModel):
+    """WO v4.35 §3.3b (STRETCH) — record a job's panels arriving in an assembly bay (the JOB-side of the
+    merge; POST /api/production-jobs/{id}/panels-arrived-in-bay)."""
+    bay_id: int
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
 class BayOut(BaseModel):
     """A parking or assembly bay (master reference data, WO v4.31 §0.3).
 
@@ -144,3 +157,13 @@ class BayOut(BaseModel):
     occupant_job_id: Optional[int] = None
     occupant_job_number: Optional[str] = None
     since: Optional[date] = None                  # assembly_assigned event_date (business date)
+    # ── WO v4.35 §0.20 / §3.3b — the bay state (event-derived, by services.chassis.
+    # compute_bay_merge_readiness). MUST-SHIP 4: 'empty' | 'awaiting_attachment' | 'attached_today' |
+    # 'post_attached'. STRETCH adds the 2 panels-event states: 'pre_assembly' (panels staged, no chassis) |
+    # 'ready_to_merge' (panels + chassis, same job, body not yet attached).
+    state: Optional[str] = None
+    body_attached_on: Optional[date] = None       # latest body_attached event_date for the occupant
+    # ── WO v4.35 §3.3b UX — panels-side fields + the mismatch cue ──
+    mismatch: bool = False                         # panels + a chassis that belong to DIFFERENT jobs (wrong-bay drop)
+    panels_job_id: Optional[int] = None            # the job whose panels are on this bay (drives the move-back undo)
+    panels_job_number: Optional[str] = None

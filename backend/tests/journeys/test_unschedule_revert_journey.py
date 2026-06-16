@@ -136,6 +136,11 @@ def _cleanup():
     from app.database import SessionLocal
     from sqlalchemy import text
     with SessionLocal() as db:
+        # §3.3b/§3.2 committed-state events first (FK-safe; bay events CASCADE from the job too, but be explicit)
+        db.execute(text("DELETE FROM icb_mes.production_job_bay_events WHERE production_job_id IN "
+                        "(SELECT id FROM icb_mes.production_jobs WHERE job_number LIKE 'PLREV%')"))
+        db.execute(text("DELETE FROM icb_mes.chassis_lifecycle_events WHERE chassis_record_id IN "
+                        "(SELECT id FROM icb_mes.chassis_records WHERE make LIKE 'PLREV%')"))
         db.execute(text("DELETE FROM icb_mes.planning_slots WHERE bay LIKE 'QA-PLREV-%'"))
         # deleting the job CASCADEs its production_jobs_audit + work_orders (+ tasks)
         db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'PLREV%'"))
@@ -241,6 +246,41 @@ def test_qc_ticked_revert_blocked(page: Page, live_server: str, role_users) -> N
     assert r.status == 409, r.text()
     assert _has_slot(s["job_id"]) is True
     assert _audit_rows(s["job_id"]) == []
+
+
+# ── 5b. WO v4.35 §3.3b/§3.2 — a job committed to a bay can't revert (both paths) ──
+def test_revert_blocked_when_panels_committed(page: Page, live_server: str, role_users) -> None:
+    s = _make_scheduled()
+    from app.database import SessionLocal
+    from app.models.mes import AssemblyBay, ProductionJobBayEvent
+    from sqlalchemy import select
+    with SessionLocal() as db:                              # commit the job's panels to a bay (§3.3b)
+        bay = db.execute(select(AssemblyBay).where(AssemblyBay.is_active.is_(True))
+                         .order_by(AssemblyBay.id)).scalars().first()
+        db.add(ProductionJobBayEvent(production_job_id=s["job_id"], bay_id=bay.id,
+                                     event_type="panels_arrived_in_bay"))
+        db.commit()
+    role_session(page, role_users["planner"], base=live_server)
+    r = _post(page, live_server, f"/api/production-jobs/{s['job_id']}/revert-to-unscheduled", {})
+    assert r.status == 409 and "panels committed" in r.text(), r.text()
+    assert _delete(page, live_server, f"/api/planning-slots/{s['slot_id']}").status == 409  # same chokepoint
+    assert _has_slot(s["job_id"]) is True                  # still scheduled — not orphaned
+    assert _audit_rows(s["job_id"]) == []                  # no audit row on a blocked revert
+
+
+def test_revert_blocked_when_body_attached(page: Page, live_server: str, role_users) -> None:
+    s = _make_scheduled()                                  # _make_scheduled links a chassis
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent
+    with SessionLocal() as db:                              # attach the body (§3.2 phase-only event)
+        db.add(ChassisLifecycleEvent(chassis_record_id=s["chassis_id"], cycle_number=1,
+                                     event_type="body_attached", event_date=date.today(), created_by="t"))
+        db.commit()
+    role_session(page, role_users["planner"], base=live_server)
+    r = _post(page, live_server, f"/api/production-jobs/{s['job_id']}/revert-to-unscheduled", {})
+    assert r.status == 409 and "body attached" in r.text(), r.text()
+    assert _delete(page, live_server, f"/api/planning-slots/{s['slot_id']}").status == 409
+    assert _has_slot(s["job_id"]) is True
 
 
 # ── 6. workshop role — NO affordance in the UI + 403 on a direct call ────────────

@@ -21,7 +21,7 @@ import { Toast } from '../../components/ui/overlays'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { zar, dmy, hhmm } from '../../lib/format'
 import { demoBom, demoBomTotal } from '../../data/mockData'
-import { STATUS_STYLES, StatusPillCosting } from './statusPalette'
+import { styleForStatus, StatusPillCosting } from './statusPalette'
 import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
 import { PreJobSignoffModal } from './PreJobSignoffModal'
@@ -65,7 +65,7 @@ export function CostingDetail() {
     )
   }
 
-  const style = STATUS_STYLES[c.status]
+  const style = styleForStatus(c.status)
   const canPreJob = hasPermission('costings.pre_job_card')
 
   return (

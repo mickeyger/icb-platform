@@ -481,8 +481,17 @@ def compute_production_kpis(db: Session, branch_id: Optional[int] = None,
     open_rework = len(db.execute(
         select(ReworkTicket.id).where(ReworkTicket.status == "open")).all())
 
+    # WO v4.35 §0.6 — bodies attached today. chassis_lifecycle_events has no branch column (like
+    # open_rework) → counted "where attributable" (global). event_date is the business attach date.
+    from app.models.mes import ChassisLifecycleEvent
+    bodies_attached_today = len(db.execute(
+        select(ChassisLifecycleEvent.id).where(
+            ChassisLifecycleEvent.event_type == "body_attached",
+            ChassisLifecycleEvent.event_date == today)).all())
+
     return {
         "units_in_production": len(jobs),
+        "bodies_attached_today": bodies_attached_today,
         "delayed": {
             "total": len(start_slipped | chassis_slipped),
             "start_slipped": len(start_slipped),

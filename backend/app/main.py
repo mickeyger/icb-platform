@@ -412,7 +412,11 @@ async def serve_mes_app(full_path: str = ""):
     """Serve the React MES SPA (BrowserRouter). Any non-asset path under
     /mes-app/ returns index.html so client-side routing and deep links work."""
     if os.path.isfile(_FRONTEND_INDEX):
-        return FileResponse(_FRONTEND_INDEX)
+        # no-cache (revalidate, NOT no-store): the browser re-checks index.html every load, so a rebuilt
+        # SPA's new hashed bundle is always picked up — without this the browser heuristically caches
+        # index.html and serves stale (potentially crashing) asset references until a hard refresh. The
+        # hashed /mes-app/assets/* themselves stay immutably cacheable. (WO v4.35 §3.3b.)
+        return FileResponse(_FRONTEND_INDEX, headers={"Cache-Control": "no-cache"})
     return HTMLResponse(
         "<h1>MES app not built</h1><p>Run <code>npm --prefix frontend run build</code> "
         "or <code>scripts\\setup.bat</code> to build the React app, then reload.</p>",

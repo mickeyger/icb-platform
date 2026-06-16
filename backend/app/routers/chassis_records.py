@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    AssemblyAssignRequest, BayOut, ChassisEventCapture, ChassisEventOut, ChassisModelOut,
-    ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
-    ChassisVinCapture,
+    AssemblyAssignRequest, BayOut, BodyAttachedRequest, ChassisEventCapture, ChassisEventOut,
+    ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut,
+    ChassisRecordUpdate, ChassisVinCapture,
 )
 from ..services import chassis as svc
 
@@ -109,6 +109,17 @@ def assign_assembly(record_id: int, payload: AssemblyAssignRequest, db: Session 
     """WO v4.31 §0.4 — assign a booked-in chassis to an assembly bay (parking -> assembly)."""
     return svc.assign_assembly_bay(db, record_id, payload.assembly_bay_id, who=user.username,
                                    event_date=payload.event_date, notes=payload.notes)
+
+
+@router.post("/{record_id}/body-attached", response_model=ChassisEventOut, status_code=201)
+def body_attached(record_id: int, payload: BodyAttachedRequest, db: Session = Depends(get_db),
+                  user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v4.35 §0.5 — record the body_attached phase event (the bay-side "Mark body attached").
+    Gated on `chassis.assembly_assign` (planner/admin/production; workshop + sales → 403). The §0.4
+    pre-conditions (on a bay + job in_production) and the §0.22 swap rule (DEV-1 planner-attested-VIN
+    signal) are enforced in services.chassis.record_body_attached — the single chokepoint."""
+    return svc.record_body_attached(db, record_id, payload.production_job_id, who=user.username,
+                                    notes=payload.notes)
 
 
 @router.post("/{record_id}/events/{event_id}/photos", response_model=List[ChassisPhotoOut],
