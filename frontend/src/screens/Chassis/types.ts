@@ -107,4 +107,9 @@ export interface Bay {
   since?: string | null
   state?: BayState | null
   body_attached_on?: string | null
+  // WO v4.35 §3.3b UX — panels + a chassis from DIFFERENT jobs (wrong-bay drop), + the panels job (so the
+  // move-panels-back undo knows what to clear).
+  mismatch?: boolean
+  panels_job_id?: number | null
+  panels_job_number?: string | null
 }

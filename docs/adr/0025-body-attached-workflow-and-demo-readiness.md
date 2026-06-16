@@ -110,6 +110,16 @@ derived read-only; `event_type` has no DB CHECK; the WO's wipe order would have 
 > signal. Fix: `_assert_revertible` now also blocks on a `panels_arrived_in_bay` event for the job or a
 > current-cycle `body_attached` on its chassis (both unschedule paths share the one chokepoint).
 
+> **J. A correct-but-silent guard is a UX defect — make the non-match legible + reversible (§3.3b, demo
+> click-around).** Dropping a job's panels on a bay whose chassis is a *different* job is a no-op merge
+> (correct: matching is by job identity, not VIN). But it was *silent* — the bay just stayed "awaiting" with
+> no reason, and the one-bay-per-job rule + the new revert guard (footnote I) left the wrong drop stranded
+> until a reseed. Fix: `compute_bay_merge_readiness` exposes a `mismatch` flag (panels + chassis, different
+> jobs) that drives a "⚠ Different jobs" cue naming the stray panels, plus a `DELETE
+> /api/production-jobs/{id}/panels-arrived-in-bay` "move panels back" undo. Lesson: when an invariant
+> *correctly* refuses an action, the refusal still has to be visible and recoverable — silence reads as a
+> bug to the operator.
+
 ## Consequences
 
 - The demo shows a believable end-to-end factory flow with the body↔chassis join explicitly visible.

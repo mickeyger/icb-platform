@@ -163,3 +163,7 @@ class BayOut(BaseModel):
     # 'ready_to_merge' (panels + chassis, same job, body not yet attached).
     state: Optional[str] = None
     body_attached_on: Optional[date] = None       # latest body_attached event_date for the occupant
+    # ── WO v4.35 §3.3b UX — panels-side fields + the mismatch cue ──
+    mismatch: bool = False                         # panels + a chassis that belong to DIFFERENT jobs (wrong-bay drop)
+    panels_job_id: Optional[int] = None            # the job whose panels are on this bay (drives the move-back undo)
+    panels_job_number: Optional[str] = None

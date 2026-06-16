@@ -223,12 +223,17 @@ export function ProductionDashboard() {
                 >
                   <div className="flex w-full items-center justify-between gap-1">
                     <span className="text-xs font-bold text-body">{b.code}</span>
-                    {ui.badge && (
+                    {b.mismatch ? (
+                      <span data-testid="bay-badge" title="The panels and the chassis in this bay are different jobs — they won't merge."
+                        className="whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-bold uppercase bg-status-red/15 text-status-red">
+                        ⚠ Different jobs
+                      </span>
+                    ) : ui.badge ? (
                       <span data-testid="bay-badge"
                         className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${ui.badgeClass}`}>
                         {ui.badge}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   {b.occupied ? (
                     <>

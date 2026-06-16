@@ -81,8 +81,11 @@ records that the job's **panels have arrived** in that bay:
   chassis arrives, then becomes Ready to merge.
 
 One job's panels live in exactly one bay, and one bay holds one job's panels — a second/duplicate drop is
-rejected with a clear toast (the backend is the source of truth, not the UI). Switching back to the
-**Production** tab reflects any change automatically (refetch-on-focus) — no reload needed.
+rejected with a clear toast (the backend is the source of truth, not the UI). If panels land on a bay whose
+chassis is a **different** job, the bay flags **"⚠ Different jobs"** (red) and names the stray panels — they
+won't merge; click **"✕ move panels back"** on the bay to undo a wrong drop (no reseed needed), then re-drop
+on the right bay. Switching back to the **Production** tab reflects any change automatically
+(refetch-on-focus) — no reload needed.
 
 *(Supplementary frames — Pre-assembly tile, Ready-to-merge tile, the auto-merge prompt — are captured
 against the canonical reseed via `frontend/scripts/capture-v435-stretch.mjs` and added here in the final

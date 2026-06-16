@@ -422,6 +422,9 @@ def assembly_bays_utilisation(db: Session) -> list:
         r = compute_bay_merge_readiness(db, bay.id, occupants=occupants)
         o.state = r["state"]
         o.body_attached_on = r["body_attached_on"]
+        o.mismatch = r["mismatch"]                   # §3.3b UX — panels + chassis are different jobs
+        o.panels_job_id = r["panels_job_id"]         # the job whose panels are on the bay (move-back undo)
+        o.panels_job_number = r["panels_job_number"]
         occ = occupants.get(bay.id)
         if occ:
             o.occupied = True
@@ -499,9 +502,15 @@ def compute_bay_merge_readiness(db: Session, bay_id: int, *, occupants=None) -> 
         "has_panels": panels_job_id is not None,
         "has_chassis": occ is not None,
         "matched": matched,
+        # WO v4.35 §3.3b UX — panels + a chassis that belong to DIFFERENT jobs (a wrong-bay drop). The
+        # state stays 'awaiting_attachment' (the 6-state machine is unchanged); this flag drives a "different
+        # jobs — not linked" cue so the silent non-merge becomes legible.
+        "mismatch": (panels_job_id is not None and occ_job_id is not None and not matched),
         "body_attached_on": att,
         "production_job_id": occ_job_id if occ else panels_job_id,
         "production_job_number": (occ["job_number"] if occ else panels_job_number),
+        "panels_job_id": panels_job_id,            # the job whose panels are on the bay (for the move-back undo)
+        "panels_job_number": panels_job_number,
         "chassis_id": occ["chassis_id"] if occ else None,
     }
 
@@ -620,6 +629,21 @@ def record_panels_arrived_in_bay(db: Session, production_job_id: int, bay_id: in
     db.commit()
     db.refresh(evt)
     return evt
+
+
+def clear_panels_arrived(db: Session, production_job_id: int) -> dict:
+    """WO v4.35 §3.3b — the move-panels-back undo: remove a job's panels_arrived_in_bay event(s) so a
+    wrong-bay drop can be corrected without a full reseed (the one-bay-per-job rule otherwise strands the
+    panels). Idempotent — returns the count removed (0 if the job had none). 404 if the job is unknown."""
+    from app.models.mes import ProductionJobBayEvent
+    job = db.get(ProductionJob, production_job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="production job not found")
+    removed = db.query(ProductionJobBayEvent).filter(
+        ProductionJobBayEvent.production_job_id == production_job_id,
+        ProductionJobBayEvent.event_type == "panels_arrived_in_bay").delete(synchronize_session=False)
+    db.commit()
+    return {"production_job_id": production_job_id, "removed": int(removed or 0)}
 
 
 def add_photos(db: Session, record_id: int, event_id: int, files, who: str) -> list[ChassisPhotoOut]:

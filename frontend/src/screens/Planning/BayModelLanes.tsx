@@ -42,8 +42,8 @@ export function BayModelLanes() {
   const toast = useToast()
   const { hasPermission, isAdmin } = useAppData()
   const canAssign = isAdmin || hasPermission('chassis.assembly_assign')
-  const { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached } =
-    useBayModel(toast.push)
+  const { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached,
+          clearPanels } = useBayModel(toast.push)
   const [drag, setDrag] = useState<ChassisRecord | null>(null)
   const [rejectBay, setRejectBay] = useState<number | null>(null)
   const [busyBay, setBusyBay] = useState<number | null>(null)
@@ -68,9 +68,10 @@ export function BayModelLanes() {
 
   if (mode === 'mock') return null // bay model is a live-only surface (API unreachable → offline demo)
 
-  function maybePromptMerge(rows: Bay[], bayId: number) {
+  function afterDrop(rows: Bay[], bayId: number) {
     const b = rows.find((x) => x.id === bayId)
-    if (b && b.state === 'ready_to_merge' && b.occupant_chassis_id && b.occupant_job_id) {
+    if (!b) return
+    if (b.state === 'ready_to_merge' && b.occupant_chassis_id && b.occupant_job_id) {
       setMergePrompt({
         bayCode: b.code,
         bayId: b.id,
@@ -79,6 +80,27 @@ export function BayModelLanes() {
         jobNumber: b.occupant_job_number ?? String(b.occupant_job_id),
         vin: b.occupant_vin ?? '—',
       })
+    } else if (b.mismatch) {
+      // §3.3b UX — the drop landed on a bay whose chassis is a DIFFERENT job: legible warning, not a silent
+      // no-merge. The panels were still recorded; the operator can move them off with ✕ and re-drop.
+      toast.push({
+        kind: 'warn',
+        message: `Panels placed on ${b.code}, but its chassis is a different job — they won’t merge. `
+          + `Move them to the bay holding the matching chassis, or remove them with ✕.`,
+      })
+    }
+  }
+
+  async function onClearPanels(bay: Bay) {
+    if (!canAssign || bay.panels_job_id == null) return
+    try {
+      setBusyBay(bay.id)
+      await clearPanels(bay.panels_job_id)
+      toast.push({ kind: 'ok', message: `Panels moved off ${bay.code}.` })
+    } catch (e) {
+      if (e instanceof ApiError) toast.push({ kind: 'warn', message: e.detail || 'Could not move the panels back.' })
+    } finally {
+      setBusyBay(null)
     }
   }
 
@@ -95,7 +117,7 @@ export function BayModelLanes() {
     try {
       setBusyBay(bayId)
       const rows = await assign(chassis.id, bayId)
-      maybePromptMerge(rows, bayId)        // assigning the chassis may complete a merge (panels already here)
+      afterDrop(rows, bayId)        // assigning the chassis may complete a merge (panels already here)
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) rejectFlash(bayId, e.detail || 'That bay is already occupied.')
     } finally {
@@ -108,7 +130,7 @@ export function BayModelLanes() {
     try {
       setBusyBay(bayId)
       const rows = await markPanelsArrived(jobId, bayId)
-      maybePromptMerge(rows, bayId)        // panels arriving may complete a merge (chassis already here)
+      afterDrop(rows, bayId)        // panels arriving may complete a merge (chassis already here)
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) rejectFlash(bayId, e.detail || 'Those panels can’t go in this bay.')
     } finally {
@@ -209,6 +231,8 @@ export function BayModelLanes() {
             const occ = occupantByBay[bay.id]
             const state: BayState = bay.state ?? (occ ? 'awaiting_attachment' : 'empty')
             const ui = BAY_TILE[state]
+            const mismatch = !!bay.mismatch                 // §3.3b — panels + a chassis from different jobs
+            const hasPanels = bay.panels_job_id != null
             const rejected = rejectBay === bay.id
             const busy = busyBay === bay.id
             // §3.3b drag-visual-feedback — during a panel-job drag, light up every bay as a drop target;
@@ -234,7 +258,11 @@ export function BayModelLanes() {
                 onDragLeave={() => setPanelHoverBay((b) => (b === bay.id ? null : b))}
                 onDrop={(e) => onBayDrop(e, bay.id)}
                 className={`relative rounded-md p-2 transition ${
-                  rejected ? 'border-2 border-status-red bg-status-red/20' : ui.border
+                  rejected
+                    ? 'border-2 border-status-red bg-status-red/20'
+                    : mismatch
+                      ? 'border border-line border-l-4 border-l-status-red bg-status-red/5'
+                      : ui.border
                 }${dropCue}`}
               >
                 {busy && (
@@ -244,9 +272,12 @@ export function BayModelLanes() {
                 )}
                 <div className="flex items-center justify-between text-[11px] text-muted">
                   <span>{bay.code}</span>
-                  {ui.badge && (
+                  {mismatch ? (
+                    <span data-testid="bay-mismatch" title="The panels and the chassis in this bay are different jobs — they won’t merge."
+                          className="rounded px-1 text-[10px] font-medium bg-status-red/15 text-status-red">⚠ Different jobs</span>
+                  ) : ui.badge ? (
                     <span className={`rounded px-1 text-[10px] font-medium ${ui.badgeClass}`}>{ui.badge}</span>
-                  )}
+                  ) : null}
                 </div>
                 {occ ? (
                   <>
@@ -267,6 +298,11 @@ export function BayModelLanes() {
                     )}
                   </div>
                 )}
+                {mismatch && (
+                  <div className="mt-0.5 truncate text-[10px] text-status-red">
+                    panels: job {bay.panels_job_number ?? bay.panels_job_id} (different job)
+                  </div>
+                )}
                 {state === 'ready_to_merge' && canAssign && (
                   <button
                     data-testid="merge-button"
@@ -274,6 +310,16 @@ export function BayModelLanes() {
                     className="mt-1 w-full rounded bg-violet-600 px-1.5 py-1 text-[11px] font-semibold text-white hover:bg-violet-700"
                   >
                     ↔ Mark body attached
+                  </button>
+                )}
+                {hasPanels && canAssign && (
+                  <button
+                    data-testid="clear-panels"
+                    onClick={() => void onClearPanels(bay)}
+                    title="Remove this job’s panels from the bay (e.g. dropped on the wrong bay)"
+                    className="mt-1 w-full rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:bg-surface-alt"
+                  >
+                    ✕ move panels back
                   </button>
                 )}
               </div>

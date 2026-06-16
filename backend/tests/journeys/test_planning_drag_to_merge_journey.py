@@ -74,6 +74,31 @@ def test_busy_bay_409(page: Page, live_server: str) -> None:
     assert h.panels_event_count(b["job_id"]) == 0
 
 
+# ── move-panels-back undo + mismatch legibility (the demo click-around finds) ────
+def test_clear_panels_moves_them_back(page: Page, live_server: str) -> None:
+    s = h.make_assembly_job()
+    admin_session(page)
+    assert _panels(page, live_server, s["job_id"], s["bay_id"]).status == 201
+    assert h.panels_event_count(s["job_id"]) == 1 and h.bay_merge_state(s["bay_id"]) == "ready_to_merge"
+    r = h.api_delete(page, live_server, f"/api/production-jobs/{s['job_id']}/panels-arrived-in-bay")
+    assert r.status == 200, r.text()
+    assert r.json()["removed"] == 1
+    assert h.panels_event_count(s["job_id"]) == 0
+    assert h.bay_merge_state(s["bay_id"]) == "awaiting_attachment"   # back to chassis-only, no orphan
+
+
+def test_panels_on_a_different_jobs_chassis_is_a_mismatch(page: Page, live_server: str) -> None:
+    a = h.make_assembly_job()
+    b = h.make_assembly_job()                                # a different job + chassis on its own bay
+    admin_session(page)
+    # drop b's panels onto a's bay (which holds a's chassis) → panels + chassis are different jobs
+    r = _panels(page, live_server, b["job_id"], a["bay_id"])
+    assert r.status == 201, r.text()
+    merge = r.json()["merge"]
+    assert merge["mismatch"] is True and merge["ready"] is False
+    assert h.bay_merge_state(a["bay_id"]) == "awaiting_attachment"   # NOT ready_to_merge — different jobs
+
+
 # ── role gating (Q5 — workshop is read-only) ─────────────────────────────────────
 def test_workshop_cannot_arrive_panels(page: Page, live_server: str, role_users) -> None:
     s = h.make_assembly_job()

@@ -7,7 +7,7 @@
 //   - assembly bays = chassis with status 'in_assembly', keyed by the backend-derived
 //                     current_assembly_bay_id (latest assembly_assigned event)
 import { useCallback, useEffect, useState } from 'react'
-import { apiGet, apiPost, handleApiError, type PushToast } from '../../lib/api'
+import { apiGet, apiPost, apiDelete, handleApiError, type PushToast } from '../../lib/api'
 import type { Bay, ChassisRecord } from '../Chassis/types'
 
 export interface BayModel {
@@ -24,6 +24,8 @@ export interface BayModel {
   markPanelsArrived: (productionJobId: number, bayId: number) => Promise<Bay[]>
   /** WO v4.35 §3.3b — the auto-merge confirm: record body_attached for the bay's occupant chassis. */
   markBodyAttached: (chassisId: number, productionJobId: number, notes?: string) => Promise<void>
+  /** WO v4.35 §3.3b — the move-panels-back undo: remove a job's panels from its bay (corrects a wrong drop). */
+  clearPanels: (productionJobId: number) => Promise<Bay[]>
 }
 
 export function useBayModel(pushToast: PushToast): BayModel {
@@ -103,5 +105,19 @@ export function useBayModel(pushToast: PushToast): BayModel {
     [refresh],
   )
 
-  return { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached }
+  const clearPanels = useCallback(
+    async (productionJobId: number): Promise<Bay[]> => {
+      try {
+        await apiDelete(`/api/production-jobs/${productionJobId}/panels-arrived-in-bay`)
+        return await refresh()
+      } catch (e) {
+        handleApiError(e, pushToast)
+        throw e
+      }
+    },
+    [refresh, pushToast],
+  )
+
+  return { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached,
+           clearPanels }
 }

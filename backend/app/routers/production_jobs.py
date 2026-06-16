@@ -254,6 +254,15 @@ def panels_arrived_in_bay(job_id: int, payload: PanelsArrivedRequest, db: Sessio
             "event_type": evt.event_type, "merge": merge}
 
 
+@router.delete("/{job_id}/panels-arrived-in-bay", status_code=200)
+def clear_panels_arrived(job_id: int, db: Session = Depends(get_db),
+                         user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v4.35 §3.3b (STRETCH) — the move-panels-back undo: remove a job's panels from whatever bay they
+    were dropped on (corrects a wrong-bay drop without a full reseed). Gated `chassis.assembly_assign`
+    (workshop read-only — Q5). Idempotent (returns the count removed)."""
+    return chassis_svc.clear_panels_arrived(db, job_id)
+
+
 @router.get("/{job_id}/timeline", response_model=list[TimelineEvent])
 def production_job_timeline(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Derived lifecycle timeline (from the job's timestamp columns), oldest-first."""
