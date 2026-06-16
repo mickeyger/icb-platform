@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.database import CalculationRecord, Customer
 from app.models.mes import (
     ChassisLifecycleEvent, ChassisRecord, PlanningSlot, ProductionJob, ProductionJobAudit,
-    SignOff, Task, WorkOrder,
+    ProductionJobBayEvent, SignOff, Task, WorkOrder,
 )
 from app.schemas.planning import (
     CapacityCell, PlanningBoard, PlanningJobRef, PlanningSlotItem, WeekRef,
@@ -341,6 +341,30 @@ def _assert_revertible(db: Session, slot: PlanningSlot, job: Optional[Production
         select(SignOff.id).where(SignOff.work_order_id.in_(wo_ids)).limit(1)).first()
     if qc:
         raise RevertNotAllowedError(f"job {job.id} has a QC check recorded — cannot revert")
+    # WO v4.35 §3.3b/§3.2 — a job physically committed to a bay must NOT silently revert to the pool and
+    # orphan the floor. record_panels_arrived_in_bay / record_body_attached are phase-only and never advance
+    # job.status (the 16-Jun ruling keeps it 'planning'), so the status/WO/QC checks above can't see them —
+    # guard the two committed-state event logs explicitly. Covers BOTH the drag (DELETE) and modal (POST)
+    # paths, since both funnel through here.
+    panels = db.execute(
+        select(ProductionJobBayEvent.id).where(
+            ProductionJobBayEvent.production_job_id == job.id,
+            ProductionJobBayEvent.event_type == "panels_arrived_in_bay").limit(1)).first()
+    if panels:
+        raise RevertNotAllowedError(
+            f"job {job.id} has panels committed to a bay — move the panels back before unscheduling")
+    if job.chassis_record_id is not None:
+        cycle = db.execute(
+            select(func.max(ChassisLifecycleEvent.cycle_number))
+            .where(ChassisLifecycleEvent.chassis_record_id == job.chassis_record_id)).scalar() or 1
+        body = db.execute(
+            select(ChassisLifecycleEvent.id).where(
+                ChassisLifecycleEvent.chassis_record_id == job.chassis_record_id,
+                ChassisLifecycleEvent.event_type == "body_attached",
+                ChassisLifecycleEvent.cycle_number == cycle).limit(1)).first()
+        if body:
+            raise RevertNotAllowedError(
+                f"job {job.id} has a body attached to its chassis — cannot unschedule")
 
 
 def unschedule(db: Session, *, slot_id: int, user=None, reason: Optional[str] = None) -> dict:

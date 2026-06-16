@@ -101,6 +101,15 @@ derived read-only; `event_type` has no DB CHECK; the WO's wipe order would have 
 > two event streams (`compute_bay_merge_readiness` — the single source of truth for both the tiles and the
 > auto-merge prompt), never stored.
 
+> **I. A new phase-only event creates committed state that EXISTING status-based guards can't see — audit
+> them (§3.3b, found in the demo click-around).** `body_attached` and `panels_arrived_in_bay` are phase-only
+> and (per the 16-Jun ruling) never advance `job.status`, so the v4.34.2 unschedule chokepoint
+> (`_assert_revertible`, which keys only on status / work-orders / QC) happily reverted a job whose panels
+> were in a bay and whose body was attached — orphaning the floor. Lesson: when a feature introduces
+> committed state WITHOUT a status transition, every guard that authorises a reversal must be taught the new
+> signal. Fix: `_assert_revertible` now also blocks on a `panels_arrived_in_bay` event for the job or a
+> current-cycle `body_attached` on its chassis (both unschedule paths share the one chokepoint).
+
 ## Consequences
 
 - The demo shows a believable end-to-end factory flow with the body↔chassis join explicitly visible.
