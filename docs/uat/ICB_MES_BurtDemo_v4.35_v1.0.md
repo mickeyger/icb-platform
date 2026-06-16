@@ -69,6 +69,25 @@ match VIN-to-VIN without a lookup.
 ![Vacuum slot VINs](../screenshots/runbook/06-vacuum-slot-vin.png)
 ![Planning slot VINs](../screenshots/runbook/07-planning-slot-vin.png)
 
+### 4b · The panel side meets the chassis — drag-to-merge (Planning) · §3.3b
+On the **Planning Board**, the five assembly bays sit just below the week grid. Drag a scheduled
+**Vacuum/Press** job's slot-cell down onto an assembly bay — the bays light up as drop targets. Dropping
+records that the job's **panels have arrived** in that bay:
+
+- If the bay already holds **that job's chassis**, it turns **violet — "Ready to merge"** and an
+  **auto-merge prompt** offers to mark the body attached now. Confirm runs the same body_attached
+  chokepoint as the Production "Mark body attached" button — the bay flips green.
+- If the chassis isn't on the bay yet, the bay shows **sky — "Pre-assembly"** (panels staged) until the
+  chassis arrives, then becomes Ready to merge.
+
+One job's panels live in exactly one bay, and one bay holds one job's panels — a second/duplicate drop is
+rejected with a clear toast (the backend is the source of truth, not the UI). Switching back to the
+**Production** tab reflects any change automatically (refetch-on-focus) — no reload needed.
+
+*(Supplementary frames — Pre-assembly tile, Ready-to-merge tile, the auto-merge prompt — are captured
+against the canonical reseed via `frontend/scripts/capture-v435-stretch.mjs` and added here in the final
+pre-dry-run pass.)*
+
 ### 5 · Roles — the floor is read-only for the workshop
 Signed in as a workshop user, the bay panel shows the state but **no Mark-body-attached button** — the
 floor *sees* the workflow; recording it is the planner/production role (the tablet write-path is a future
@@ -80,13 +99,15 @@ step).
 
 ## Notes for the presenter
 
-- **"The chassis page still says 'in_assembly' after I attached the body — is that a bug?"** No — by
-  design (ADR 0025): the chassis page is the chassis *lifecycle audit*; the *workflow moment* lives on the
-  Production Dashboard (bay tile + Assembly section + KPI). A future enhancement (workshop tablet, v4.36+)
-  promotes the attach to a chassis-status milestone.
-- **Bay vocabulary is 4 states** for this demo: Available · Awaiting attachment · Attached today ·
-  Finishing. (Two extra states — "Pre-assembly" and "Ready to merge" — arrive with the Planning
-  panel-drag enhancement; if that ships, this runbook gains them.)
+- **"The status fields didn't change after I attached the body — is that a bug?"** No — by design (ADR
+  0025). **Status fields (chassis: `in_assembly`, job: `planning`) stay at pre-attachment values; status
+  promotion lands with the v4.36 QC sprint. The bay tile + KPI + Assembly section tell the body_attached
+  story.** The *event* is the meaningful moment, not a status flip — both "stale-looking" fields are
+  deliberate and parallel (a future workshop-tablet step promotes them).
+- **Bay vocabulary is 6 states** (the §3.3b Planning panel-drag enhancement shipped): Available ·
+  **Pre-assembly** (a job's panels are in the bay, chassis not yet there) · **Ready to merge** (panels +
+  chassis, *same job* — the auto-merge prompt offers to attach) · Awaiting attachment (chassis on the bay,
+  panels not yet there) · Attached today · Finishing.
 - **If Burt asks about email / SAP / materials** — those are blocked on the intranet/Marnus work and out
   of scope for this demo; the flow shown is the production workflow as designed.
 - **If a bay won't mark attached** — it's guarded: the job must be in production, the chassis must be on

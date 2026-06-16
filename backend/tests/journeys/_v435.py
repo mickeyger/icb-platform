@@ -57,10 +57,11 @@ def _free_bay(db):
 
 
 def make_assembly_job(*, attached: bool = False, attested_vin: "str | None" = None,
-                      vin: "str | None" = None) -> dict:
-    """A P435 in_production job whose chassis is on a (free) assembly bay (VCL + assembly_assigned
-    events). attached=True adds a body_attached event today. attested_vin sets a confirmed Pre-Job
-    Card attesting that VIN (the DEV-1 swap-rule signal). Returns ids + bay + vin."""
+                      vin: "str | None" = None, job_status: str = "in_production") -> dict:
+    """A P435 job whose chassis is on a (free) assembly bay (VCL + assembly_assigned events).
+    attached=True adds a body_attached event today. attested_vin sets a confirmed Pre-Job Card attesting
+    that VIN (the DEV-1 swap-rule signal). job_status sets BOTH calc + job status (default in_production;
+    'planning' exercises the 16-Jun loosened body_attached pre-condition). Returns ids + bay + vin."""
     from app.database import Branch, CalculationRecord, SessionLocal
     from app.models.mes import (
         ChassisLifecycleEvent, ChassisRecord, PrejobCard, PrejobTemplate, ProductionJob,
@@ -72,14 +73,14 @@ def make_assembly_job(*, attached: bool = False, attested_vin: "str | None" = No
         jhb = db.query(Branch).order_by(Branch.id).first()
         bay = _free_bay(db)
         bay_id, bay_code = bay.id, bay.code
-        calc = CalculationRecord(quote_number=f"{MARK}-{tag}", status="in_production", branch_id=jhb.id,
+        calc = CalculationRecord(quote_number=f"{MARK}-{tag}", status=job_status, branch_id=jhb.id,
                                  dimensions_json='{"body_type": "Chiller"}',
                                  result_json='{"selling_zar": 1000.0}')
         db.add(calc); db.flush()
         ch = ChassisRecord(make=f"{MARK} Test", model="X", vin=vin, status="in_assembly", source="manual",
                            created_via="manual_chassis_menu", created_by="t")
         db.add(ch); db.flush()
-        job = ProductionJob(calculation_record_id=calc.id, branch_id=jhb.id, status="in_production",
+        job = ProductionJob(calculation_record_id=calc.id, branch_id=jhb.id, status=job_status,
                             job_number=f"{MARK}{tag}", chassis_record_id=ch.id)
         db.add(job); db.flush()
         db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="VCL",
@@ -119,6 +120,32 @@ def chassis_status(chassis_id: int) -> str:
         return db.get(ChassisRecord, chassis_id).status
 
 
+def job_status(job_id: int) -> str:
+    from app.database import SessionLocal
+    from app.models.mes import ProductionJob
+    with SessionLocal() as db:
+        return db.get(ProductionJob, job_id).status
+
+
+def panels_event_count(production_job_id: int) -> int:
+    from app.database import SessionLocal
+    from app.models.mes import ProductionJobBayEvent
+    from sqlalchemy import select
+    with SessionLocal() as db:
+        return len(db.execute(
+            select(ProductionJobBayEvent.id).where(
+                ProductionJobBayEvent.production_job_id == production_job_id,
+                ProductionJobBayEvent.event_type == "panels_arrived_in_bay")).all())
+
+
+def bay_merge_state(bay_id: int) -> str:
+    """The §3.3b 6-state of a bay (via the single-source-of-truth helper) — for DB-side assertions."""
+    from app.database import SessionLocal
+    from app.services.chassis import compute_bay_merge_readiness
+    with SessionLocal() as db:
+        return compute_bay_merge_readiness(db, bay_id)["state"]
+
+
 def purge():
     from app.database import SessionLocal
     from sqlalchemy import text
@@ -127,6 +154,8 @@ def purge():
         db.execute(text("DELETE FROM icb_mes.chassis_lifecycle_events WHERE chassis_record_id IN "
                         "(SELECT id FROM icb_mes.chassis_records WHERE make LIKE 'P435%')"))
         db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE body_description LIKE 'P435%'"))
+        db.execute(text("DELETE FROM icb_mes.production_job_bay_events WHERE production_job_id IN "
+                        "(SELECT id FROM icb_mes.production_jobs WHERE job_number LIKE 'P435%')"))
         db.execute(text("DELETE FROM icb_mes.planning_slots WHERE production_job_id IN "
                         "(SELECT id FROM icb_mes.production_jobs WHERE job_number LIKE 'P435%')"))
         db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE 'P435%'"))

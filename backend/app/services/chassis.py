@@ -534,10 +534,15 @@ def record_body_attached(db: Session, record_id: int, production_job_id: int, wh
     job = db.get(ProductionJob, production_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="production job not found")
-    if job.status != "in_production":
+    if job.status not in ("planning", "in_production"):
         raise HTTPException(status_code=422,
-                            detail=f"job {job.job_number or job.id} is '{job.status}', not 'in_production' "
-                                   "— a body can only be attached to a job in production")
+                            detail=f"job {job.job_number or job.id} is '{job.status}' — a body can only be "
+                                   "attached to a job in planning or production")
+    # WO v4.35 (16 Jun ruling) — pre-condition LOOSENED to accept 'planning' too, and we deliberately do
+    # NOT auto-transition planning -> in_production here. Post-attachment the job stays at its current
+    # status (parallel to DEV-2: chassis stays 'in_assembly'). Both "stale-looking" fields are intentional:
+    # the body_attached EVENT is the meaningful moment (bay tile + KPI + Assembly section); status promotion
+    # lands with the v4.36 QC sprint.
     cycle = _latest_cycle(db, record_id)
     if not _has_event(db, record_id, "assembly_assigned", cycle):
         raise HTTPException(status_code=422,

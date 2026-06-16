@@ -83,26 +83,55 @@ derived read-only; `event_type` has no DB CHECK; the WO's wipe order would have 
 > Production worksheet *and* the Planning Board (slot cells + pool) with one `data-testid="slot-vin"` and
 > the same mono/muted/hover-full/null-safe treatment — reducing UX drift and test-maintenance overhead.
 
+> **G. Cross-component drag without shared state: HTML5 DataTransfer + a DOM CustomEvent (§3.3b).** The
+> Planning panel-drag crosses a React component boundary — the week-grid slot-cell lives in `PlanningBoard`,
+> the assembly-bay drop target in `BayModelLanes` — without lifting state or adding context. The source
+> writes the payload via `e.dataTransfer.setData('application/x-panel-job', jobId)` and announces drag
+> start/end with a `document` `CustomEvent` (which drives the drop-target highlight on the other component);
+> the target reads it in a new `onDrop` branch and **widens its `onDragOver` guard to `preventDefault()`
+> for that MIME type**. Two decoupled components, one new drop semantics, zero shared store. (The single
+> easiest thing to get wrong: if `onDragOver` doesn't allow the new type, the browser rejects the drop and
+> it silently no-ops.)
+
+> **H. A separate event class gets its own table + allowlist, not a widened enum (§3.3b).** Panels arriving
+> in a bay is a JOB-side event, so it lives in `production_job_bay_events` with its own
+> `ALLOWED_BAY_EVENT_TYPES = {panels_arrived_in_bay}` — deliberately NOT folded into the chassis-side
+> `ALLOWED_EVENT_TYPES`, so a job-bay event can never slip into the `chassis_lifecycle_events` insert path
+> (this is footnote C applied forward). The 6-state "ready to merge" is then *derived* by correlating the
+> two event streams (`compute_bay_merge_readiness` — the single source of truth for both the tiles and the
+> auto-merge prompt), never stored.
+
 ## Consequences
 
 - The demo shows a believable end-to-end factory flow with the body↔chassis join explicitly visible.
 - No `/calculator` change, no `icb_sap` write, no migration (MUST-SHIP); icb_costings writes confined to
   the BA-approved demo reseed. v4.31-v4.34.2 surfaces consume-only.
-- **Narrative wrinkle (runbook-documented):** because the attach is phase-only, the Chassis page still
-  shows `in_assembly` after a body is attached — by design; the Production Dashboard is where the moment
-  surfaces. v4.36+ promotes it to a status milestone.
+- **Narrative wrinkle (runbook-documented):** because the attach is phase-only, BOTH status fields stay at
+  pre-attachment values after a body is attached — chassis `in_assembly` AND, with the 16-Jun loosened
+  pre-condition, the job stays `planning` (the pre-condition now accepts `planning` OR `in_production` and
+  deliberately does NOT auto-transition). The Production Dashboard (bay tile + KPI + Assembly section) is
+  where the moment surfaces; the v4.36 QC sprint promotes the status fields.
 - **Carried to v4.36+ housekeeping:** `seed_from_mockup` is not v4.34.4-invariant-clean on a fresh seed
   (it predates the invariants) — alongside the FK-drift, dealer-admin-CRUD, and audit-explorer backlog.
 
 ## As shipped (Click-to-verify)
 
-- `chassis.py`: `ALLOWED_EVENT_TYPES`, `record_body_attached`, `assembly_bay_states` (4-state), VIN helpers.
+- `chassis.py`: `ALLOWED_EVENT_TYPES`, `record_body_attached` (16-Jun: accepts `planning` OR
+  `in_production`, no auto-transition), VIN helpers. **§3.3b:** `ALLOWED_BAY_EVENT_TYPES`,
+  `record_panels_arrived_in_bay`, `compute_bay_merge_readiness` (single source of truth),
+  `assembly_bays_utilisation` now 6-state (`empty`/`pre_assembly`/`ready_to_merge`/`awaiting_attachment`/
+  `attached_today`/`post_attached`).
 - `team_worksheet.py`/`production_jobs.py`: Assembly section + `bodies_attached_today` KPI.
 - `planning.py`: `_CHASSIS_VIN` on the board read.
-- Endpoint: `POST /api/chassis-records/{id}/body-attached`.
-- Frontend: 4-state bay tiles + KPI tile + mark-attached side-panel + Assembly section + Vac/Press 🔗 +
-  slot VIN (Production + Planning).
+- Endpoints: `POST /api/chassis-records/{id}/body-attached`; **§3.3b** `POST
+  /api/production-jobs/{id}/panels-arrived-in-bay`.
+- Migration **0024** `production_job_bay_events` (mirrors 0023; cross-schema `user_id` FK in-migration).
+- Frontend: 6-state bay tiles + KPI tile + mark-attached side-panel + Assembly section + Vac/Press 🔗 +
+  slot VIN (Production + Planning). **§3.3b:** Planning panel-drag-to-bay (`BayModelLanes` +
+  `PlanningBoard` slot-cell) + auto-merge prompt + `useRefetchOnFocus` on 3 surfaces.
 - `scripts/seed_v4_35_demo_reset.py`; `docs/audit/2026-06-16/V4_35_DEMO_SEED_EXECUTION_LOG.md`.
-- Journeys: `test_body_attached_event` / `test_assembly_tab_body_attached_section` / `test_demo_walkthrough` (+ `_v435`).
-- Docs: this ADR, `docs/uat/ICB_MES_BurtDemo_v4.35_v1.0.md`, `docs/uat/ICB_MES_LiveData_Creation_Guide_v1.0.md`, runbook screenshots under `docs/screenshots/runbook/`.
+- Journeys: `test_body_attached_event` / `test_assembly_tab_body_attached_section` / `test_demo_walkthrough`
+  / **§3.3b** `test_planning_drag_to_merge` / `test_cross_page_sync` (+ `_v435`).
+- Docs: this ADR, `docs/uat/ICB_MES_BurtDemo_v4.35_v1.0.md`, `docs/uat/ICB_MES_LiveData_Creation_Guide_v1.0.md`,
+  runbook screenshots under `docs/screenshots/runbook/` (`capture-v435-stretch.mjs` for the §3.3b frames).
 - No new nav route.

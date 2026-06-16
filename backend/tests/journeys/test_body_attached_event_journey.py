@@ -41,17 +41,25 @@ def test_planner_can_mark(page: Page, live_server: str, role_users) -> None:
     assert _post_attach(page, live_server, s["chassis_id"], s["job_id"]).status == 201
 
 
-# ── pre-conditions (§0.4) ────────────────────────────────────────────────────────
-def test_blocked_when_job_not_in_production(page: Page, live_server: str) -> None:
-    s = h.make_assembly_job()
-    from app.database import SessionLocal
-    from app.models.mes import ProductionJob
-    with SessionLocal() as db:                          # demote the job out of production
-        db.get(ProductionJob, s["job_id"]).status = "planning"
-        db.commit()
+# ── pre-conditions (§0.4; 16-Jun ruling — 'planning' accepted, NO auto-transition) ──────────────
+def test_attach_allowed_when_job_in_planning(page: Page, live_server: str) -> None:
+    """The loosened pre-condition: a body can be attached to a 'planning' job. The job stays 'planning'
+    afterwards (no auto-transition — status promotion is the v4.36 QC sprint), parallel to the phase-only
+    chassis status (DEV-2)."""
+    s = h.make_assembly_job(job_status="planning")
     admin_session(page)
     r = _post_attach(page, live_server, s["chassis_id"], s["job_id"])
-    assert r.status == 422 and "in_production" in r.text()
+    assert r.status == 201, r.text()
+    assert h.body_attached_event_count(s["chassis_id"]) == 1
+    assert h.job_status(s["job_id"]) == "planning"          # NOT auto-transitioned to in_production
+    assert h.chassis_status(s["chassis_id"]) == "in_assembly"   # DEV-2 — phase-only
+
+
+def test_blocked_when_job_not_in_planning_or_production(page: Page, live_server: str) -> None:
+    s = h.make_assembly_job(job_status="completed")         # outside {planning, in_production}
+    admin_session(page)
+    r = _post_attach(page, live_server, s["chassis_id"], s["job_id"])
+    assert r.status == 422 and "planning or production" in r.text()
     assert h.body_attached_event_count(s["chassis_id"]) == 0
 
 
