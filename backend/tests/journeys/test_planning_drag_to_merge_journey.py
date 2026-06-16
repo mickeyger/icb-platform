@@ -108,6 +108,25 @@ def test_workshop_cannot_arrive_panels(page: Page, live_server: str, role_users)
     assert h.panels_event_count(s["job_id"]) == 0
 
 
+# ── Production side panel — mark-attached visibility (the demo click-around find) ──
+def test_production_shows_mark_attached_for_ready_to_merge(page: Page, live_server: str) -> None:
+    s = h.make_assembly_job()                                  # linked job + chassis on a bay
+    admin_session(page)
+    assert _panels(page, live_server, s["job_id"], s["bay_id"]).status == 201   # → ready_to_merge
+    h.open_production(page)
+    page.locator(f'[data-bay-code="{s["bay_code"]}"]').click()
+    expect(page.get_by_test_id("mark-body-attached")).to_be_visible(timeout=T)  # actionable, not absent
+
+
+def test_production_no_job_hint_for_unlinked_chassis(page: Page, live_server: str) -> None:
+    u = h.assign_unlinked_chassis()                            # chassis on a bay, NO linked job
+    admin_session(page)
+    h.open_production(page)
+    page.locator(f'[data-bay-code="{u["bay_code"]}"]').click()
+    expect(page.get_by_test_id("mark-attached-no-job")).to_be_visible(timeout=T)   # legible, not a dead button
+    expect(page.get_by_test_id("mark-body-attached")).to_have_count(0)
+
+
 # ── UI: the Planning bay tile renders the new 'ready_to_merge' state + merge affordance ──
 def test_planning_bay_tile_renders_ready_to_merge(page: Page, live_server: str) -> None:
     s = h.make_assembly_job()

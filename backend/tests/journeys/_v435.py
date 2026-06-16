@@ -106,6 +106,28 @@ def make_assembly_job(*, attached: bool = False, attested_vin: "str | None" = No
                 "calc_id": calc.id, "vin": vin}
 
 
+def assign_unlinked_chassis() -> dict:
+    """A P435 chassis assembly_assigned to a free bay with NO production job linked — the unlinked-occupant
+    case (WO v4.35 §3.3b). Production must show the 'no job linked' hint, not a dead Mark-body-attached
+    button. Returns chassis_id + bay."""
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent, ChassisRecord
+    tag = uuid.uuid4().hex[:6]
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        bay = _free_bay(db)
+        bay_id, bay_code = bay.id, bay.code
+        ch = ChassisRecord(make=f"{MARK} Test", model="X", vin=f"{MARK}NOJOB{tag}", status="in_assembly",
+                           source="manual", created_via="manual_chassis_menu", created_by="t")
+        db.add(ch); db.flush()
+        db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="VCL",
+                                     event_date=now.date(), created_by="t"))
+        db.add(ChassisLifecycleEvent(chassis_record_id=ch.id, cycle_number=1, event_type="assembly_assigned",
+                                     assembly_bay_id=bay_id, event_date=now.date(), created_by="t"))
+        db.commit()
+        return {"chassis_id": ch.id, "bay_id": bay_id, "bay_code": bay_code}
+
+
 def body_attached_event_count(chassis_id: int) -> int:
     from app.database import SessionLocal
     from app.models.mes import ChassisLifecycleEvent

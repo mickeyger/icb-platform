@@ -329,8 +329,12 @@ export function ProductionDashboard() {
               )
             })()}
 
-            {/* WO v4.35 §0.5 — "Mark body attached" affordance: only when awaiting + permitted. */}
-            {bay.state === 'awaiting_attachment' && canMarkAttached && (
+            {/* WO v4.35 §0.5 + §3.3b — "Mark body attached": when the bay is awaiting OR ready_to_merge
+                (chassis + matched panels), the actor is permitted, AND a production job is linked to the
+                chassis. The occupant_job_id guard prevents a silent dead button on a chassis that belongs
+                to no job (record_body_attached needs a job; see the no-job hint below). */}
+            {(bay.state === 'awaiting_attachment' || bay.state === 'ready_to_merge')
+              && canMarkAttached && bay.occupant_job_id != null && (
               <div className="space-y-2 rounded-md border border-status-green/40 bg-status-green/5 p-3"
                    data-testid="mark-attached-section">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted">Body ↔ chassis merge</div>
@@ -353,7 +357,18 @@ export function ProductionDashboard() {
                 </button>
               </div>
             )}
-            {bay.state === 'awaiting_attachment' && !canMarkAttached && (
+            {/* §3.3b — a chassis is on the bay but no production job is linked to it: explain why a body
+                can't be attached (turns the former silent dead-button into a legible state). */}
+            {(bay.state === 'awaiting_attachment' || bay.state === 'ready_to_merge')
+              && bay.occupant_job_id == null && (
+              <div className="rounded-md border border-dashed border-line p-3 text-xs text-muted"
+                   data-testid="mark-attached-no-job">
+                This chassis is on the bay but isn’t linked to a production job, so a body can’t be attached.
+                Link it to a job in Planning first.
+              </div>
+            )}
+            {(bay.state === 'awaiting_attachment' || bay.state === 'ready_to_merge')
+              && !canMarkAttached && bay.occupant_job_id != null && (
               <div className="rounded-md border border-dashed border-line p-3 text-xs text-muted"
                    data-testid="mark-attached-readonly">
                 Awaiting body attachment — only planner / production / admin can record it.

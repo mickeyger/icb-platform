@@ -120,6 +120,15 @@ derived read-only; `event_type` has no DB CHECK; the WO's wipe order would have 
 > *correctly* refuses an action, the refusal still has to be visible and recoverable — silence reads as a
 > bug to the operator.
 
+> **K. An affordance that can't act must not render as an actionable CTA (§3.3b, demo click-around).** The
+> Production "Mark body attached" button rendered for any `awaiting_attachment` bay but `doMarkAttached`
+> silently no-op'd when the occupant chassis had no linked production job (`occupant_job_id == null`) — a
+> dead button. Fix: gate the actionable button on `occupant_job_id != null` and render an explanatory hint
+> ("this chassis isn't linked to a production job") otherwise. Same pass widened the gate to include
+> `ready_to_merge` (a panels-dragged bay), so the Production attach path matches the operator's "drag panels
+> → mark attached" mental model. Rule: a control's render condition must imply its action can succeed —
+> otherwise show the reason, not the button.
+
 ## Consequences
 
 - The demo shows a believable end-to-end factory flow with the body↔chassis join explicitly visible.

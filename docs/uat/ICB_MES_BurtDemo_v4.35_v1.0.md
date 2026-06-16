@@ -113,8 +113,11 @@ step).
   panels not yet there) · Attached today · Finishing.
 - **If Burt asks about email / SAP / materials** — those are blocked on the intranet/Marnus work and out
   of scope for this demo; the flow shown is the production workflow as designed.
-- **If a bay won't mark attached** — it's guarded: the job must be in production, the chassis must be on
-  the bay, and if a VIN was attested at planning-ack the chassis must match. The error toast says which.
+- **If a bay won't mark attached** — it's guarded: the job must be in planning or production, the chassis
+  must be on the bay **and linked to a production job**, and if a VIN was attested at planning-ack the
+  chassis must match. The bay panel says which — e.g. a chassis on a bay with no linked job shows *"not
+  linked to a production job — link it to a job in Planning first"* instead of the attach button. (The
+  attach button appears for both *Awaiting attachment* and *Ready to merge* bays.)
 
 ## Reset between dry-runs
 If you mark a body attached during a dry-run and want the two amber bays back, just re-run the
