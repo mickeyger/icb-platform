@@ -1065,6 +1065,7 @@ function LivePlanningBoard() {
                             <button
                               onClick={() => setOpenSlot(cell)}
                               data-testid="slot-cell"
+                              data-job-id={cell.job.id}    /* WO v4.34.2 — deterministic cell targeting in the revert journey */
                               draggable={canSchedule}
                               onDragStart={(e) => {
                                 if (!canSchedule) { e.preventDefault(); return }
