@@ -3,11 +3,12 @@
 // 5-bay utilisation (/api/chassis-records/bays/assembly, §0.4 extension). Lean apiGet + the
 // useBayModel live/mock fallback idiom; the §0.3 30s tick lives here so the screen stays dumb.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiGet } from '../../lib/api'
+import { apiGet, apiPost } from '../../lib/api'
 import type { Bay } from '../Chassis/types'
 
 export interface ProductionKpis {
   units_in_production: number
+  bodies_attached_today: number          // WO v4.35 §0.6
   delayed: { total: number; start_slipped: number; chassis_slipped: number }
   critical_chassis: number
   bottleneck: { job_id: number; job_number: string | null; status: string; days_in_stage: number } | null
@@ -16,6 +17,9 @@ export interface ProductionKpis {
   open_rework: number
   as_of: string
 }
+
+/** WO v4.35 §0.20 — the MUST-SHIP 4-state assembly bay machine. */
+export type BayState = 'empty' | 'awaiting_attachment' | 'attached_today' | 'post_attached'
 
 /** v4.31 Bay + the v4.32 §0.4 utilisation extension (additive — defined locally so the
  *  v4.31 Chassis/types.ts surface stays untouched). */
@@ -27,6 +31,8 @@ export type UtilisedBay = Bay & {
   occupant_job_id?: number | null
   occupant_job_number?: string | null
   since?: string | null
+  state?: BayState | null                // WO v4.35 §0.20
+  body_attached_on?: string | null
 }
 
 const REFRESH_MS = 30_000               // §0.3 lock: keep the 30s pattern, no faster polling
@@ -37,6 +43,8 @@ export interface ProductionDashboardState {
   bays: UtilisedBay[]
   refreshedAt: Date | null
   refresh: () => Promise<void>
+  // WO v4.35 §3.3 — record the body_attached event for a bay's occupant (pessimistic → refetch).
+  markBodyAttached: (chassisId: number, productionJobId: number, notes?: string) => Promise<void>
 }
 
 export function useProductionDashboard(): ProductionDashboardState {
@@ -63,6 +71,17 @@ export function useProductionDashboard(): ProductionDashboardState {
     }
   }, [])
 
+  const markBodyAttached = useCallback(
+    async (chassisId: number, productionJobId: number, notes?: string) => {
+      await apiPost(`/api/chassis-records/${chassisId}/body-attached`, {
+        production_job_id: productionJobId,
+        notes: (notes ?? '').trim() || null,
+      })
+      await refresh()                    // pessimistic — the bay re-renders as 'attached_today'
+    },
+    [refresh],
+  )
+
   useEffect(() => {
     void refresh()
     timer.current = setInterval(() => void refresh(), REFRESH_MS)
@@ -71,5 +90,5 @@ export function useProductionDashboard(): ProductionDashboardState {
     }
   }, [refresh])
 
-  return { mode, kpis, bays, refreshedAt, refresh }
+  return { mode, kpis, bays, refreshedAt, refresh, markBodyAttached }
 }

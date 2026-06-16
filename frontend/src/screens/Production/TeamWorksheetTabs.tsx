@@ -9,7 +9,7 @@
 // (Vacuum → Press → Assembly → Parking → Dispatch). v4.32.1 refines the mapping if Burt/Simeon
 // want a different lens. Read-only — no actions on any tab (§3.3).
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarDays } from 'lucide-react'
+import { CalendarDays, Link2 } from 'lucide-react'
 import { Card, SectionTitle } from '../../components/ui/primitives'
 import { useAppData } from '../../store/AppDataContext'
 import { apiGet } from '../../lib/api'
@@ -25,13 +25,17 @@ interface WorksheetItem {
   status: string
   since: string | null
   flag: string | null
+  body_attached: boolean       // WO v4.35 §0.25 — drives the 🔗 on Vacuum/Press slots
 }
 
 interface TeamWorksheet {
   team: string
   date: string
   capacity: { used: number; total: number } | null
-  sections: { scheduled: WorksheetItem[]; in_flight: WorksheetItem[]; blocking: WorksheetItem[] }
+  sections: {
+    scheduled: WorksheetItem[]; in_flight: WorksheetItem[]; blocking: WorksheetItem[]
+    body_attached_today: WorksheetItem[]    // WO v4.35 §0.7 — populated only for the Assembly team
+  }
 }
 
 const ALL_TEAMS = [
@@ -152,58 +156,67 @@ export function TeamWorksheetTabs() {
         {loading && <span className="text-[11px] text-muted">refreshing…</span>}
       </div>
 
-      {/* Three fixed sections (§3.3) */}
-      <div className="grid gap-3 lg:grid-cols-3">
-        {SECTION_META.map((s) => {
-          const items = data?.sections[s.key] ?? []
-          return (
-            <div key={s.key} data-testid={`worksheet-${s.key}`} className="rounded-md border border-line p-2.5">
-              <div className="mb-2 flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${s.dot}`} />
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-                  {s.title}
-                </span>
-                <span className="ml-auto text-[11px] text-muted">{items.length}</span>
-              </div>
-              {items.length === 0 ? (
-                <div className="py-2 text-sm text-muted">—</div>
-              ) : (
-                /* capped + scrollable — the parking yard can hold dozens of chassis */
-                <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                  {items.map((i, idx) => (
-                    <li key={idx} className="rounded-md bg-surface-alt/50 p-2 text-sm">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-mono text-xs font-semibold text-body">
-                          {i.job_number ? `J${i.job_number}` : i.chassis_vin || '—'}
-                        </span>
-                        {i.job_number && i.chassis_vin && (
-                          <span className="font-mono text-[11px] text-muted">{i.chassis_vin}</span>
-                        )}
-                        {i.location && (
-                          <span className="ml-auto rounded bg-white px-1.5 py-0.5 font-mono text-[10px] text-muted">
-                            {i.location}
-                          </span>
-                        )}
-                      </div>
-                      <div className="truncate text-xs text-body">{i.customer || '—'}</div>
-                      {i.description && (
-                        <div className="truncate text-[11px] text-muted">{i.description}</div>
-                      )}
-                      <div className="mt-0.5 flex items-center gap-2 text-[11px]">
-                        <span className="text-muted">{i.status.replace(/_/g, ' ')}</span>
-                        {i.since && <span className="text-muted">· since {dmy(i.since)}</span>}
-                        {i.flag && (
-                          <span className="font-semibold text-status-amber">⚠ {i.flag}</span>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      {/* Sections (§3.3) — the Assembly tab adds the WO v4.35 §0.7 "Body Attached (today)" 4th section. */}
+      {(() => {
+        const sections = team === 'assembly'
+          ? [...SECTION_META, { key: 'body_attached_today', title: 'Body Attached (today)', dot: 'bg-status-green' }]
+          : SECTION_META
+        return (
+          <div className={`grid gap-3 ${team === 'assembly' ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
+            {sections.map((s) => {
+              const items = data?.sections[s.key as keyof TeamWorksheet['sections']] ?? []
+              return (
+                <div key={s.key} data-testid={`worksheet-${s.key}`} className="rounded-md border border-line p-2.5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full ${s.dot}`} />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted">{s.title}</span>
+                    <span className="ml-auto text-[11px] text-muted">{items.length}</span>
+                  </div>
+                  {items.length === 0 ? (
+                    <div className="py-2 text-sm text-muted">—</div>
+                  ) : (
+                    /* capped + scrollable — the parking yard can hold dozens of chassis */
+                    <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                      {items.map((i, idx) => (
+                        <li key={idx} className="rounded-md bg-surface-alt/50 p-2 text-sm">
+                          <div className="flex items-baseline gap-2">
+                            <span className="font-mono text-xs font-semibold text-body">
+                              {i.job_number ? `J${i.job_number}` : i.chassis_vin || '—'}
+                            </span>
+                            {i.job_number && i.chassis_vin && (
+                              <span className="font-mono text-[11px] text-muted">{i.chassis_vin}</span>
+                            )}
+                            {i.body_attached && (
+                              <span title="Body attached to this chassis" data-testid="slot-body-attached"
+                                    className="text-status-green"><Link2 size={12} /></span>
+                            )}
+                            {i.location && (
+                              <span className="ml-auto rounded bg-white px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                                {i.location}
+                              </span>
+                            )}
+                          </div>
+                          <div className="truncate text-xs text-body">{i.customer || '—'}</div>
+                          {i.description && (
+                            <div className="truncate text-[11px] text-muted">{i.description}</div>
+                          )}
+                          <div className="mt-0.5 flex items-center gap-2 text-[11px]">
+                            <span className="text-muted">{i.status.replace(/_/g, ' ')}</span>
+                            {i.since && <span className="text-muted">· since {dmy(i.since)}</span>}
+                            {i.flag && (
+                              <span className="font-semibold text-status-amber">⚠ {i.flag}</span>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })()}
     </Card>
   )
 }

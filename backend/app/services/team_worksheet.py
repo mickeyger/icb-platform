@@ -65,13 +65,24 @@ def _body_type(calc) -> Optional[str]:
 
 
 def _job_item(job, customer_name, calc, *, location, status, since=None, flag=None,
-              chassis_vin=None) -> WorksheetItem:
+              chassis_vin=None, body_attached=False) -> WorksheetItem:
     return WorksheetItem(
         job_id=job.id, job_number=job.job_number, chassis_vin=chassis_vin,
         customer=(customer_name or job.customer_name),
         description=(_body_type(calc) or job.description),
-        location=location, status=status, since=since, flag=flag,
+        location=location, status=status, since=since, flag=flag, body_attached=body_attached,
     )
+
+
+def _chassis_with_body_attached(db: Session, chassis_ids) -> set:
+    """WO v4.35 §0.25 — the subset of chassis_ids that have a body_attached event (any cycle)."""
+    ids = [c for c in chassis_ids if c is not None]
+    if not ids:
+        return set()
+    return {row[0] for row in db.execute(
+        select(ChassisLifecycleEvent.chassis_record_id).where(
+            ChassisLifecycleEvent.chassis_record_id.in_(ids),
+            ChassisLifecycleEvent.event_type == "body_attached")).all()}
 
 
 def _rework_blocking(db: Session, team: str) -> list[WorksheetItem]:
@@ -103,10 +114,13 @@ def _slot_team(db: Session, team: str, for_date: date_type, branch_id) -> Worksh
     )
     if branch_id is not None:
         stmt = stmt.where(ProductionJob.branch_id == branch_id)
+    rows = db.execute(stmt).all()
+    attached = _chassis_with_body_attached(db, [j.chassis_record_id for _, j, _, _ in rows])  # §0.25 🔗
     scheduled, in_flight = [], []
-    for slot, job, calc, customer in db.execute(stmt).all():
+    for slot, job, calc, customer in rows:
         item = _job_item(job, (customer.name if customer else None), calc,
-                         location=slot.bay, status=(slot.status or "scheduled"))
+                         location=slot.bay, status=(slot.status or "scheduled"),
+                         body_attached=(job.chassis_record_id in attached))
         if slot.status == "in_progress":
             in_flight.append(item)
         elif slot.status != "completed":

@@ -25,6 +25,8 @@ class WorksheetItem(BaseModel):
     status: str                           # domain status driving the status pill
     since: Optional[date_type] = None     # when the row entered its current state (business date)
     flag: Optional[str] = None            # human-readable attention/blocking reason
+    body_attached: bool = False           # WO v4.35 §0.25 — the linked job's body has been attached
+                                          # (drives the 🔗 link symbol on a Vacuum/Press slot, historical)
 
 
 class WorksheetCapacity(BaseModel):

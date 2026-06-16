@@ -9,26 +9,41 @@
 // mode renders an offline card. 30s tick refetches the real APIs (§0.3).
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertCircle, ArrowRightCircle, Package, RefreshCw, Wrench } from 'lucide-react'
+import { AlertCircle, ArrowRightCircle, CheckCircle2, Circle, Link2, Package, RefreshCw, Wrench } from 'lucide-react'
 import { KpiTile, Card, SectionTitle } from '../../components/ui/primitives'
 import { SidePanel } from '../../components/ui/overlays'
+import { Spinner } from '../../components/ui/feedback'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { useToast } from '../../components/ui/toast'
 import { JobCardSections } from '../Planning/JobCardSections'
 import { useCostings } from '../../store/CostingsContext'
+import { useAppData } from '../../store/AppDataContext'
+import { handleApiError } from '../../lib/api'
 import { hhmm, dmy } from '../../lib/format'
-import { useProductionDashboard, type UtilisedBay } from './useProductionDashboard'
+import { useProductionDashboard, type BayState, type UtilisedBay } from './useProductionDashboard'
 import { TeamWorksheetTabs } from './TeamWorksheetTabs'
+
+// WO v4.35 §0.20 — the MUST-SHIP 4-state bay visual language (the 2 panels-event states are STRETCH).
+const BAY_STATE_UI: Record<BayState, { label: string; tile: string; badge?: string; badgeClass?: string }> = {
+  empty:               { label: 'Available', tile: 'cursor-default border border-dashed border-line bg-surface-alt/40' },
+  awaiting_attachment: { label: 'Awaiting attachment', tile: 'border border-line border-l-4 border-l-status-amber bg-white hover:border-primary', badge: 'Awaiting', badgeClass: 'bg-status-amber/15 text-status-amber' },
+  attached_today:      { label: 'Body attached today', tile: 'border border-line border-l-4 border-l-status-green bg-status-green/10 hover:border-primary', badge: '🔗 Attached today', badgeClass: 'bg-status-green/20 text-status-green' },
+  post_attached:       { label: 'Finishing', tile: 'border border-line border-l-4 border-l-primary bg-primary/5 hover:border-primary', badge: '🔗 Attached', badgeClass: 'bg-primary/15 text-primary' },
+}
 
 export function ProductionDashboard() {
   const nav = useNavigate()
   const toast = useToast()
   const [searchParams, setSearchParams] = useSearchParams()
   const { costings } = useCostings()
+  const { hasPermission } = useAppData()
+  const canMarkAttached = hasPermission('chassis.assembly_assign')   // §0.5 — planner/admin/production
   const repairs = costings.filter((c) => c.quote_type === 'Repair')
-  const { mode, kpis, bays, refreshedAt } = useProductionDashboard()
+  const { mode, kpis, bays, refreshedAt, markBodyAttached } = useProductionDashboard()
   const [bay, setBay] = useState<UtilisedBay | null>(null)
   const [highlightBayId, setHighlightBayId] = useState<number | null>(null)
+  const [attachNotes, setAttachNotes] = useState('')
+  const [attachBusy, setAttachBusy] = useState(false)
 
   // WO v4.32 §3.5 — the Planning Board deep-link (?jobId=, the v4.29 D7 carry-forward).
   // Runs once the live bays have loaded; the param is CLEARED after handling either way
@@ -52,6 +67,23 @@ export function ProductionDashboard() {
       toast.push({ kind: 'warn', message: `Job ${jobIdParam} is no longer in production` })
     }
   }, [jobIdParam, mode, bays, setSearchParams, toast])
+
+  // WO v4.35 §3.3 — reset the optional notes when the open bay changes.
+  useEffect(() => setAttachNotes(''), [bay?.id])
+
+  async function doMarkAttached() {
+    if (!bay?.occupant_chassis_id || bay.occupant_job_id == null) return
+    setAttachBusy(true)
+    try {
+      await markBodyAttached(bay.occupant_chassis_id, bay.occupant_job_id, attachNotes)
+      setBay(null)                       // refetch updated the bays → close the panel
+      toast.push({ kind: 'ok', message: 'Body attached ✓' })
+    } catch (e) {
+      handleApiError(e, toast.push)      // 409/422 → the service's remediation message
+    } finally {
+      setAttachBusy(false)
+    }
+  }
 
   if (mode === 'mock') {
     return (
@@ -89,9 +121,22 @@ export function ProductionDashboard() {
       </div>
 
       {/* KPI strip — real values from compute_production_kpis (§0.6 defaults) */}
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-7" data-testid="production-kpis">
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8" data-testid="production-kpis">
         <Tooltip k="production_dashboard.units_in_production_tile">
           <KpiTile label="Units in production" value={kpis?.units_in_production ?? '—'} />
+        </Tooltip>
+        {/* WO v4.35 §0.6 — the keystone KPI: bodies joined to chassis today. */}
+        <Tooltip k="production_dashboard.bodies_attached_today_tile">
+          <KpiTile
+            label="Bodies attached today"
+            value={
+              <span className="flex items-center gap-1.5 text-status-green">
+                <Link2 size={18} /> {kpis?.bodies_attached_today ?? '—'}
+              </span>
+            }
+            status={kpis && kpis.bodies_attached_today > 0 ? 'GREEN' : undefined}
+            sub="body ↔ chassis joined"
+          />
         </Tooltip>
         <Tooltip k="production_dashboard.delayed_units_tile">
           <KpiTile
@@ -155,34 +200,44 @@ export function ProductionDashboard() {
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {bays.map((b) => (
-              <button
-                key={b.id}
-                data-testid="production-bay-tile"
-                data-bay-code={b.code}
-                data-occupied={b.occupied}
-                onClick={() => b.occupied && setBay(b)}
-                className={`flex min-h-[84px] flex-col items-start rounded-md p-2.5 text-left transition ${
-                  b.occupied
-                    ? 'border border-line border-l-4 border-l-status-green bg-white hover:border-primary'
-                    : 'cursor-default border border-dashed border-line bg-surface-alt/40'
-                } ${highlightBayId === b.id ? 'ring-2 ring-primary ring-offset-2' : ''}`}
-              >
-                <span className="text-xs font-bold text-body">{b.code}</span>
-                {b.occupied ? (
-                  <>
-                    <span className="mt-1 font-mono text-xs font-semibold text-body">{b.occupant_vin}</span>
-                    <span className="truncate text-[11px] text-muted">{b.occupant_customer || '—'}</span>
-                    <span className="mt-auto text-[10px] text-muted">
-                      {b.occupant_job_number ? `J${b.occupant_job_number} · ` : ''}
-                      since {b.since ? dmy(b.since) : '—'}
-                    </span>
-                  </>
-                ) : (
-                  <span className="m-auto text-[11px] text-muted">Free</span>
-                )}
-              </button>
-            ))}
+            {bays.map((b) => {
+              const st = (b.state ?? (b.occupied ? 'awaiting_attachment' : 'empty')) as BayState
+              const ui = BAY_STATE_UI[st] ?? BAY_STATE_UI.empty
+              return (
+                <button
+                  key={b.id}
+                  data-testid="production-bay-tile"
+                  data-bay-code={b.code}
+                  data-occupied={b.occupied}
+                  data-bay-state={st}
+                  onClick={() => b.occupied && setBay(b)}
+                  className={`flex min-h-[92px] flex-col items-start rounded-md p-2.5 text-left transition ${ui.tile} ${
+                    highlightBayId === b.id ? 'ring-2 ring-primary ring-offset-2' : ''
+                  }`}
+                >
+                  <div className="flex w-full items-center justify-between gap-1">
+                    <span className="text-xs font-bold text-body">{b.code}</span>
+                    {ui.badge && (
+                      <span data-testid="bay-badge"
+                        className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${ui.badgeClass}`}>
+                        {ui.badge}
+                      </span>
+                    )}
+                  </div>
+                  {b.occupied ? (
+                    <>
+                      <span className="mt-1 font-mono text-xs font-semibold text-body">{b.occupant_vin}</span>
+                      <span className="truncate text-[11px] text-muted">{b.occupant_customer || '—'}</span>
+                      <span className="mt-auto text-[10px] text-muted">
+                        {b.occupant_job_number ? `J${b.occupant_job_number} · ` : ''}{ui.label.toLowerCase()}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="m-auto text-[11px] text-muted">Available</span>
+                  )}
+                </button>
+              )
+            })}
             {bays.length === 0 && <div className="text-sm text-muted">No assembly bays configured.</div>}
           </div>
         </Card>
@@ -233,6 +288,67 @@ export function ProductionDashboard() {
                 <div className="font-semibold text-body">{bay.since ? dmy(bay.since) : '—'}</div>
               </div>
             </div>
+            {/* WO v4.35 §3.3 — body↔chassis lifecycle checklist (makes the causality visible to Burt). */}
+            {(() => {
+              const attached = bay.state === 'attached_today' || bay.state === 'post_attached'
+              const steps = [
+                { label: 'Chassis received (VCL)', done: true },
+                { label: 'Assigned to assembly bay', done: true },
+                { label: 'Body attached', done: attached },
+              ]
+              return (
+                <div className="rounded-md border border-line p-3" data-testid="bay-lifecycle">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Lifecycle</div>
+                  <ul className="space-y-1.5 text-sm">
+                    {steps.map((s) => (
+                      <li key={s.label} className="flex items-center gap-2">
+                        {s.done
+                          ? <CheckCircle2 size={15} className="shrink-0 text-status-green" />
+                          : <Circle size={15} className="shrink-0 text-muted" />}
+                        <span className={s.done ? 'text-body' : 'text-muted'}>{s.label}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {bay.body_attached_on && (
+                    <div className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-status-green">
+                      <Link2 size={12} /> Body attached on {dmy(bay.body_attached_on)}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* WO v4.35 §0.5 — "Mark body attached" affordance: only when awaiting + permitted. */}
+            {bay.state === 'awaiting_attachment' && canMarkAttached && (
+              <div className="space-y-2 rounded-md border border-status-green/40 bg-status-green/5 p-3"
+                   data-testid="mark-attached-section">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted">Body ↔ chassis merge</div>
+                <textarea
+                  value={attachNotes}
+                  onChange={(e) => setAttachNotes(e.target.value.slice(0, 500))}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="Notes (optional)"
+                  data-testid="attach-notes"
+                  className="w-full rounded-md border border-line bg-surface p-2 text-sm"
+                />
+                <button
+                  onClick={doMarkAttached}
+                  disabled={attachBusy}
+                  data-testid="mark-body-attached"
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-status-green py-2 font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  {attachBusy ? <Spinner size={14} /> : <Link2 size={14} />} Mark body attached
+                </button>
+              </div>
+            )}
+            {bay.state === 'awaiting_attachment' && !canMarkAttached && (
+              <div className="rounded-md border border-dashed border-line p-3 text-xs text-muted"
+                   data-testid="mark-attached-readonly">
+                Awaiting body attachment — only planner / production / admin can record it.
+              </div>
+            )}
+
             {bay.occupant_job_id != null ? (
               <JobCardSections jobId={bay.occupant_job_id} />
             ) : (
