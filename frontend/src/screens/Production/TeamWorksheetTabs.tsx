@@ -183,9 +183,6 @@ export function TeamWorksheetTabs() {
                             <span className="font-mono text-xs font-semibold text-body">
                               {i.job_number ? `J${i.job_number}` : i.chassis_vin || '—'}
                             </span>
-                            {i.job_number && i.chassis_vin && (
-                              <span className="font-mono text-[11px] text-muted">{i.chassis_vin}</span>
-                            )}
                             {i.body_attached && (
                               <span title="Body attached to this chassis" data-testid="slot-body-attached"
                                     className="text-status-green"><Link2 size={12} /></span>
@@ -196,6 +193,14 @@ export function TeamWorksheetTabs() {
                               </span>
                             )}
                           </div>
+                          {/* WO v4.35 §3.3+ — chassis VIN below the job number (VIN-to-VIN matching with
+                              the assembly bay tiles). Shown only when a chassis is assigned; full VIN on hover. */}
+                          {i.job_number && i.chassis_vin && (
+                            <div className="truncate font-mono text-[10px] text-muted" title={i.chassis_vin}
+                                 data-testid="slot-vin">
+                              {i.chassis_vin}
+                            </div>
+                          )}
                           <div className="truncate text-xs text-body">{i.customer || '—'}</div>
                           {i.description && (
                             <div className="truncate text-[11px] text-muted">{i.description}</div>

@@ -85,6 +85,16 @@ def _chassis_with_body_attached(db: Session, chassis_ids) -> set:
             ChassisLifecycleEvent.event_type == "body_attached")).all()}
 
 
+def _vins_for_chassis(db: Session, chassis_ids) -> dict:
+    """WO v4.35 §3.3+ — {chassis_record_id: vin} for slot rows, so Vacuum/Press cards can show the
+    chassis VIN (VIN-to-VIN matching against the assembly bay tiles). NULL when no chassis assigned."""
+    ids = [c for c in chassis_ids if c is not None]
+    if not ids:
+        return {}
+    return {cid: vin for cid, vin in db.execute(
+        select(ChassisRecord.id, ChassisRecord.vin).where(ChassisRecord.id.in_(ids))).all()}
+
+
 def _rework_blocking(db: Session, team: str) -> list[WorksheetItem]:
     prefixes = _REWORK_PREFIX.get(team)
     if not prefixes:
@@ -115,11 +125,14 @@ def _slot_team(db: Session, team: str, for_date: date_type, branch_id) -> Worksh
     if branch_id is not None:
         stmt = stmt.where(ProductionJob.branch_id == branch_id)
     rows = db.execute(stmt).all()
-    attached = _chassis_with_body_attached(db, [j.chassis_record_id for _, j, _, _ in rows])  # §0.25 🔗
+    chassis_ids = [j.chassis_record_id for _, j, _, _ in rows]
+    attached = _chassis_with_body_attached(db, chassis_ids)        # §0.25 🔗
+    vins = _vins_for_chassis(db, chassis_ids)                      # §3.3+ VIN-to-VIN matching
     scheduled, in_flight = [], []
     for slot, job, calc, customer in rows:
         item = _job_item(job, (customer.name if customer else None), calc,
                          location=slot.bay, status=(slot.status or "scheduled"),
+                         chassis_vin=vins.get(job.chassis_record_id),
                          body_attached=(job.chassis_record_id in attached))
         if slot.status == "in_progress":
             in_flight.append(item)
