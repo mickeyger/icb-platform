@@ -4,8 +4,8 @@
  * STEP 2: read-only list. STEP 3: the first row-action — "Link a job" (retrofit-link), reusing the §3.5c
  * atomic-link chokepoint. Soft-delete / merge actions land in STEP 4 / 6. */
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { AlertTriangle, RefreshCw, ExternalLink, X, Trash2 } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { AlertTriangle, RefreshCw, ExternalLink, X, Trash2, GitMerge } from 'lucide-react'
 
 import { apiGet, apiPost, apiDelete, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
@@ -19,6 +19,7 @@ interface OrphanChassis {
 
 export function OrphanChassisAdmin() {
   const toast = useToast()
+  const nav = useNavigate()
   const [rows, setRows] = useState<OrphanChassis[]>([])
   const [loading, setLoading] = useState(true)
   const [linkTarget, setLinkTarget] = useState<OrphanChassis | null>(null)     // STEP 3 retrofit-link
@@ -78,6 +79,10 @@ export function OrphanChassisAdmin() {
                     <button data-testid={`orphan-link-${r.id}`} onClick={() => setLinkTarget(r)}
                             className="mr-3 rounded-md border border-line px-2 py-1 text-xs font-semibold text-primary hover:bg-surface-alt">
                       Link a job
+                    </button>
+                    <button data-testid={`orphan-merge-${r.id}`} onClick={() => nav(`/admin/merge-chassis?loser=${r.id}`)}
+                            className="mr-3 inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-semibold text-primary hover:bg-surface-alt">
+                      <GitMerge size={12} /> Merge
                     </button>
                     <button data-testid={`orphan-delete-${r.id}`} onClick={() => setDeleteTarget(r)}
                             className="mr-3 inline-flex items-center gap-1 rounded-md border border-status-red/40 px-2 py-1 text-xs font-semibold text-status-red hover:bg-status-red/5">

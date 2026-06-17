@@ -9,7 +9,7 @@ renumbering the loser's cycles ABOVE the winner's max (history preserved, photos
 STEP 5 ships preview_merge (read-only dry-run). merge_chassis (STEP 6) + restore_chassis (STEP 7) land next.
 """
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.models.mes import ChassisLifecycleEvent, ChassisRecord, PrejobCard, ProductionJob
@@ -45,7 +45,10 @@ def renumber_plan(db: Session, loser_id: int, winner_id: int):
         .where(ChassisLifecycleEvent.chassis_record_id == loser_id)).all()
     if not any((c, t) in winner_keys for c, t in loser_events):
         return [], {}
-    cycle_map = {c: winner_max + c for c in sorted({c for c, _ in loser_events})}
+    # Rank-based shift (sign-robust): loser cycles → winner_max+1, +2, … in order. Above the winner's
+    # range AND sequential, so it can't re-collide even if a loser cycle is 0/negative (winner_max+c could).
+    loser_cycles = sorted({c for c, _ in loser_events})
+    cycle_map = {c: winner_max + i + 1 for i, c in enumerate(loser_cycles)}
     collisions = [{"cycle_number": c, "event_type": t, "new_cycle_number": cycle_map[c]}
                   for c, t in loser_events if (c, t) in winner_keys]
     return collisions, cycle_map
@@ -76,7 +79,7 @@ def preview_merge(db: Session, loser_id: int, winner_id: int) -> dict:
                        .where(PrejobCard.chassis_record_id == loser_id)).scalar() or 0
     loser_events = _event_count(db, loser_id)
     winner_events = _event_count(db, winner_id)
-    collisions, _ = renumber_plan(db, loser_id, winner_id)
+    collisions, cycle_map = renumber_plan(db, loser_id, winner_id)
     if collisions:
         warnings.append(f"{len(collisions)} lifecycle event(s) collide on cycle/type — the loser's cycles "
                         "will be renumbered above the winner's to preserve both histories.")
@@ -99,7 +102,80 @@ def preview_merge(db: Session, loser_id: int, winner_id: int) -> dict:
         "winner": _summary(winner, winner_events),
         "repoint_counts": {"production_jobs": jobs, "prejob_cards": cards, "lifecycle_events": loser_events},
         "event_collisions": collisions,
+        # full cycle remap (not just the colliding events) so the preview shows exactly what the merge applies
+        "cycles_renumbered": [{"from": c, "to": n} for c, n in sorted(cycle_map.items())],
         "vin_conflict": vin_conflict,
         "warnings": warnings,
         "blocking": blocking,
     }
+
+
+def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
+    """WO v4.36a §3.6 STEP 6 — merge the LOSER chassis INTO the WINNER, one transaction:
+      1) renumber the loser's colliding lifecycle cycles (renumber_plan) + re-point its events to the winner;
+      2) re-point the loser's production_jobs + prejob_cards to the winner (no UNIQUE on chassis_record_id —
+         multi-cycle consolidation is the reality; calculation_record_id (1:1) is untouched, so its UNIQUE
+         can't be violated);
+      3) reconcile a blank winner.job_number from a surviving job (provenance only);
+      4) SOFT-DELETE the loser (deleted_at + merged_into_id=winner) — NEVER hard-delete (production_jobs FK
+         is RESTRICT; events are CASCADE — a hard delete would be blocked / would destroy history).
+    Photos ride the lifecycle-event FK (no separate re-point). ChassisIntegrityError → 409 via the handler."""
+    from sqlalchemy.exc import IntegrityError
+    loser = db.get(ChassisRecord, loser_id)
+    winner = db.get(ChassisRecord, winner_id)
+    if loser is None or winner is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if loser_id == winner_id:
+        raise ci.ChassisIntegrityError("Winner and loser are the same chassis.", status_code=409)
+    # Lock BOTH rows (ordered by id → deadlock-safe) then re-read, so two concurrent merges serialize and
+    # the deleted-state guards re-check COMMITTED state (mirrors record_planning_ack's with_for_update). A
+    # double-merge of the same loser, or A→B racing B→A, becomes a clean 409 instead of silent corruption.
+    for cid in sorted({loser_id, winner_id}):
+        db.execute(select(ChassisRecord.id).where(ChassisRecord.id == cid).with_for_update())
+    db.refresh(loser)
+    db.refresh(winner)
+    if loser.deleted_at is not None:
+        raise ci.ChassisIntegrityError("Loser is already deleted (a tombstone).", status_code=409)
+    if winner.deleted_at is not None:
+        raise ci.ChassisIntegrityError("Winner is deleted — restore it before merging into it.", status_code=409)
+    try:
+        # 1) renumber colliding loser cycles, then re-point its events to the winner. One ORM pass — each
+        #    new (winner, cycle, event_type) is unique vs the winner and vs the still-on-loser rows, so the
+        #    per-row UPDATEs never transiently violate uq_chassis_events_record_cycle_type.
+        _, cycle_map = renumber_plan(db, loser_id, winner_id)
+        events = db.execute(select(ChassisLifecycleEvent)
+                            .where(ChassisLifecycleEvent.chassis_record_id == loser_id)).scalars().all()
+        for ev in events:
+            if cycle_map:
+                ev.cycle_number = cycle_map.get(ev.cycle_number, ev.cycle_number)
+            ev.chassis_record_id = winner_id
+        db.flush()
+        # 2) re-point jobs + cards (bulk; no uq on chassis_record_id — multi-job consolidation is allowed)
+        jobs_n = db.execute(update(ProductionJob).where(ProductionJob.chassis_record_id == loser_id)
+                            .values(chassis_record_id=winner_id)).rowcount
+        cards_n = db.execute(update(PrejobCard).where(PrejobCard.chassis_record_id == loser_id)
+                             .values(chassis_record_id=winner_id)).rowcount
+        # 3) reconcile a blank winner.job_number from a surviving (now winner-linked) job — provenance only
+        if not (winner.job_number or "").strip():
+            sj = db.execute(select(ProductionJob).where(ProductionJob.chassis_record_id == winner_id)
+                            .order_by(ProductionJob.id.desc())).scalars().first()
+            if sj is not None and sj.job_number:
+                winner.job_number = sj.job_number
+        # 4) flatten any prior chain: tombstones that pointed at THIS loser now resolve straight to the
+        #    winner (A→B then B→C ⇒ A→C), keeping merged_into_id always pointing at a live survivor.
+        db.execute(update(ChassisRecord).where(ChassisRecord.merged_into_id == loser_id)
+                   .values(merged_into_id=winner_id))
+        # 5) soft-delete the loser (audit tombstone) — never hard-delete
+        loser.deleted_at = func.now()
+        loser.merged_into_id = winner_id
+        loser.updated_by = who
+        winner.updated_by = who
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ci.ChassisIntegrityError(
+            "Merge conflicts with existing chassis lifecycle data — review the preview and retry.",
+            status_code=409)
+    db.refresh(winner)
+    return {"winner_id": winner_id, "loser_id": loser_id, "merged_into_id": winner_id,
+            "repointed": {"production_jobs": jobs_n, "prejob_cards": cards_n, "lifecycle_events": len(events)}}

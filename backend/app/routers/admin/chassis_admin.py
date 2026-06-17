@@ -53,3 +53,15 @@ def merge_preview(loser_id: int, winner_id: int,
     """§3.6 STEP 5 — read-only dry-run for the merge confirm modal: repoint counts, the proposed lifecycle
     cycle renumbering, vin_conflict, non-blocking warnings, and a `blocking` flag. No mutation."""
     return chassis_merge.preview_merge(db, loser_id, winner_id)
+
+
+class MergeBody(BaseModel):
+    winner_id: int
+
+
+@router.post("/{loser_id}/merge")
+def merge(loser_id: int, body: MergeBody,
+          db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """§3.6 STEP 6 — merge the loser chassis INTO the winner: re-point all FKs + renumber colliding cycles +
+    soft-delete the loser (deleted_at + merged_into_id). One transaction; ChassisIntegrityError → 409/422."""
+    return chassis_merge.merge_chassis(db, loser_id, body.winner_id, who=user.username)
