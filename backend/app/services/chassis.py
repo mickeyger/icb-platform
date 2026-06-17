@@ -18,7 +18,7 @@ from app.models.mes import (
     AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, ProductionJob,
 )
 from app.schemas.chassis import (
-    ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut,
+    ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
 )
 from app.services import file_store
 
@@ -345,6 +345,29 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
     db.commit()
     db.refresh(rec)
     return rec
+
+
+def retrofit_link(db: Session, chassis_id: int, job_id: int, who: str) -> ChassisRecord:
+    """WO v4.36a §3.6 — admin recovery: link an ORPHAN chassis to an unlinked job. Reuses the §3.5c
+    atomic-link chokepoint (update_chassis UNLINKED→LINK): validates the job (422 if unknown), refuses an
+    already-taken job (409), sets the FK + stamps job_number in one txn. Adopts the job's customer when the
+    orphan has none (so the linked record is §0.9-consistent); a non-blank orphan customer that differs from
+    the job's still 409s. Refuses an already-linked chassis (use Merge to swap) or a soft-deleted tombstone."""
+    from app.services import chassis_integrity as ci
+    rec = db.get(ChassisRecord, chassis_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is not None:
+        raise ci.ChassisIntegrityError("This chassis is deleted — restore it first.", status_code=409)
+    if db.execute(select(ProductionJob.id).where(ProductionJob.chassis_record_id == chassis_id)).first():
+        raise ci.ChassisIntegrityError(
+            "Chassis is already linked to a job. Use Merge Chassis to swap.", status_code=409)
+    payload = {"production_job_id": job_id}
+    if not (rec.customer_name or "").strip():                     # fill a blank orphan customer from the job
+        job_cust = _job_customer_name(db, ci.validate_job_link(db, job_id))
+        if job_cust:
+            payload["customer_name"] = job_cust
+    return update_chassis(db, chassis_id, ChassisRecordUpdate(**payload), who)
 
 
 def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecord:

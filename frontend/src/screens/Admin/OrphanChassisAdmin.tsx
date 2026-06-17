@@ -1,14 +1,16 @@
-/** WO v4.36a §3.6 STEP 2 — admin Find Orphan Chassis (READ-ONLY). Lists LIVE chassis with no
- * production-job and no pre-job-card FK (the authoritative WIDE FK-anchorless set, ANY status — the
- * MICKEYTEST class). Merged chassis (soft-deleted) are excluded. Row recovery actions (retrofit-link /
- * soft-delete / merge) land incrementally in STEP 3 / 4 / 6 — no ghost affordances until then. */
+/** WO v4.36a §3.6 — admin Find Orphan Chassis. Lists LIVE chassis with no production-job and no
+ * pre-job-card FK (the authoritative WIDE FK-anchorless set, ANY status — the MICKEYTEST class). Merged
+ * (soft-deleted) chassis are excluded.
+ * STEP 2: read-only list. STEP 3: the first row-action — "Link a job" (retrofit-link), reusing the §3.5c
+ * atomic-link chokepoint. Soft-delete / merge actions land in STEP 4 / 6. */
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, RefreshCw, ExternalLink } from 'lucide-react'
+import { AlertTriangle, RefreshCw, ExternalLink, X } from 'lucide-react'
 
-import { apiGet, handleApiError } from '../../lib/api'
+import { apiGet, apiPost, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
 import { Spinner, EmptyState } from '../../components/ui/feedback'
+import { type UnlinkedJob } from '../Chassis/chassisShared'
 
 interface OrphanChassis {
   id: number; vin: string | null; make: string | null; status: string
@@ -19,6 +21,7 @@ export function OrphanChassisAdmin() {
   const toast = useToast()
   const [rows, setRows] = useState<OrphanChassis[]>([])
   const [loading, setLoading] = useState(true)
+  const [linkTarget, setLinkTarget] = useState<OrphanChassis | null>(null)   // STEP 3 retrofit-link
 
   const load = useCallback(() => {
     setLoading(true)
@@ -44,7 +47,7 @@ export function OrphanChassisAdmin() {
       </div>
       <p className="mb-3 text-xs text-muted">
         Live chassis with no production-job and no pre-job-card link (any status). Merged chassis are
-        excluded. Recovery actions (link a job · soft-delete · merge) arrive in the next steps.
+        excluded. Link an orphan to its job below; soft-delete + merge actions arrive in the next steps.
       </p>
       {loading ? (
         <div className="flex justify-center py-10"><Spinner size={24} /></div>
@@ -70,7 +73,11 @@ export function OrphanChassisAdmin() {
                   <td className="px-3 py-2">{r.status}</td>
                   <td className="px-3 py-2">{(r.created_via || '—').replace(/_/g, ' ')}</td>
                   <td className="px-3 py-2 text-muted">{r.created_source_ref || '—'}</td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="whitespace-nowrap px-3 py-2 text-right">
+                    <button data-testid={`orphan-link-${r.id}`} onClick={() => setLinkTarget(r)}
+                            className="mr-3 rounded-md border border-line px-2 py-1 text-xs font-semibold text-primary hover:bg-surface-alt">
+                      Link a job
+                    </button>
                     <Link to={`/chassis/${r.id}`} className="inline-flex items-center gap-1 text-primary hover:underline">
                       Open <ExternalLink size={12} />
                     </Link>
@@ -84,6 +91,79 @@ export function OrphanChassisAdmin() {
           </div>
         </div>
       )}
+      {linkTarget && (
+        <RetrofitLinkModal orphan={linkTarget} onClose={() => setLinkTarget(null)}
+                           onLinked={() => { setLinkTarget(null); load() }} />
+      )}
+    </div>
+  )
+}
+
+/** STEP 3 — link an orphan chassis to an unlinked job via POST /api/admin/chassis/{id}/retrofit-link.
+ * The backend reuses the §3.5c atomic-link chokepoint; a customer mismatch / already-taken job → 409. */
+function RetrofitLinkModal({ orphan, onClose, onLinked }: {
+  orphan: OrphanChassis; onClose: () => void; onLinked: () => void
+}) {
+  const toast = useToast()
+  const [jobs, setJobs] = useState<UnlinkedJob[]>([])
+  const [jobId, setJobId] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    apiGet<UnlinkedJob[]>('/api/production-jobs/unlinked').then(setJobs).catch(() => setJobs([]))
+  }, [])
+
+  async function link() {
+    if (jobId == null) { toast.push({ kind: 'error', message: 'Pick a job to link.' }); return }
+    setSaving(true)
+    try {
+      await apiPost(`/api/admin/chassis/${orphan.id}/retrofit-link`, { production_job_id: jobId })
+      toast.push({ kind: 'ok', message: 'Chassis linked to job.' })
+      onLinked()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.push({ kind: 'warn', message: e.detail || 'That job conflicts with this chassis.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div data-testid="orphan-link-modal" onClick={(e) => e.stopPropagation()}
+           className="w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-body">Link chassis to a job</h3>
+          <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={18} /></button>
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          Chassis <span className="font-mono">{orphan.vin || `#${orphan.id}`}</span>
+          {orphan.customer_name ? ` · ${orphan.customer_name}` : ''} → pick an unlinked job. The job's
+          customer must match (a blank chassis customer adopts it). Sets the real FK link atomically.
+        </p>
+        <label className="block text-xs"><span className="font-semibold text-muted">Link to job</span>
+          <select data-testid="orphan-link-job" value={jobId ?? ''}
+                  onChange={(e) => setJobId(e.target.value ? Number(e.target.value) : null)}
+                  className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
+            <option value="">— select a job —</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.job_number || `#${j.id}`}{j.customer ? ` · ${j.customer}` : ''}{j.body_type ? ` · ${j.body_type}` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-md border border-line py-2.5 text-sm font-semibold">Cancel</button>
+          <button data-testid="orphan-link-save" onClick={link} disabled={saving || jobId == null}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+            {saving ? <Spinner size={16} /> : null} Link job
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
