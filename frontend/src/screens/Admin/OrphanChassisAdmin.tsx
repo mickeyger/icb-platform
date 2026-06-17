@@ -5,9 +5,9 @@
  * atomic-link chokepoint. Soft-delete / merge actions land in STEP 4 / 6. */
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, RefreshCw, ExternalLink, X } from 'lucide-react'
+import { AlertTriangle, RefreshCw, ExternalLink, X, Trash2 } from 'lucide-react'
 
-import { apiGet, apiPost, ApiError, handleApiError } from '../../lib/api'
+import { apiGet, apiPost, apiDelete, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
 import { Spinner, EmptyState } from '../../components/ui/feedback'
 import { type UnlinkedJob } from '../Chassis/chassisShared'
@@ -21,7 +21,8 @@ export function OrphanChassisAdmin() {
   const toast = useToast()
   const [rows, setRows] = useState<OrphanChassis[]>([])
   const [loading, setLoading] = useState(true)
-  const [linkTarget, setLinkTarget] = useState<OrphanChassis | null>(null)   // STEP 3 retrofit-link
+  const [linkTarget, setLinkTarget] = useState<OrphanChassis | null>(null)     // STEP 3 retrofit-link
+  const [deleteTarget, setDeleteTarget] = useState<OrphanChassis | null>(null) // STEP 4 soft-delete
 
   const load = useCallback(() => {
     setLoading(true)
@@ -78,6 +79,10 @@ export function OrphanChassisAdmin() {
                             className="mr-3 rounded-md border border-line px-2 py-1 text-xs font-semibold text-primary hover:bg-surface-alt">
                       Link a job
                     </button>
+                    <button data-testid={`orphan-delete-${r.id}`} onClick={() => setDeleteTarget(r)}
+                            className="mr-3 inline-flex items-center gap-1 rounded-md border border-status-red/40 px-2 py-1 text-xs font-semibold text-status-red hover:bg-status-red/5">
+                      <Trash2 size={12} /> Delete
+                    </button>
                     <Link to={`/chassis/${r.id}`} className="inline-flex items-center gap-1 text-primary hover:underline">
                       Open <ExternalLink size={12} />
                     </Link>
@@ -94,6 +99,10 @@ export function OrphanChassisAdmin() {
       {linkTarget && (
         <RetrofitLinkModal orphan={linkTarget} onClose={() => setLinkTarget(null)}
                            onLinked={() => { setLinkTarget(null); load() }} />
+      )}
+      {deleteTarget && (
+        <SoftDeleteModal orphan={deleteTarget} onClose={() => setDeleteTarget(null)}
+                         onDeleted={() => { setDeleteTarget(null); load() }} />
       )}
     </div>
   )
@@ -161,6 +170,62 @@ function RetrofitLinkModal({ orphan, onClose, onLinked }: {
           <button data-testid="orphan-link-save" onClick={link} disabled={saving || jobId == null}
                   className="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary py-2.5 text-sm font-semibold text-white disabled:opacity-50">
             {saving ? <Spinner size={16} /> : null} Link job
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** STEP 4 — soft-delete a JUNK orphan via DELETE /api/admin/chassis/{id}?reason=. Reversible (no
+ * merged_into_id); the backend refuses if a live job / card / lifecycle-event still references it (409). */
+function SoftDeleteModal({ orphan, onClose, onDeleted }: {
+  orphan: OrphanChassis; onClose: () => void; onDeleted: () => void
+}) {
+  const toast = useToast()
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function del() {
+    setSaving(true)
+    try {
+      const qs = reason.trim() ? `?reason=${encodeURIComponent(reason.trim())}` : ''
+      await apiDelete(`/api/admin/chassis/${orphan.id}${qs}`)
+      toast.push({ kind: 'ok', message: 'Chassis soft-deleted (reversible via restore).' })
+      onDeleted()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        toast.push({ kind: 'warn', message: e.detail || 'This chassis can’t be deleted yet.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div data-testid="orphan-delete-modal" onClick={(e) => e.stopPropagation()}
+           className="w-full max-w-md rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-body">Soft-delete chassis</h3>
+          <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={18} /></button>
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          Soft-delete <span className="font-mono">{orphan.vin || `#${orphan.id}`}</span> as junk. It drops
+          out of the chassis list + orphan view but stays navigable by id and is reversible via restore.
+          Refused if a live job / card / lifecycle event still references it.
+        </p>
+        <label className="block text-xs"><span className="font-semibold text-muted">Reason (optional)</span>
+          <textarea data-testid="orphan-delete-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+                    placeholder="e.g. duplicate test row" className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" />
+        </label>
+        <div className="mt-4 flex gap-2">
+          <button onClick={onClose} className="flex-1 rounded-md border border-line py-2.5 text-sm font-semibold">Cancel</button>
+          <button data-testid="orphan-delete-confirm" onClick={del} disabled={saving}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-md bg-status-red py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+            {saving ? <Spinner size={16} /> : <Trash2 size={14} />} Soft-delete
           </button>
         </div>
       </div>

@@ -35,3 +35,12 @@ def retrofit_link(chassis_id: int, body: RetrofitLinkBody,
     via the §3.5c chokepoint). ChassisIntegrityError → 409/422 via the global handler."""
     chassis_svc.retrofit_link(db, chassis_id, body.production_job_id, who=user.username)
     return chassis_svc.get_detail(db, chassis_id)
+
+
+@router.delete("/{chassis_id}", response_model=ChassisRecordDetail)
+def soft_delete(chassis_id: int, reason: str | None = None,
+                db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """§3.6 STEP 4 — soft-delete a JUNK orphan (deliberate, reversible; no merged_into_id). Refuses if a
+    live job / card / lifecycle-event still references it (409). The optional reason is appended to notes."""
+    chassis_svc.soft_delete_chassis(db, chassis_id, who=user.username, reason=reason)
+    return chassis_svc.get_detail(db, chassis_id)

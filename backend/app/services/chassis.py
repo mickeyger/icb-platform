@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Customer            # WO v4.34.1 §3.4 — cross-schema dealer-name resolve
 from app.models.mes import (
-    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, ProductionJob,
+    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, PrejobCard, ProductionJob,
 )
 from app.schemas.chassis import (
     ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
@@ -368,6 +368,43 @@ def retrofit_link(db: Session, chassis_id: int, job_id: int, who: str) -> Chassi
         if job_cust:
             payload["customer_name"] = job_cust
     return update_chassis(db, chassis_id, ChassisRecordUpdate(**payload), who)
+
+
+def soft_delete_chassis(db: Session, chassis_id: int, who: str, reason: "str | None" = None) -> ChassisRecord:
+    """WO v4.36a §3.6 STEP 4 — soft-delete a genuine JUNK orphan: a deliberate deletion (NOT a merge — no
+    merged_into_id), reversible via restore (STEP 7). Refuses if ANY LIVE FK still references the chassis:
+      • a production_job  → use Merge Chassis, or unlink first (would orphan the job);
+      • a prejob_card     → resolve that first;
+      • a lifecycle_event → the chassis has history, so it isn't junk — Merge Chassis preserves+re-points it.
+    jobs/cards/events carry NO deleted_at (existence == live); the only soft-deletable table is
+    chassis_records, already excluded by the STEP 1 read guards. Already-deleted → 409."""
+    from app.services import chassis_integrity as ci
+    rec = db.get(ChassisRecord, chassis_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is not None:
+        raise ci.ChassisIntegrityError("This chassis is already deleted.", status_code=409)
+    job = db.execute(select(ProductionJob.id, ProductionJob.job_number)
+                     .where(ProductionJob.chassis_record_id == chassis_id)).first()
+    if job is not None:
+        raise ci.ChassisIntegrityError(
+            f"Chassis is still linked to job {job.job_number or job.id} — use Merge Chassis, or unlink first.",
+            status_code=409)
+    if db.execute(select(PrejobCard.id).where(PrejobCard.chassis_record_id == chassis_id)).first():
+        raise ci.ChassisIntegrityError(
+            "Chassis is still referenced by a Pre-Job card — resolve that first.", status_code=409)
+    if db.execute(select(ChassisLifecycleEvent.id)
+                  .where(ChassisLifecycleEvent.chassis_record_id == chassis_id)).first():
+        raise ci.ChassisIntegrityError(
+            "Chassis has lifecycle history — it isn't junk. Use Merge Chassis to preserve the history.",
+            status_code=409)
+    rec.deleted_at = func.now()
+    rec.updated_by = who
+    if reason and reason.strip():
+        rec.notes = ((rec.notes + "\n") if rec.notes else "") + f"[soft-deleted §3.6: {reason.strip()}]"
+    db.commit()
+    db.refresh(rec)
+    return rec
 
 
 def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecord:
