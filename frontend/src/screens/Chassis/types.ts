@@ -62,6 +62,10 @@ export interface ChassisRecordDetail extends ChassisRecord {
   linked_job_id?: number | null
   linked_job_number?: string | null
   linked_customer?: string | null
+  // WO v4.36a §3.6 STEP 7 — tombstone state (soft-deleted / merged); drives the detail banner + Restore.
+  deleted_at?: string | null
+  merged_into_id?: number | null
+  merged_into_vin?: string | null
   events: ChassisEvent[]
 }
 

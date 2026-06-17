@@ -3,7 +3,7 @@
  * permission-gated (admin sees both); the backend enforces chassis.vcl / chassis.dcl regardless. */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X } from 'lucide-react'
+import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X, RotateCcw, AlertTriangle } from 'lucide-react'
 
 import { apiGet, apiPatch, apiPost, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
@@ -96,6 +96,7 @@ export function ChassisDetail() {
   const [capture, setCapture] = useState<'VCL' | 'DCL' | null>(null)
   const [editing, setEditing] = useState(false)
   const [capturingVin, setCapturingVin] = useState(false)
+  const [restoring, setRestoring] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -104,6 +105,23 @@ export function ChassisDetail() {
       .catch((e) => handleApiError(e, toast.push))
       .finally(() => setLoading(false))
   }, [id, toast])
+
+  // WO v4.36a §3.6 STEP 7 — restore a soft-deleted / merged tombstone (admin only; clears deleted_at +
+  // merged_into_id, does NOT re-point FKs).
+  async function restore() {
+    if (!rec) return
+    setRestoring(true)
+    try {
+      await apiPatch(`/api/admin/chassis/${rec.id}/restore`, {})
+      toast.push({ kind: 'ok', message: 'Chassis restored.' })
+      load()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) toast.push({ kind: 'warn', message: e.detail || 'Can’t restore.' })
+      else handleApiError(e, toast.push)
+    } finally {
+      setRestoring(false)
+    }
+  }
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -136,6 +154,27 @@ export function ChassisDetail() {
         <ArrowLeft size={14} /> Back to chassis
       </Link>
 
+      {/* §3.6 STEP 7 — tombstone banner: a soft-deleted / merged chassis is navigable by id but hidden from
+          lists; admins can restore it (clears deleted_at + merged_into_id, no FK re-point). */}
+      {rec.deleted_at && (
+        <div data-testid="chassis-tombstone" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-status-red/40 bg-status-red/10 px-3 py-2 text-sm text-status-red">
+          <span className="flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            {rec.merged_into_id
+              ? <>This chassis was <b>merged into</b>{' '}
+                  <Link to={`/chassis/${rec.merged_into_id}`} className="font-mono underline">{rec.merged_into_vin || `#${rec.merged_into_id}`}</Link>.</>
+              : <>This chassis was <b>soft-deleted</b>.</>}
+            {' '}It’s hidden from lists (kept for audit).
+          </span>
+          {isAdmin && (
+            <button data-testid="chassis-restore" onClick={restore} disabled={restoring}
+                    className="flex items-center gap-1.5 rounded-md border border-status-red bg-white px-3 py-1.5 text-xs font-semibold text-status-red hover:bg-status-red/5 disabled:opacity-50">
+              {restoring ? <Spinner size={14} /> : <RotateCcw size={14} />} Restore
+            </button>
+          )}
+        </div>
+      )}
+
       <Card className="mb-4 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h1 className="flex flex-wrap items-center gap-2 text-lg font-bold text-body">
@@ -163,7 +202,8 @@ export function ChassisDetail() {
           <Field label="Origin ref" value={rec.created_source_ref} />
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {canEdit && (
+          {/* §3.6 STEP 7 — no mutating actions on a tombstone (restore via the banner first) */}
+          {!rec.deleted_at && canEdit && (
             <button data-testid="chassis-edit" onClick={() => setEditing(true)}
                     className="flex items-center gap-1.5 rounded-md border border-line px-4 py-2.5 text-sm font-semibold text-body hover:bg-surface-alt">
               <Pencil size={16} /> Edit details

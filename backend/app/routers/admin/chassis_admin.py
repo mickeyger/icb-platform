@@ -65,3 +65,11 @@ def merge(loser_id: int, body: MergeBody,
     """§3.6 STEP 6 — merge the loser chassis INTO the winner: re-point all FKs + renumber colliding cycles +
     soft-delete the loser (deleted_at + merged_into_id). One transaction; ChassisIntegrityError → 409/422."""
     return chassis_merge.merge_chassis(db, loser_id, body.winner_id, who=user.username)
+
+
+@router.patch("/{chassis_id}/restore", response_model=ChassisRecordDetail)
+def restore(chassis_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """§3.6 STEP 7 — un-soft-delete a chassis (clear deleted_at + merged_into_id). Reverses a junk
+    soft-delete or an accidental merge; does NOT auto-re-point FKs. 409 if not deleted / VIN clash."""
+    chassis_merge.restore_chassis(db, chassis_id, who=user.username)
+    return chassis_svc.get_detail(db, chassis_id)

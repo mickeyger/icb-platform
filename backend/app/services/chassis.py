@@ -161,6 +161,9 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
         detail.linked_job_id = linked_job.id
         detail.linked_job_number = linked_job.job_number
         detail.linked_customer = _job_customer_name(db, linked_job)
+    if rec.merged_into_id:                            # §3.6 STEP 7 — resolve the survivor's VIN for the banner
+        survivor = db.get(ChassisRecord, rec.merged_into_id)
+        detail.merged_into_vin = survivor.vin if survivor else None
     if rec.status == "in_assembly":                  # current bay derived from the latest event (§0.12)
         aa = [e for e in events if e.event_type == "assembly_assigned"]
         detail.current_assembly_bay_id = max(aa, key=lambda e: e.id).assembly_bay_id if aa else None

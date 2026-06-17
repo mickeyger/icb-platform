@@ -179,3 +179,23 @@ def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
     db.refresh(winner)
     return {"winner_id": winner_id, "loser_id": loser_id, "merged_into_id": winner_id,
             "repointed": {"production_jobs": jobs_n, "prejob_cards": cards_n, "lifecycle_events": len(events)}}
+
+
+def restore_chassis(db: Session, chassis_id: int, who: str) -> ChassisRecord:
+    """WO v4.36a §3.6 STEP 7 — un-soft-delete a chassis: clear deleted_at + merged_into_id. Reverses a junk
+    soft-delete (STEP 4) or an accidental merge (STEP 6). Does NOT auto-re-point FKs — a merge moved them to
+    the winner, so the operator re-links/merges explicitly. Guards a VIN clash (a LIVE chassis may have
+    taken the VIN since the soft-delete; rare under the all-rows uq, but the check keeps the contract)."""
+    rec = db.get(ChassisRecord, chassis_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is None:
+        raise ci.ChassisIntegrityError("This chassis is not deleted — nothing to restore.", status_code=409)
+    if rec.vin:
+        ci.validate_vin_uniqueness(db, rec.vin, exclude_id=chassis_id)   # 409 if a live chassis now holds it
+    rec.deleted_at = None
+    rec.merged_into_id = None
+    rec.updated_by = who
+    db.commit()
+    db.refresh(rec)
+    return rec

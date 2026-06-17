@@ -67,6 +67,12 @@ class ChassisRecordDetail(ChassisRecordOut):
     linked_job_id: Optional[int] = None
     linked_job_number: Optional[str] = None
     linked_customer: Optional[str] = None
+    # WO v4.36a §3.6 STEP 7 — tombstone state (a soft-deleted/merged chassis stays navigable by id). Drives
+    # the detail-page banner + Restore affordance. deleted_at/merged_into_id auto-fill from the row;
+    # merged_into_vin is resolved in get_detail.
+    deleted_at: Optional[datetime] = None
+    merged_into_id: Optional[int] = None
+    merged_into_vin: Optional[str] = None
     events: List[ChassisEventOut] = []
 
 
