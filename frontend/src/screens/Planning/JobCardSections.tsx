@@ -8,6 +8,7 @@
 // identical for every role; only the column render is conditional (BA lock 2026-06-10). A null
 // unit_price (unresolved BOM line) renders an em-dash, never "null"/"0.00".
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Camera, ClipboardList, MapPin, Package, Truck } from 'lucide-react'
 import { apiGet, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
@@ -93,6 +94,11 @@ export function JobCardSections({ jobId }: { jobId: number }) {
         <SectionHead icon={<Truck size={13} />} label="Chassis" />
         {chassis ? (
           <div className="space-y-2 text-sm">
+            {/* WO v4.36a §3.5d Patch 1 — jump to the full Chassis page (same-tab); only when linked */}
+            <Link to={`/chassis/${chassis.id}`} data-testid="jobcard-open-chassis"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+              Open Chassis page →
+            </Link>
             <div className="flex flex-wrap items-baseline justify-between gap-1">
               <span className="font-mono text-xs font-semibold">{chassis.vin}</span>
               <span className="text-xs text-muted">{[chassis.make, chassis.model].filter(Boolean).join(' ') || ''}</span>

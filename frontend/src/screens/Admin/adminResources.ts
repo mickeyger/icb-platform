@@ -148,6 +148,24 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
     fields: [],
     custom: true,
   },
+  // WO v4.36a §3.6 — Find Orphan Chassis (custom read-only list; recovery actions added incrementally).
+  'orphan-chassis': {
+    key: 'orphan-chassis',
+    title: 'Find Orphan Chassis',
+    basePath: '/api/admin/chassis/orphans',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
+  // WO v4.36a §3.6 — Merge Chassis (custom: loser/winner pickers → preview → confirm merge).
+  'merge-chassis': {
+    key: 'merge-chassis',
+    title: 'Merge Chassis',
+    basePath: '/api/admin/chassis',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
 }
 
-export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers']
+export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']

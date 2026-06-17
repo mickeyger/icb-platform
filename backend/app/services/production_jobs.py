@@ -272,6 +272,70 @@ def _auto_create_chassis_at_ack(db: Session, job: ProductionJob,
     job.chassis_record_id = chassis.id
 
 
+def list_unlinked_jobs(db: Session) -> list[dict]:
+    """WO v4.36a §0.6 — production jobs with no chassis linked yet (chassis_record_id IS NULL), for the
+    Add-Chassis job dropdown. Excludes terminal jobs. Returns {id, job_number, customer, body_type}."""
+    from app.database import CalculationRecord, Customer
+    rows = db.execute(
+        select(ProductionJob.id, ProductionJob.job_number, Customer.name, CalculationRecord.dimensions_json)
+        .select_from(ProductionJob)
+        .outerjoin(CalculationRecord, CalculationRecord.id == ProductionJob.calculation_record_id)
+        .outerjoin(Customer, Customer.id == CalculationRecord.customer_id)
+        .where(ProductionJob.chassis_record_id.is_(None),
+               ProductionJob.status.notin_(("completed", "dispatched", "cancelled")))
+        .order_by(ProductionJob.job_number)
+    ).all()
+    out = []
+    for jid, jn, cust, dims in rows:
+        body_type = None
+        if dims:
+            try:
+                body_type = (json.loads(dims) or {}).get("body_type")
+            except (ValueError, TypeError):
+                body_type = None
+        out.append({"id": jid, "job_number": jn, "customer": cust, "body_type": body_type})
+    return out
+
+
+def chassis_prefill(db: Session, job_id: int) -> dict:
+    """WO v4.36a §3.5b — prefill data for the Add-Chassis modal when a job is selected: the customer +
+    anything already captured UPSTREAM (chassis type / dealer / VIN at Pre-Job or Planning-Ack), reading
+    production_jobs + the linked prejob_card + the linked chassis. Each field is None unless captured."""
+    from app.database import CalculationRecord, Customer
+    from app.models.mes import ChassisRecord, PrejobCard
+    job = db.get(ProductionJob, job_id)
+    if job is None:
+        raise NotFoundError(f"production job {job_id} not found")
+    customer_name = customer_id = None
+    card = None
+    if job.calculation_record_id:
+        calc = db.get(CalculationRecord, job.calculation_record_id)
+        if calc and calc.customer_id:
+            c = db.get(Customer, calc.customer_id)
+            if c:
+                customer_name, customer_id = c.name, c.id
+        card = db.execute(
+            select(PrejobCard).where(PrejobCard.calculation_id == job.calculation_record_id)
+            .order_by(PrejobCard.id.desc())).scalars().first()
+    chassis = db.get(ChassisRecord, job.chassis_record_id) if job.chassis_record_id else None
+    chassis_type = (chassis.make if chassis and chassis.make else None) \
+        or (card.chassis_make_model if card and card.chassis_make_model else None)
+    vin_number = (chassis.vin if chassis and chassis.vin else None) \
+        or (card.vin_number if card and card.vin_number else None)
+    vin_source = None
+    if vin_number:
+        vin_source = (chassis.vin_source if chassis and chassis.vin else None) \
+            or ("pre_job_card" if card and card.vin_number else None)
+    dealer_id = chassis.dealer_id if chassis else None
+    dealer_name = (db.get(Customer, dealer_id).name if dealer_id and db.get(Customer, dealer_id) else None)
+    return {"customer_name": customer_name, "customer_id": customer_id, "chassis_type": chassis_type,
+            "dealer_id": dealer_id, "dealer_name": dealer_name, "vin_number": vin_number,
+            "vin_source": vin_source,
+            # §3.5e — the job's Delivery ETA (production_jobs.chassis_eta) as a YYYY-MM-DD string, for the
+            # Add-Chassis modal's ETA auto-populate.
+            "chassis_eta": (job.chassis_eta.date().isoformat() if job.chassis_eta else None)}
+
+
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                         notes: Optional[str], user, chassis_data: Optional[dict] = None,
                         job_number: Optional[str] = None) -> JobRow:
@@ -327,22 +391,29 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
     # Pre-Job Card OR captured here when the card left it blank. No-op when no chassis is linked; never
     # overwrites an existing VIN, and skips a value already anchoring another chassis
     # (uq_chassis_records_vin) so the ack can't fail on a VIN clash.
+    from app.services import chassis_integrity as ci   # lazy — chassis_integrity imports ServiceError from here
     if job.chassis_record_id:
         chassis = db.get(ChassisRecord, job.chassis_record_id)
         if chassis is not None:
             if job.job_number:
                 chassis.job_number = job.job_number
-            vin = (((chassis_data or {}).get("chassis_vin")) or "").strip()[:32]
+            # WO v4.36a §0.5 — VIN format validated (422 on bad format), clash no longer SILENTLY swallowed:
+            # write-once NULL→value with a 409 on clash; a DIFFERENT VIN presented for a chassis that already
+            # has one is surfaced (409), not dropped.
+            vin = ci.validate_vin_format((chassis_data or {}).get("chassis_vin"))
             if vin and not chassis.vin:
-                clash = db.execute(select(ChassisRecord.id).where(
-                    ChassisRecord.vin == vin, ChassisRecord.id != chassis.id)).first()
-                if not clash:
-                    chassis.vin = vin
-            # WO v4.34.1 §0.3 — stamp the planner's chosen chassis supplier onto the linked chassis.
-            # Explicit planner choice → last-write wins; None (field absent) leaves it untouched.
+                ci.validate_vin_uniqueness(db, vin, exclude_id=chassis.id)        # 409 on clash (was silent)
+                chassis.vin = vin
+                chassis.vin_source = chassis.vin_source or "planning_ack"
+            elif vin and chassis.vin and ci.normalize_vin(vin) != chassis.vin:
+                raise ci.ChassisIntegrityError(
+                    f"VIN {ci.normalize_vin(vin)} differs from this chassis's VIN {chassis.vin}. "
+                    "Use Merge Chassis to swap the chassis.", status_code=409)
+            # WO v4.34.1 §0.3 / v4.36a §0.5 — stamp the planner's chosen supplier, validated as a dealer
+            # (is_dealer=true → 422 otherwise). Explicit choice → last-write wins; None leaves it untouched.
             dealer_id = (chassis_data or {}).get("dealer_id")
             if dealer_id is not None:
-                chassis.dealer_id = int(dealer_id)
+                chassis.dealer_id = ci.validate_dealer(db, dealer_id)
             chassis.updated_by = actor
     job.status = "planning"
     # hotfix (fix/prejob-card-status-sync) — keep the costing's status in lock-step so the Costings

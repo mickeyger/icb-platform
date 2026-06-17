@@ -18,7 +18,7 @@ import {
   type RepairPhaseInsertion,
   type StatusName,
 } from '../data/costingsData'
-import { apiGet, apiPost, handleApiError, mesAutoLogin } from '../lib/api'
+import { apiGet, apiPost, ApiError, handleApiError, mesAutoLogin } from '../lib/api'
 import { useToast } from '../components/ui/toast'
 import { useAppData } from './AppDataContext'
 
@@ -212,7 +212,14 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         await apiPost(`/api/production-jobs/${id}/${path}`, body)
         await refetch()
       } catch (e) {
-        handleApiError(e, toast.push)
+        // WO v4.36a §0.5 — a VIN clash / dealer / customer conflict from the planning-ack now returns 409
+        // with remediation text; surface it as a toast here (handleApiError re-throws 409 for blocking-modal
+        // callers — this path wants the legible message inline, not a modal).
+        if (e instanceof ApiError && e.status === 409) {
+          toast.push({ kind: 'warn', message: e.detail || 'That conflicts with the current chassis state.' })
+        } else {
+          handleApiError(e, toast.push)
+        }
       }
     },
     [refetch, toast],

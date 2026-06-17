@@ -61,12 +61,32 @@ class ChassisRecordDetail(ChassisRecordOut):
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # WO v4.36a §3.5c — the AUTHORITATIVE job link (production_jobs.chassis_record_id back-reference), filled
+    # by get_detail. Drives the Edit modal: linked → job_number read-only ("swap via Merge"); unlinked → the
+    # job dropdown. NOT chassis_records.job_number (free-text/non-unique legacy provenance — not a link).
+    linked_job_id: Optional[int] = None
+    linked_job_number: Optional[str] = None
+    linked_customer: Optional[str] = None
+    # WO v4.36a §3.6 STEP 7 — tombstone state (a soft-deleted/merged chassis stays navigable by id). Drives
+    # the detail-page banner + Restore affordance. deleted_at/merged_into_id auto-fill from the row;
+    # merged_into_vin is resolved in get_detail.
+    deleted_at: Optional[datetime] = None
+    merged_into_id: Optional[int] = None
+    merged_into_vin: Optional[str] = None
+    chassis_eta: Optional[date] = None              # WO v4.36a §3.5e — the LINKED job's ETA (get_detail fills it)
     events: List[ChassisEventOut] = []
 
 
 class ChassisRecordCreate(BaseModel):
     vin: str
     job_number: Optional[str] = None
+    # WO v4.36a §0.6/§0.7 — the selected job to link (from the unlinked-jobs dropdown; atomically sets
+    # production_jobs.chassis_record_id) + the supplying dealer (validated is_dealer=true).
+    production_job_id: Optional[int] = None
+    dealer_id: Optional[int] = None
+    # WO v4.36a §3.5e — Delivery ETA. There is NO chassis_eta column; it persists onto the LINKED job's
+    # production_jobs.chassis_eta (the §0.13 single source, set at Planning Ack). Ignored if no job linked.
+    chassis_eta: Optional[date] = None
     customer_name: Optional[str] = None
     contact_person: Optional[str] = None
     telephone: Optional[str] = None
@@ -78,6 +98,13 @@ class ChassisRecordCreate(BaseModel):
 
 class ChassisRecordUpdate(BaseModel):
     job_number: Optional[str] = None
+    # WO v4.36a §3.5c — when the chassis is UNLINKED, the Edit modal sends the selected job here to
+    # atomically set production_jobs.chassis_record_id (mirrors create). Ignored for a LINKED chassis
+    # (job_number is read-only there — swap via admin Merge Chassis), so the edit door can't re-point a link.
+    production_job_id: Optional[int] = None
+    # WO v4.36a §3.5e — Delivery ETA → persists onto the linked job's production_jobs.chassis_eta (popped
+    # before the setattr loop — chassis_records has no chassis_eta column).
+    chassis_eta: Optional[date] = None
     customer_name: Optional[str] = None
     contact_person: Optional[str] = None
     telephone: Optional[str] = None
@@ -86,6 +113,16 @@ class ChassisRecordUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+
+class ChassisCreateResult(BaseModel):
+    """WO v4.36a §0.8 — the Add-Chassis result envelope. `adopted` = the VIN matched an existing live chassis
+    and the selected job was linked to it (the frontend then shows the AdoptionNotificationModal with
+    `message` + `chassis`); otherwise a fresh chassis (or a placeholder updated in-place) was created."""
+    chassis: ChassisRecordDetail
+    adopted: bool = False
+    adopted_chassis_id: Optional[int] = None
+    message: Optional[str] = None
 
 
 class ChassisVinCapture(BaseModel):

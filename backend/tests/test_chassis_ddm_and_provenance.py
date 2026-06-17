@@ -28,7 +28,7 @@ def test_manual_create_sets_provenance():
     from app.models.mes import ChassisRecord
     from app.schemas.chassis import ChassisRecordCreate
     from app.services import chassis as svc
-    vin = "P437TESTVIN0001"
+    vin = "P437TESTVN0000001"   # WO v4.36a — conformant 17-char ISO-3779 (was 'P437TESTVIN0001')
     with SessionLocal() as db:
         db.query(ChassisRecord).filter(ChassisRecord.vin == vin).delete()
         db.commit()
@@ -52,11 +52,11 @@ def test_provenance_serialises_in_list():
     from app.models.mes import ChassisRecord
     from app.schemas.chassis import ChassisRecordCreate
     from app.services import chassis as svc
-    vin = "P437TESTVIN0002"
+    vin = "P437TESTVN0000002"   # WO v4.36a — conformant 17-char ISO-3779 (was 'P437TESTVIN0002')
     with SessionLocal() as db:
         db.query(ChassisRecord).filter(ChassisRecord.vin == vin).delete()
         db.commit()
-        rid = svc.create_chassis(db, ChassisRecordCreate(vin=vin), who="admin").id
+        rid = svc.create_chassis(db, ChassisRecordCreate(vin=vin, make="Isuzu"), who="admin").id
         try:
             rows = svc.list_chassis(db, q=vin)
             assert rows and rows[0].created_via == "manual_chassis_menu"

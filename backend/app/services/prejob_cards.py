@@ -118,26 +118,50 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
     propagates so the whole submit rolls back atomically (the chassis is the pipeline foundation,
     unlike the cosmetic PDF snapshot)."""
     make_model = (card.chassis_make_model or "").strip()[:64]   # chassis.make is VARCHAR(64); the card field is 128
+    # WO v4.36a §0.4 — validate + propagate the Pre-Job-attested VIN to the chassis (was dropped: vin=None).
+    # Write-time-only strict format (422 on bad format); NULL/blank exempt ('expected' carry NULL until VCL).
+    from app.services import chassis_integrity as ci
+    # WO v4.36a §0.4 — propagate the card VIN to the chassis ONLY when it's strict-conforming; a
+    # legacy/inherited non-conforming card VIN is NOT re-validated here (D-VIN: never re-validate stored
+    # rows) and never 422s the submit. The interactive format gate lives in update_card (the VIN edit).
+    raw = ci.normalize_vin(card.vin_number)
+    vin = raw if (raw and ci.VIN_RE.match(raw)) else None
     if card.chassis_record_id is not None:
         ch = db.get(ChassisRecord, card.chassis_record_id)      # sync an auto-created 'expected' row with card edits
         if ch is not None and ch.created_via == "pre_job_card" and ch.status == "expected":
             if make_model:
                 ch.make = make_model
             ch.body_gap_mm = card.body_gap_mm
+            if vin and not ch.vin:                              # §0.4 propagation — write-once NULL→value
+                ci.validate_vin_uniqueness(db, vin, exclude_id=ch.id)
+                ch.vin = vin
+                ch.vin_source = ch.vin_source or "pre_job_card"
         return                                             # already linked — idempotent (sync only, no new row)
     if not make_model:
         return                                             # §3.2 case 2 — empty make/model: graceful no-op
     job = _job_for_calc(db, card.calculation_id)
+    if vin:                                                # §0.8 — a known VIN already on a live chassis → adopt it
+        existing_vin = ci.resolve_existing_chassis(db, vin)
+        if existing_vin is not None:
+            card.chassis_record_id = existing_vin.id
+            if job is not None and job.chassis_record_id is None:
+                job.chassis_record_id = existing_vin.id
+            return
     existing = _chassis_for_job(db, job)
     if existing is not None:                               # §3.2 case A4 — adopt the job's chassis, don't duplicate
         card.chassis_record_id = existing.id
-        if existing.created_via == "pre_job_card" and existing.status == "expected" and make_model:
-            existing.make = make_model                     # keep an auto-created 'expected' row synced
+        if existing.created_via == "pre_job_card" and existing.status == "expected":
+            if make_model:
+                existing.make = make_model                 # keep an auto-created 'expected' row synced
+            if vin and not existing.vin:                   # §0.4 — propagate VIN onto the adopted 'expected' row
+                ci.validate_vin_uniqueness(db, vin, exclude_id=existing.id)
+                existing.vin = vin
+                existing.vin_source = existing.vin_source or "pre_job_card"
         return                                             # (real/foreign chassis: job wins, no sync — §3.2 review #3)
     calc = db.get(CalculationRecord, card.calculation_id)
     from app.services.chassis import create_expected_chassis
     chassis = create_expected_chassis(                     # §0.5 shared insert (identical at §3.3)
-        db, make=make_model, vin=None,                     # §3.2 case 3 — VIN unknown until VCL receive
+        db, make=make_model, vin=vin,                      # §0.4 — propagate the attested VIN (was vin=None)
         body_gap_mm=card.body_gap_mm, created_via="pre_job_card",
         created_source_ref=_source_ref(calc, card), who=getattr(user, "username", None))
     card.chassis_record_id = chassis.id
@@ -300,18 +324,40 @@ def update_card(db: Session, card_id: int, data: dict, user) -> PrejobCard:
     unknown = set(data) - _DRAFT_EDITABLE
     if unknown:
         raise HTTPException(status_code=422, detail=f"not editable: {', '.join(sorted(unknown))}")
-    if "template_id" in data and data["template_id"] is not None:
-        tpl = db.get(PrejobTemplate, data["template_id"])
-        if tpl is None or not tpl.is_active:
-            raise HTTPException(status_code=422, detail="template not found or not approved")
-        # switching template re-seeds the sections from it (the modal confirms first)
-        card.sections = copy.deepcopy(tpl.sections)
-        card.body_description = tpl.header_format or tpl.name
+    if data.get("vin_number"):
+        # WO v4.36a §0.4 — strict VIN format at the interactive edit (the capture point — a freshly typed
+        # bad VIN is rejected 422 here); the normalized value is stored. NULL/blank clears it (allowed).
+        from app.services import chassis_integrity as ci
+        data["vin_number"] = ci.validate_vin_format(data["vin_number"])
+    # Apply the plain field edits FIRST so a subsequent template re-seed substitutes against the LATEST
+    # header (vin / chassis / fridge), and so the template's sections always win over any stale payload.
     for k, v in data.items():
         if k != "template_id":
             setattr(card, k, v)
     if "body_gap_mm" in data:
         card.body_gap_pending = data["body_gap_mm"] is None
+    if data.get("template_id") is not None:
+        tpl = db.get(PrejobTemplate, data["template_id"])
+        if tpl is None or not tpl.is_active:
+            raise HTTPException(status_code=422, detail="template not found or not approved")
+        # WO v4.36a §3.5d — switching template re-seeds the sections + header, THEN applies the SAME token
+        # substitution CREATE does (else the re-seed ships raw {{tokens}} — the §3.0-discovery catch). The
+        # modal refreshes inline, NO confirm (Michael's call). UNLIKE create we substitute fridge tokens too
+        # (the card may already have a fridge selected at edit-time) — mirrors the PDF-render sweep.
+        from app.models.mes import FridgeUnit
+        from app.services.template_variables import build_context, substitute_sections, substitute_text
+        card.template_id = tpl.id                         # §3.5d — record the switch (else template_id/_name go stale)
+        card.sections = copy.deepcopy(tpl.sections)
+        card.body_description = tpl.header_format or tpl.name
+        fridge = (db.execute(select(FridgeUnit).where(FridgeUnit.display_name == card.fridge_model))
+                  .scalars().first() if card.fridge_model else None)
+        ctx = build_context(
+            db, card,
+            calc=db.get(CalculationRecord, card.calculation_id) if card.calculation_id else None,
+            chassis=db.get(ChassisRecord, card.chassis_record_id) if card.chassis_record_id else None,
+            fridge=fridge)
+        card.sections = substitute_sections(card.sections, ctx)
+        card.body_description = substitute_text(card.body_description, ctx) or card.body_description
     card.version = (card.version or 1) + 1
     db.commit()
     db.refresh(card)

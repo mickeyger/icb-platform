@@ -72,6 +72,7 @@ from .routers.admin import (  # WO v4.26 — admin CRUD for the 4 master-data ta
 )
 from .routers.admin import prejob_templates as _r_admin_prejob_templates  # WO v4.33 §3.3
 from .routers.admin import fridge_units as _r_admin_fridge_units  # WO v4.33 — fridge DDM
+from .routers.admin import chassis_admin as _r_admin_chassis  # WO v4.36a §3.6 — Merge / Find Orphan
 from .routers import auth as _r_auth, trailers as _r_trailers
 from .routers import skin_taping as _r_skin_taping, calculator as _r_calculator
 from .routers import health as _r_health, formulas as _r_formulas
@@ -128,6 +129,15 @@ async def _admin_validation_handler(request: Request, exc: AdminValidationError)
 @app.exception_handler(AdminConflictError)
 async def _admin_conflict_handler(request: Request, exc: AdminConflictError):
     return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+# WO v4.36a §0.13 — chassis-integrity validation failures carry their own HTTP status (422 / 409).
+from .services.chassis_integrity import ChassisIntegrityError  # noqa: E402
+
+
+@app.exception_handler(ChassisIntegrityError)
+async def _chassis_integrity_handler(request: Request, exc: ChassisIntegrityError):
+    return JSONResponse({"detail": str(exc)}, status_code=getattr(exc, "status_code", 422))
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 # CORS for the Icecold Bodies MES React mockup (Vite dev 5173, Vite preview 4173).
 # Lets the mockup fetch /api/calculations + the new pre-job-card endpoints during
@@ -190,6 +200,7 @@ app.include_router(_r_admin_spec_options.router)
 app.include_router(_r_admin_spec_options.search_router)
 app.include_router(_r_admin_prejob_templates.router)  # WO v4.33 §3.3 — template review/approve
 app.include_router(_r_admin_fridge_units.router)  # WO v4.33 — fridge DDM CRUD
+app.include_router(_r_admin_chassis.router)  # WO v4.36a §3.6 — admin Merge / Find Orphan chassis
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered

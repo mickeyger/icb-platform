@@ -6,13 +6,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Truck, Search, Plus, X } from 'lucide-react'
 
-import { apiGet, apiPost, handleApiError } from '../../lib/api'
+import { apiGet, apiPost, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { Card } from '../../components/ui/primitives'
 import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisRecord } from './types'
 import { ChassisModelSelect } from './ChassisModelSelect'
+import { DealerSelect } from './DealerSelect'
+import { type UnlinkedJob, type ChassisPrefill, VIN_PROVENANCE, VIN_RE, FilledBadge } from './chassisShared'
+
+interface ChassisCreateResult {
+  chassis: { id: number; vin: string | null; customer_name: string | null; make: string | null }
+  adopted: boolean
+  adopted_chassis_id: number | null
+  message: string | null
+}
 
 function StatusPill({ status }: { status: string }) {
   const cls = CHASSIS_STATUS_STYLE[status] ?? 'bg-surface-alt text-muted'
@@ -103,7 +112,7 @@ export function ChassisList() {
         {q && <button onClick={() => setQ('')} className="text-xs text-muted hover:text-body">clear</button>}
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-1.5" data-testid="chassis-status-filters">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="chassis-status-filters">
         {STATUS_CHIPS.map((chip) => {
           const active = statusFilter === chip.key
           const n = chip.key ? (counts[chip.key] ?? 0) : rows.length
@@ -115,6 +124,13 @@ export function ChassisList() {
             </button>
           )
         })}
+        {/* WO v4.36a §3.6 — the chip is a display filter; the authoritative FK-based orphan view is admin-only */}
+        {isAdmin && (
+          <button data-testid="chassis-review-orphans" onClick={() => nav('/admin/orphan-chassis')}
+                  className="ml-auto rounded-full px-3 py-1 text-xs font-semibold text-primary hover:underline">
+            Review orphans →
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -188,31 +204,111 @@ export function ChassisList() {
 
 /** WO v4.34 §3.7 — manual chassis create (planner / admin). Make/model comes from the DDM dropdown
  * (no free-text); the backend stamps created_via='manual_chassis_menu'. */
+// WO v4.36a §0.8 — informational modal shown when a typed VIN matched an existing live chassis and the
+// selected job was AUTO-ADOPTED onto it (no duplicate created). Single [Got it]; no Cancel (already done).
+function AdoptionNotificationModal({ result, onClose }: { result: ChassisCreateResult; onClose: () => void }) {
+  const ch = result.chassis
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+         data-testid="adoption-modal" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-bold text-body">VIN already on record — chassis adopted</h3>
+        <p className="mt-2 text-sm text-muted" data-testid="adoption-message">{result.message}</p>
+        <div className="mt-3 rounded-md border border-line bg-surface-alt/40 p-2 text-xs">
+          <div className="font-mono font-semibold text-body">{ch.vin}</div>
+          <div className="text-muted">{ch.customer_name || '—'}{ch.make ? ` · ${ch.make}` : ''}</div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button data-testid="adoption-got-it" onClick={onClose}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark">
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const toast = useToast()
   const [vin, setVin] = useState('')
   const [customer, setCustomer] = useState('')
   const [make, setMake] = useState('')
-  const [jobNumber, setJobNumber] = useState('')
+  const [jobId, setJobId] = useState<number | null>(null)
+  const [dealerId, setDealerId] = useState<number | null>(null)
+  const [dealerName, setDealerName] = useState('')
+  const [eta, setEta] = useState('')                  // §3.5e — Delivery ETA (persists onto the linked job)
+  const [jobs, setJobs] = useState<UnlinkedJob[]>([])
+  const [prefilled, setPrefilled] = useState<Set<string>>(new Set())
+  const [vinReadOnly, setVinReadOnly] = useState(false)
+  const [vinProvenance, setVinProvenance] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [adoption, setAdoption] = useState<ChassisCreateResult | null>(null)
+
+  useEffect(() => {
+    // §0.6 — the job dropdown lists only jobs with no chassis linked yet.
+    apiGet<UnlinkedJob[]>('/api/production-jobs/unlinked').then(setJobs).catch(() => setJobs([]))
+  }, [])
+
+  // §3.5b — selecting a job prefills customer + anything captured upstream (PJ/AJ); the VIN is read-only
+  // when already captured (§0.3 write-once — fix a wrong VIN via admin Merge Chassis, not here).
+  useEffect(() => {
+    if (jobId == null) { setPrefilled(new Set()); setVinReadOnly(false); setVinProvenance(null); setEta(''); return }
+    let live = true
+    apiGet<ChassisPrefill>(`/api/production-jobs/${jobId}/chassis-prefill`).then((p) => {
+      if (!live) return
+      const filled = new Set<string>()
+      if (p.customer_name) { setCustomer(p.customer_name); filled.add('customer') }
+      if (p.chassis_type) { setMake(p.chassis_type); filled.add('make') }
+      if (p.dealer_id != null) { setDealerId(p.dealer_id); setDealerName(p.dealer_name ?? ''); filled.add('dealer') }
+      if (p.chassis_eta) { setEta(p.chassis_eta); filled.add('eta') }      // §3.5e — ETA from the job
+      if (p.vin_number) {
+        setVin(p.vin_number); filled.add('vin')
+        if (VIN_RE.test(p.vin_number)) {                 // lock only a conforming captured VIN
+          setVinReadOnly(true); setVinProvenance(VIN_PROVENANCE[p.vin_source ?? ''] ?? 'upstream')
+        } else {                                          // legacy/non-conforming → editable so it can be fixed
+          setVinReadOnly(false); setVinProvenance(null)
+        }
+      } else { setVinReadOnly(false); setVinProvenance(null) }
+      setPrefilled(filled)
+    }).catch(() => {})
+    return () => { live = false }
+  }, [jobId])
 
   async function save() {
     if (!vin.trim()) { toast.push({ kind: 'error', message: 'VIN is required.' }); return }
+    if (!make.trim()) { toast.push({ kind: 'error', message: 'Chassis type is required.' }); return }
     setSaving(true)
     try {
-      await apiPost('/api/chassis-records', {
-        vin: vin.trim(), customer_name: customer.trim() || null,
-        make: make.trim() || null, job_number: jobNumber.trim() || null,
+      const result = await apiPost<ChassisCreateResult>('/api/chassis-records', {
+        vin: vin.trim(), customer_name: customer.trim() || null, make: make.trim() || null,
+        production_job_id: jobId, dealer_id: dealerId,
+        chassis_eta: jobId != null ? (eta || null) : null,   // §3.5e — only the linked job can hold an ETA
       })
-      toast.push({ kind: 'ok', message: `Chassis ${vin.trim()} created.` })
-      onCreated()
+      if (result.adopted) {
+        setAdoption(result)                 // §0.8 — surface the adoption before closing
+      } else {
+        toast.push({ kind: 'ok', message: `Chassis ${result.chassis.vin} created.` })
+        onCreated(); onClose()
+      }
     } catch (e) {
-      handleApiError(e, toast.push)
+      // §0.5/§0.9 — 409 (VIN clash / customer mismatch / job already has a chassis) surfaces inline with
+      // remediation (handleApiError re-throws 409 for blocking-modal callers); 422 etc. via handleApiError.
+      if (e instanceof ApiError && e.status === 409) {
+        toast.push({ kind: 'warn', message: e.detail || 'That conflicts with the current chassis state.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
     } finally {
       setSaving(false)
     }
   }
 
+  if (adoption) {
+    return <AdoptionNotificationModal result={adoption} onClose={() => { onCreated(); onClose() }} />
+  }
+
+  const filledBg = (k: string) => (prefilled.has(k) ? ' bg-status-green/5' : '')
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
       <div data-testid="chassis-create-form" onClick={(e) => e.stopPropagation()}
@@ -222,25 +318,59 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
           <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={20} /></button>
         </div>
         <div className="space-y-3">
+          {/* 1 — Link to job (first; drives the prefill, matching the AJ External-Chassis pattern) */}
           <label className="block text-xs">
-            <span className="font-semibold text-muted">VIN <span className="text-status-red">*</span></span>
-            <input data-testid="chassis-create-vin" value={vin} onChange={(e) => setVin(e.target.value)}
-                   placeholder="Vehicle ID / VIN"
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" />
+            <span className="font-semibold text-muted">Link to job</span>
+            <select data-testid="chassis-create-job" value={jobId ?? ''}
+                    onChange={(e) => setJobId(e.target.value ? Number(e.target.value) : null)}
+                    className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
+              <option value="">— no job (enter manually) —</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.job_number || `#${j.id}`}{j.customer ? ` · ${j.customer}` : ''}{j.body_type ? ` · ${j.body_type}` : ''}
+                </option>
+              ))}
+            </select>
           </label>
+          {/* 2 — Customer (auto-fills from the job; editable — a mismatch is caught server-side §0.9) */}
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Customer</span>
+            <span className="font-semibold text-muted">Customer{prefilled.has('customer') && <FilledBadge />}</span>
             <input data-testid="chassis-create-customer" value={customer} onChange={(e) => setCustomer(e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" />
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm${filledBg('customer')}`} />
           </label>
+          {/* 3 — Chassis type (required; auto-fills from the Pre-Job card) */}
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Chassis type</span>
+            <span className="font-semibold text-muted">Chassis type <span className="text-status-red">*</span>{prefilled.has('make') && <FilledBadge />}</span>
             <ChassisModelSelect testid="chassis-create-make" value={make} onChange={setMake} />
           </label>
+          {/* 4 — Supplying dealer (auto-fills from the Planning ack) */}
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Job number</span>
-            <input data-testid="chassis-create-job" value={jobNumber} onChange={(e) => setJobNumber(e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" />
+            <span className="font-semibold text-muted">Supplying dealer{prefilled.has('dealer') && <FilledBadge />}</span>
+            <DealerSelect value={dealerId} valueName={dealerName}
+                          onChange={(id, name) => { setDealerId(id); setDealerName(name) }}
+                          testid="chassis-create-dealer" />
+          </label>
+          {/* 5 — Delivery ETA (§3.5e; persists onto the LINKED job — disabled until a job is selected) */}
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">Delivery ETA{prefilled.has('eta') && <FilledBadge />}</span>
+            <input type="date" data-testid="chassis-create-eta" value={eta} onChange={(e) => setEta(e.target.value)}
+                   disabled={jobId == null}
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm disabled:bg-surface-alt${filledBg('eta')}`} />
+            <span className="mt-1 block text-[10px] text-muted">
+              {jobId == null ? 'Links to the job’s ETA — select a job above to capture it.' : 'When will the chassis arrive at Icecold?'}
+            </span>
+          </label>
+          {/* 6 — VIN (required; READ-ONLY once captured upstream — §0.3 write-once) */}
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">VIN <span className="text-status-red">*</span>{prefilled.has('vin') && <FilledBadge />}</span>
+            <input data-testid="chassis-create-vin" value={vin} onChange={(e) => setVin(e.target.value)}
+                   disabled={vinReadOnly} placeholder="17 characters — no I, O or Q"
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt${filledBg('vin')}`} />
+            {vinReadOnly && (
+              <span data-testid="chassis-create-vin-locked" className="mt-1 block text-[10px] text-muted">
+                Captured at {vinProvenance} — locked. Use admin Merge Chassis to correct a wrong VIN.
+              </span>
+            )}
           </label>
         </div>
         <div className="mt-4 flex gap-2">

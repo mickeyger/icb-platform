@@ -18,7 +18,7 @@ JOURNEY = "prejob_ack_lock"
 LOCKED_JOB = "94350"        # card attests make + VIN → both lock read-only
 VINOPEN_JOB = "94351"       # card attests make, NO VIN → type locks, VIN editable (the §3.9 refine)
 CHASSIS = "Hino 300 815"    # a seeded DDM entry (migration 0021)
-ATTESTED_VIN = "J434DVIN00001"
+ATTESTED_VIN = "J434DVN0000000001"   # WO v4.36a — conformant 17-char ISO-3779 (was 'J434DVIN00001')
 
 
 def _purge(db) -> None:

@@ -15,10 +15,10 @@ from sqlalchemy.orm import Session
 
 from app.database import Customer            # WO v4.34.1 §3.4 — cross-schema dealer-name resolve
 from app.models.mes import (
-    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, ProductionJob,
+    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, PrejobCard, ProductionJob,
 )
 from app.schemas.chassis import (
-    ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut,
+    ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
 )
 from app.services import file_store
 
@@ -81,7 +81,7 @@ def _dealer_names(db: Session, dealer_ids) -> dict:
 
 
 def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> list[ChassisRecordOut]:
-    stmt = select(ChassisRecord)
+    stmt = select(ChassisRecord).where(ChassisRecord.deleted_at.is_(None))   # §3.6 STEP 1 — hide soft-deleted (merged) losers
     if status:
         stmt = stmt.where(ChassisRecord.status == status)
     if q:
@@ -154,6 +154,17 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     detail.event_count = len(events)
     detail.latest_event_date = max((e.event_date for e in events if e.event_date), default=None)
     detail.dealer_name = _dealer_names(db, [rec.dealer_id]).get(rec.dealer_id)   # §3.4 — cross-schema resolve
+    # §3.5c — the authoritative job link (back-reference); drives the Edit modal's read-only-vs-dropdown choice.
+    linked_job = db.execute(
+        select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
+    if linked_job is not None:
+        detail.linked_job_id = linked_job.id
+        detail.linked_job_number = linked_job.job_number
+        detail.linked_customer = _job_customer_name(db, linked_job)
+        detail.chassis_eta = linked_job.chassis_eta.date() if linked_job.chassis_eta else None  # §3.5e
+    if rec.merged_into_id:                            # §3.6 STEP 7 — resolve the survivor's VIN for the banner
+        survivor = db.get(ChassisRecord, rec.merged_into_id)
+        detail.merged_into_vin = survivor.vin if survivor else None
     if rec.status == "in_assembly":                  # current bay derived from the latest event (§0.12)
         aa = [e for e in events if e.event_type == "assembly_assigned"]
         detail.current_assembly_bay_id = max(aa, key=lambda e: e.id).assembly_bay_id if aa else None
@@ -166,19 +177,117 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     return detail
 
 
+def _job_customer_name(db: Session, job) -> "str | None":
+    """Best-effort customer name for a production job (job → calc → customer), for §0.9 consistency."""
+    if job is None or not getattr(job, "calculation_record_id", None):
+        return None
+    from app.database import CalculationRecord, Customer
+    calc = db.get(CalculationRecord, job.calculation_record_id)
+    cid = getattr(calc, "customer_id", None) if calc else None
+    cust = db.get(Customer, cid) if cid else None
+    return cust.name if cust else None
+
+
+def _stamp_job_eta(job, eta_date, who: str) -> None:
+    """WO v4.36a §3.5e — record a chassis Delivery ETA onto its production job (the §0.13 single ETA
+    source: production_jobs.chassis_eta, mirroring record_planning_ack's stamp). eta_date=None clears it."""
+    from app.services.production_jobs import _now, _to_dt
+    job.chassis_eta = _to_dt(eta_date)
+    job.chassis_eta_captured_at = _now() if eta_date is not None else None
+    job.chassis_eta_captured_by = who if eta_date is not None else None
+
+
+def _assert_customer_ok(data: dict, rec: ChassisRecord, job_customer: "str | None") -> None:
+    """WO v4.36a §0.9 — the (possibly edited) customer must stay consistent with the linked job. A blank
+    CLEAR is rejected when the job asserts a customer (the edit modal always sends customer_name, so a
+    cleared field would otherwise short-circuit the consistency check AND wipe a name the job still owns);
+    a non-blank mismatch is a 409 via validate_customer_consistency."""
+    from app.services import chassis_integrity as ci
+    if job_customer and "customer_name" in data and not (data["customer_name"] or "").strip():
+        raise ci.ChassisIntegrityError(
+            f"Customer can't be cleared — it must stay consistent with the linked job ({job_customer}).",
+            status_code=409)
+    ci.validate_customer_consistency(data.get("customer_name", rec.customer_name), job_customer)
+
+
 def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
-    vin = (payload.vin or "").strip()
-    if not vin:
-        raise HTTPException(status_code=422, detail="vin is required")
-    if db.execute(select(ChassisRecord.id).where(ChassisRecord.vin == vin)).first():
-        raise HTTPException(status_code=409, detail=f"chassis with VIN {vin} already exists")
-    rec = ChassisRecord(vin=vin[:32], source="manual", status="received",
-                        created_via="manual_chassis_menu",       # WO v4.34 §0.4 — provenance
-                        created_by=who, updated_by=who,
-                        **payload.model_dump(exclude={"vin"}, exclude_none=True))
+    """WO v4.36a §0.6/§0.7 — Add-Chassis with full integrity: strict VIN format + uniqueness, required
+    make/model, validated dealer, customer-consistency, and the ATOMIC job link (the MICKEYTEST fix —
+    sets production_jobs.chassis_record_id in the same transaction). If the selected job already carries a
+    LIVE placeholder chassis, MERGE-INTO-PLACEHOLDER (update-in-place) — never a duplicate row, never an
+    FK-swap that would strand the placeholder as an anchorless 'expected' chassis (§3.0 concern ii)."""
+    from app.services import chassis_integrity as ci
+    vin = ci.validate_vin_format(payload.vin)                    # 422 on bad format
+    if vin is None:
+        raise ci.ChassisIntegrityError("VIN is required", status_code=422)
+    make = (payload.make or "").strip()
+    if not make:
+        raise ci.ChassisIntegrityError("Chassis make/model is required", status_code=422)
+    dealer_id = ci.validate_dealer(db, getattr(payload, "dealer_id", None))
+    job = ci.validate_job_link(db, getattr(payload, "production_job_id", None))
+    if job is not None and getattr(payload, "chassis_eta", None) is not None:
+        _stamp_job_eta(job, payload.chassis_eta, who)           # §3.5e — Delivery ETA onto the linked job
+    existing = ci.resolve_existing_chassis(db, vin)              # §0.8 — does this VIN already live somewhere?
+    if job is not None:                                          # §0.9 — customer consistency (vs whoever we'd link)
+        ci.validate_customer_consistency(
+            (existing.customer_name if existing is not None else payload.customer_name),
+            _job_customer_name(db, job))
+    # §0.8 AUTO-ADOPT — the VIN already belongs to a LIVE chassis: link the job to it (don't mint a duplicate)
+    # and flag the result so the router raises the AdoptionNotificationModal. 409 only on a genuine conflict.
+    if existing is not None:
+        if job is None:
+            raise ci.ChassisIntegrityError(
+                f"VIN {vin} is already on chassis {existing.id} (customer {existing.customer_name or '—'}). "
+                "Open that chassis, or pick a job to link it to.", status_code=409)
+        if job.chassis_record_id not in (None, existing.id):
+            raise ci.ChassisIntegrityError(
+                f"Job {job.job_number or job.id} already has a different chassis. Use Merge Chassis to swap.",
+                status_code=409)
+        if job.chassis_record_id is None:
+            job.chassis_record_id = existing.id                 # adopt — link the job to the existing chassis
+        existing.updated_by = who
+        db.commit()
+        db.refresh(existing)
+        existing.adopted = True                                 # transient signal (§0.8) → AdoptionNotificationModal
+        return existing
+    # §0.6 MERGE-INTO-PLACEHOLDER (update-in-place): VIN is NEW + the job already has a live placeholder →
+    # stamp the real VIN/make onto it rather than minting a duplicate or FK-swapping (which would orphan it).
+    if job is not None and job.chassis_record_id is not None:
+        ph = db.get(ChassisRecord, job.chassis_record_id)
+        if ph is not None and ph.deleted_at is None:
+            if ph.vin and ci.normalize_vin(ph.vin) != vin:
+                raise ci.ChassisIntegrityError(
+                    f"Job {job.job_number or job.id} already has chassis VIN {ph.vin}. "
+                    "Use Merge Chassis to swap the chassis.", status_code=409)
+            ph.vin = vin                                        # VIN is new (existing is None) → unique-safe
+            ph.vin_source = ph.vin_source or "chassis_page_manual"
+            ph.make = make
+            if payload.customer_name:
+                ph.customer_name = payload.customer_name
+            if dealer_id is not None:
+                ph.dealer_id = dealer_id
+            if ph.status == "expected":
+                ph.status = "received"                          # the placeholder now has a real chassis
+            ph.updated_by = who
+            db.commit()
+            db.refresh(ph)
+            ph.adopted = False
+            return ph
+    # Fresh chassis + atomic job link in ONE transaction (no partial-failure orphan — §3.0 atomicity note).
+    rec = ChassisRecord(
+        vin=vin, make=make, status="received", source="manual", created_via="manual_chassis_menu",
+        vin_source="chassis_page_manual", customer_name=payload.customer_name,
+        contact_person=payload.contact_person, telephone=payload.telephone, model=payload.model,
+        description=payload.description, notes=payload.notes, dealer_id=dealer_id,
+        job_number=(job.job_number if job is not None else payload.job_number),
+        created_by=who, updated_by=who)
     db.add(rec)
+    db.flush()                                                   # id for the FK link, same txn
+    if job is not None:
+        job.chassis_record_id = rec.id                           # THE MICKEYTEST fix — atomic job↔chassis link
     db.commit()
     db.refresh(rec)
+    rec.adopted = False
     return rec
 
 
@@ -208,12 +317,112 @@ def create_expected_chassis(db: Session, *, make, vin, body_gap_mm, created_via,
 
 
 def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRecord:
+    """WO v4.36a §3.5c — link-aware edit chokepoint (the ADR-0024 guard on the EDIT door, symmetric with
+    create_chassis so the edit modal can't be a MICKEYTEST-class bypass). The job↔chassis link is
+    authoritative on production_jobs.chassis_record_id:
+      • LINKED  → the FK + denormalised job_number are read-only here (the payload's production_job_id /
+                  job_number are dropped); the edit door never re-points a link (that's admin Merge), and a
+                  customer edit must stay §0.9-consistent with the linked job.
+      • UNLINKED → LINK (payload.production_job_id set, chassis currently unlinked) → after validating the
+                  job + customer-consistency, ATOMICALLY set production_jobs.chassis_record_id and stamp
+                  rec.job_number from the real job (clearing any stale free-text — closes the §3.0 FK-drift).
+      • UNLINKED, no job selected → legacy behaviour (free-text job_number passes through)."""
+    from app.services import chassis_integrity as ci
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="chassis record not found")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    job_id = data.pop("production_job_id", None)         # never a ChassisRecord column
+    eta_sent = "chassis_eta" in data                     # §3.5e — ETA lives on the linked job, not the chassis
+    eta_val = data.pop("chassis_eta", None)
+    linked_job = db.execute(
+        select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
+    link_to = None
+    if linked_job is not None:                           # LINKED — FK/job_number immutable here (swap = Merge)
+        data.pop("job_number", None)
+        _assert_customer_ok(data, rec, _job_customer_name(db, linked_job))
+    elif job_id is not None:                             # UNLINKED → LINK (mirror create's atomic FK link)
+        if rec.deleted_at is not None:
+            raise ci.ChassisIntegrityError(
+                "This chassis is deleted — restore it before linking a job.", status_code=409)
+        job = ci.validate_job_link(db, job_id)           # 422 if unknown
+        if job.chassis_record_id not in (None, record_id):
+            raise ci.ChassisIntegrityError(
+                f"Job {job.job_number or job.id} already has a different chassis. Use Merge Chassis to swap.",
+                status_code=409)
+        _assert_customer_ok(data, rec, _job_customer_name(db, job))
+        data["job_number"] = job.job_number              # stamp from the real job (clears stale free-text)
+        link_to = job
+    # §3.5e — a Delivery ETA edit persists onto the linked job (linked or just-linked); ignored if no job.
+    eta_job = linked_job if linked_job is not None else link_to
+    if eta_sent and eta_job is not None:
+        _stamp_job_eta(eta_job, eta_val, who)
+    for k, v in data.items():
         setattr(rec, k, v)
     rec.updated_by = who
+    if link_to is not None:
+        db.flush()                                       # rec.id stable, same txn — mirror create's atomic link
+        link_to.chassis_record_id = rec.id
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
+def retrofit_link(db: Session, chassis_id: int, job_id: int, who: str) -> ChassisRecord:
+    """WO v4.36a §3.6 — admin recovery: link an ORPHAN chassis to an unlinked job. Reuses the §3.5c
+    atomic-link chokepoint (update_chassis UNLINKED→LINK): validates the job (422 if unknown), refuses an
+    already-taken job (409), sets the FK + stamps job_number in one txn. Adopts the job's customer when the
+    orphan has none (so the linked record is §0.9-consistent); a non-blank orphan customer that differs from
+    the job's still 409s. Refuses an already-linked chassis (use Merge to swap) or a soft-deleted tombstone."""
+    from app.services import chassis_integrity as ci
+    rec = db.get(ChassisRecord, chassis_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is not None:
+        raise ci.ChassisIntegrityError("This chassis is deleted — restore it first.", status_code=409)
+    if db.execute(select(ProductionJob.id).where(ProductionJob.chassis_record_id == chassis_id)).first():
+        raise ci.ChassisIntegrityError(
+            "Chassis is already linked to a job. Use Merge Chassis to swap.", status_code=409)
+    payload = {"production_job_id": job_id}
+    if not (rec.customer_name or "").strip():                     # fill a blank orphan customer from the job
+        job_cust = _job_customer_name(db, ci.validate_job_link(db, job_id))
+        if job_cust:
+            payload["customer_name"] = job_cust
+    return update_chassis(db, chassis_id, ChassisRecordUpdate(**payload), who)
+
+
+def soft_delete_chassis(db: Session, chassis_id: int, who: str, reason: "str | None" = None) -> ChassisRecord:
+    """WO v4.36a §3.6 STEP 4 — soft-delete a genuine JUNK orphan: a deliberate deletion (NOT a merge — no
+    merged_into_id), reversible via restore (STEP 7). Refuses if ANY LIVE FK still references the chassis:
+      • a production_job  → use Merge Chassis, or unlink first (would orphan the job);
+      • a prejob_card     → resolve that first;
+      • a lifecycle_event → the chassis has history, so it isn't junk — Merge Chassis preserves+re-points it.
+    jobs/cards/events carry NO deleted_at (existence == live); the only soft-deletable table is
+    chassis_records, already excluded by the STEP 1 read guards. Already-deleted → 409."""
+    from app.services import chassis_integrity as ci
+    rec = db.get(ChassisRecord, chassis_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is not None:
+        raise ci.ChassisIntegrityError("This chassis is already deleted.", status_code=409)
+    job = db.execute(select(ProductionJob.id, ProductionJob.job_number)
+                     .where(ProductionJob.chassis_record_id == chassis_id)).first()
+    if job is not None:
+        raise ci.ChassisIntegrityError(
+            f"Chassis is still linked to job {job.job_number or job.id} — use Merge Chassis, or unlink first.",
+            status_code=409)
+    if db.execute(select(PrejobCard.id).where(PrejobCard.chassis_record_id == chassis_id)).first():
+        raise ci.ChassisIntegrityError(
+            "Chassis is still referenced by a Pre-Job card — resolve that first.", status_code=409)
+    if db.execute(select(ChassisLifecycleEvent.id)
+                  .where(ChassisLifecycleEvent.chassis_record_id == chassis_id)).first():
+        raise ci.ChassisIntegrityError(
+            "Chassis has lifecycle history — it isn't junk. Use Merge Chassis to preserve the history.",
+            status_code=409)
+    rec.deleted_at = func.now()
+    rec.updated_by = who
+    if reason and reason.strip():
+        rec.notes = ((rec.notes + "\n") if rec.notes else "") + f"[soft-deleted §3.6: {reason.strip()}]"
     db.commit()
     db.refresh(rec)
     return rec
@@ -227,16 +436,19 @@ def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecor
     integrity that v4.34 implemented frontend-only (ADR 0022 footnote): an attested/known VIN can
     never be silently rewritten through this path. Stamps vin_source='chassis_page_manual' for
     provenance, and refuses a value already anchoring another chassis (uq_chassis_records_vin)."""
+    from app.services import chassis_integrity as ci
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="chassis record not found")
-    vin = (vin or "").strip()
-    if not vin:
-        raise HTTPException(status_code=422, detail="vin is required")
+    # WO v4.36a §3.8 (subagent-A hardening) — the 4th write path now enforces the SAME strict ISO-3779
+    # format as create_chassis / update_card / PJ propagation (the §0.13 single-definition-of-valid). A
+    # bad VIN 422s here too; no silent [:32] truncation (a valid VIN is exactly 17).
+    vin = ci.validate_vin_format(vin)
+    if vin is None:
+        raise ci.ChassisIntegrityError("VIN is required", status_code=422)
     if rec.vin:                                            # NULL-state guard — write-once
         raise HTTPException(status_code=409,
                             detail=f"VIN already set ({rec.vin}); it cannot be overwritten from the Chassis page")
-    vin = vin[:32]
     clash = db.execute(select(ChassisRecord.id).where(
         ChassisRecord.vin == vin, ChassisRecord.id != record_id)).first()
     if clash:

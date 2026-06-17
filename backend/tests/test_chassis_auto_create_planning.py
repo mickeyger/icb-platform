@@ -103,13 +103,13 @@ def test_ack_vin_lands_on_chassis_row(staged_job):
     import json
     from app.database import SessionLocal
     from app.models.mes import ProductionJob
-    _ack(staged_job, {"chassis_model": "P434B Scania", "chassis_vin": "P434BVIN0001"})
+    _ack(staged_job, {"chassis_model": "P434B Scania", "chassis_vin": "P434BVN0000000001"})
     crid, ch = _job_chassis(staged_job)
     assert crid is not None
-    assert ch["vin"] == "P434BVIN0001" and ch["make"] == "P434B Scania"   # VIN → chassis row
+    assert ch["vin"] == "P434BVN0000000001" and ch["make"] == "P434B Scania"   # VIN → chassis row
     with SessionLocal() as db:
         cd = json.loads(db.get(ProductionJob, staged_job).chassis_data_json or "{}")
-    assert cd.get("chassis_vin") == "P434BVIN0001"        # still preserved in the job's data
+    assert cd.get("chassis_vin") == "P434BVN0000000001"        # still preserved in the job's data
 
 
 def test_ack_vin_only_no_op(staged_job):
