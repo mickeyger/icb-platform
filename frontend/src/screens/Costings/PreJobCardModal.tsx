@@ -377,7 +377,7 @@ export function PreJobCardModal({
                 </label>
                 <label className="text-xs text-muted">VIN Nr
                   <input value={card.vin_number ?? ''} disabled={!editable}
-                    placeholder="fills at chassis receive (or TBD for complete builds)"
+                    placeholder="17 characters, no I/O/Q (or leave blank until receive)"
                     onChange={(e) => patchCard({ vin_number: e.target.value || null })}
                     className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm text-body disabled:bg-surface-alt" />
                 </label>

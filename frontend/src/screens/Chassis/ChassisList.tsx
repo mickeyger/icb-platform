@@ -13,6 +13,15 @@ import { Card } from '../../components/ui/primitives'
 import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisRecord } from './types'
 import { ChassisModelSelect } from './ChassisModelSelect'
+import { DealerSelect } from './DealerSelect'
+
+interface UnlinkedJob { id: number; job_number: string | null; customer: string | null; body_type: string | null }
+interface ChassisCreateResult {
+  chassis: { id: number; vin: string | null; customer_name: string | null; make: string | null }
+  adopted: boolean
+  adopted_chassis_id: number | null
+  message: string | null
+}
 
 function StatusPill({ status }: { status: string }) {
   const cls = CHASSIS_STATUS_STYLE[status] ?? 'bg-surface-alt text-muted'
@@ -188,29 +197,71 @@ export function ChassisList() {
 
 /** WO v4.34 §3.7 — manual chassis create (planner / admin). Make/model comes from the DDM dropdown
  * (no free-text); the backend stamps created_via='manual_chassis_menu'. */
+// WO v4.36a §0.8 — informational modal shown when a typed VIN matched an existing live chassis and the
+// selected job was AUTO-ADOPTED onto it (no duplicate created). Single [Got it]; no Cancel (already done).
+function AdoptionNotificationModal({ result, onClose }: { result: ChassisCreateResult; onClose: () => void }) {
+  const ch = result.chassis
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+         data-testid="adoption-modal" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-base font-bold text-body">VIN already on record — chassis adopted</h3>
+        <p className="mt-2 text-sm text-muted" data-testid="adoption-message">{result.message}</p>
+        <div className="mt-3 rounded-md border border-line bg-surface-alt/40 p-2 text-xs">
+          <div className="font-mono font-semibold text-body">{ch.vin}</div>
+          <div className="text-muted">{ch.customer_name || '—'}{ch.make ? ` · ${ch.make}` : ''}</div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button data-testid="adoption-got-it" onClick={onClose}
+                  className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark">
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const toast = useToast()
   const [vin, setVin] = useState('')
   const [customer, setCustomer] = useState('')
   const [make, setMake] = useState('')
-  const [jobNumber, setJobNumber] = useState('')
+  const [jobId, setJobId] = useState<number | null>(null)
+  const [dealerId, setDealerId] = useState<number | null>(null)
+  const [jobs, setJobs] = useState<UnlinkedJob[]>([])
   const [saving, setSaving] = useState(false)
+  const [adoption, setAdoption] = useState<ChassisCreateResult | null>(null)
+
+  useEffect(() => {
+    // §0.6 — the job dropdown lists only jobs with no chassis linked yet.
+    apiGet<UnlinkedJob[]>('/api/production-jobs/unlinked').then(setJobs).catch(() => setJobs([]))
+  }, [])
 
   async function save() {
     if (!vin.trim()) { toast.push({ kind: 'error', message: 'VIN is required.' }); return }
+    if (!make.trim()) { toast.push({ kind: 'error', message: 'Chassis type is required.' }); return }
     setSaving(true)
     try {
-      await apiPost('/api/chassis-records', {
-        vin: vin.trim(), customer_name: customer.trim() || null,
-        make: make.trim() || null, job_number: jobNumber.trim() || null,
+      const result = await apiPost<ChassisCreateResult>('/api/chassis-records', {
+        vin: vin.trim(), customer_name: customer.trim() || null, make: make.trim() || null,
+        production_job_id: jobId, dealer_id: dealerId,
       })
-      toast.push({ kind: 'ok', message: `Chassis ${vin.trim()} created.` })
-      onCreated()
+      if (result.adopted) {
+        setAdoption(result)                 // §0.8 — surface the adoption before closing
+      } else {
+        toast.push({ kind: 'ok', message: `Chassis ${result.chassis.vin} created.` })
+        onCreated(); onClose()
+      }
     } catch (e) {
-      handleApiError(e, toast.push)
+      handleApiError(e, toast.push)         // chassis_integrity 422/409 surfaces with full remediation text
     } finally {
       setSaving(false)
     }
+  }
+
+  if (adoption) {
+    return <AdoptionNotificationModal result={adoption} onClose={() => { onCreated(); onClose() }} />
   }
 
   return (
@@ -225,8 +276,25 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
           <label className="block text-xs">
             <span className="font-semibold text-muted">VIN <span className="text-status-red">*</span></span>
             <input data-testid="chassis-create-vin" value={vin} onChange={(e) => setVin(e.target.value)}
-                   placeholder="Vehicle ID / VIN"
+                   placeholder="17 characters — no I, O or Q"
                    className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" />
+          </label>
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">Chassis type <span className="text-status-red">*</span></span>
+            <ChassisModelSelect testid="chassis-create-make" value={make} onChange={setMake} />
+          </label>
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">Link to job</span>
+            <select data-testid="chassis-create-job" value={jobId ?? ''}
+                    onChange={(e) => setJobId(e.target.value ? Number(e.target.value) : null)}
+                    className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
+              <option value="">— no job —</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.job_number || `#${j.id}`}{j.customer ? ` · ${j.customer}` : ''}{j.body_type ? ` · ${j.body_type}` : ''}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="block text-xs">
             <span className="font-semibold text-muted">Customer</span>
@@ -234,13 +302,8 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
                    className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" />
           </label>
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Chassis type</span>
-            <ChassisModelSelect testid="chassis-create-make" value={make} onChange={setMake} />
-          </label>
-          <label className="block text-xs">
-            <span className="font-semibold text-muted">Job number</span>
-            <input data-testid="chassis-create-job" value={jobNumber} onChange={(e) => setJobNumber(e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" />
+            <span className="font-semibold text-muted">Supplying dealer</span>
+            <DealerSelect value={dealerId} onChange={(id) => setDealerId(id)} testid="chassis-create-dealer" />
           </label>
         </div>
         <div className="mt-4 flex gap-2">
