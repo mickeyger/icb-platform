@@ -12,10 +12,26 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.models.mes import ChassisLifecycleEvent, ChassisRecord, PrejobCard, ProductionJob
+from app.models.mes import AssemblyBay, ChassisLifecycleEvent, ChassisRecord, PrejobCard, ProductionJob
 from app.services import chassis_integrity as ci
 
 _LARGE_EVENT_DELTA = 4
+
+
+def _double_bay_codes(db: Session, loser: ChassisRecord, winner: ChassisRecord):
+    """WO v4.36a §3.8 — if BOTH chassis are CURRENTLY on (different) assembly bays, return their bay codes
+    (loser_code, winner_code); else None. Merging two on-bay chassis would re-point the loser's
+    assembly_assigned event onto the winner, leaving it owning TWO bays — and the second bay would read
+    silently EMPTY (the assign_assembly_bay occupancy guard merge would otherwise bypass). So we refuse."""
+    from app.services.chassis import _current_assembly_bay_id
+    lb = _current_assembly_bay_id(db, loser.id) if loser.status == "in_assembly" else None
+    wb = _current_assembly_bay_id(db, winner.id) if winner.status == "in_assembly" else None
+    if lb is not None and wb is not None and lb != wb:
+        def code(bid):
+            b = db.get(AssemblyBay, bid)
+            return b.code if b and b.code else f"#{bid}"
+        return code(lb), code(wb)
+    return None
 
 
 def _event_count(db: Session, chassis_id: int) -> int:
@@ -97,6 +113,11 @@ def preview_merge(db: Session, loser_id: int, winner_id: int) -> dict:
     if abs(loser_events - winner_events) >= _LARGE_EVENT_DELTA:
         warnings.append("Large lifecycle-history difference between the two chassis — double-check "
                         "they're the same unit.")
+    double_bay = _double_bay_codes(db, loser, winner)
+    if double_bay:                                          # §3.8 — can't merge two on-bay chassis (silent empty bay)
+        warnings.append(f"Both chassis are on assembly bays ({double_bay[0]} and {double_bay[1]}) — "
+                        "dispatch or clear one before merging.")
+        blocking = True
     return {
         "loser": _summary(loser, loser_events),
         "winner": _summary(winner, winner_events),
@@ -138,6 +159,11 @@ def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
         raise ci.ChassisIntegrityError("Loser is already deleted (a tombstone).", status_code=409)
     if winner.deleted_at is not None:
         raise ci.ChassisIntegrityError("Winner is deleted — restore it before merging into it.", status_code=409)
+    double_bay = _double_bay_codes(db, loser, winner)       # §3.8 — refuse two on-bay chassis (would empty a bay)
+    if double_bay:
+        raise ci.ChassisIntegrityError(
+            f"Both chassis are on assembly bays ({double_bay[0]} and {double_bay[1]}) — "
+            "dispatch or clear one before merging.", status_code=409)
     try:
         # 1) renumber colliding loser cycles, then re-point its events to the winner. One ORM pass — each
         #    new (winner, cycle, event_type) is unique vs the winner and vs the still-on-loser rows, so the

@@ -418,16 +418,19 @@ def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecor
     integrity that v4.34 implemented frontend-only (ADR 0022 footnote): an attested/known VIN can
     never be silently rewritten through this path. Stamps vin_source='chassis_page_manual' for
     provenance, and refuses a value already anchoring another chassis (uq_chassis_records_vin)."""
+    from app.services import chassis_integrity as ci
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="chassis record not found")
-    vin = (vin or "").strip()
-    if not vin:
-        raise HTTPException(status_code=422, detail="vin is required")
+    # WO v4.36a §3.8 (subagent-A hardening) — the 4th write path now enforces the SAME strict ISO-3779
+    # format as create_chassis / update_card / PJ propagation (the §0.13 single-definition-of-valid). A
+    # bad VIN 422s here too; no silent [:32] truncation (a valid VIN is exactly 17).
+    vin = ci.validate_vin_format(vin)
+    if vin is None:
+        raise ci.ChassisIntegrityError("VIN is required", status_code=422)
     if rec.vin:                                            # NULL-state guard — write-once
         raise HTTPException(status_code=409,
                             detail=f"VIN already set ({rec.vin}); it cannot be overwritten from the Chassis page")
-    vin = vin[:32]
     clash = db.execute(select(ChassisRecord.id).where(
         ChassisRecord.vin == vin, ChassisRecord.id != record_id)).first()
     if clash:
