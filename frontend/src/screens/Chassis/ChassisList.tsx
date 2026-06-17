@@ -14,29 +14,13 @@ import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisRecord } from './types'
 import { ChassisModelSelect } from './ChassisModelSelect'
 import { DealerSelect } from './DealerSelect'
+import { type UnlinkedJob, type ChassisPrefill, VIN_PROVENANCE, VIN_RE, FilledBadge } from './chassisShared'
 
-interface UnlinkedJob { id: number; job_number: string | null; customer: string | null; body_type: string | null }
 interface ChassisCreateResult {
   chassis: { id: number; vin: string | null; customer_name: string | null; make: string | null }
   adopted: boolean
   adopted_chassis_id: number | null
   message: string | null
-}
-interface ChassisPrefill {
-  customer_name: string | null; customer_id: number | null; chassis_type: string | null
-  dealer_id: number | null; dealer_name: string | null; vin_number: string | null; vin_source: string | null
-}
-// WO v4.36a §3.5b — human label for the VIN-captured provenance note.
-const VIN_PROVENANCE: Record<string, string> = {
-  pre_job_card: 'Pre-Job', planning_ack: 'Planning Ack', chassis_page_manual: 'Chassis page',
-  vcl: 'VCL', vcl_form: 'VCL',
-}
-// Strict VIN (§0.1) — mirrors the backend VIN_RE; used here only to decide whether a captured VIN is
-// safe to LOCK. A legacy/non-conforming captured VIN stays editable so it can be corrected (locking it
-// would dead-end — the field can't be edited but submit would 422 on format).
-const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/
-function FilledBadge() {
-  return <span className="ml-1 rounded bg-primary/10 px-1 text-[9px] font-medium text-primary align-middle">auto-filled</span>
 }
 
 function StatusPill({ status }: { status: string }) {

@@ -57,6 +57,11 @@ export interface ChassisRecordDetail extends ChassisRecord {
   notes?: string | null
   created_at?: string | null
   updated_at?: string | null
+  // WO v4.36a §3.5c — authoritative job link (production_jobs.chassis_record_id back-ref); drives the
+  // Edit modal: linked → job_number read-only ("swap via Merge"); unlinked → the job dropdown.
+  linked_job_id?: number | null
+  linked_job_number?: string | null
+  linked_customer?: string | null
   events: ChassisEvent[]
 }
 

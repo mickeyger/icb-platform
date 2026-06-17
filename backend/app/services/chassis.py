@@ -154,6 +154,13 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     detail.event_count = len(events)
     detail.latest_event_date = max((e.event_date for e in events if e.event_date), default=None)
     detail.dealer_name = _dealer_names(db, [rec.dealer_id]).get(rec.dealer_id)   # §3.4 — cross-schema resolve
+    # §3.5c — the authoritative job link (back-reference); drives the Edit modal's read-only-vs-dropdown choice.
+    linked_job = db.execute(
+        select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
+    if linked_job is not None:
+        detail.linked_job_id = linked_job.id
+        detail.linked_job_number = linked_job.job_number
+        detail.linked_customer = _job_customer_name(db, linked_job)
     if rec.status == "in_assembly":                  # current bay derived from the latest event (§0.12)
         aa = [e for e in events if e.event_type == "assembly_assigned"]
         detail.current_assembly_bay_id = max(aa, key=lambda e: e.id).assembly_bay_id if aa else None
@@ -175,6 +182,19 @@ def _job_customer_name(db: Session, job) -> "str | None":
     cid = getattr(calc, "customer_id", None) if calc else None
     cust = db.get(Customer, cid) if cid else None
     return cust.name if cust else None
+
+
+def _assert_customer_ok(data: dict, rec: ChassisRecord, job_customer: "str | None") -> None:
+    """WO v4.36a §0.9 — the (possibly edited) customer must stay consistent with the linked job. A blank
+    CLEAR is rejected when the job asserts a customer (the edit modal always sends customer_name, so a
+    cleared field would otherwise short-circuit the consistency check AND wipe a name the job still owns);
+    a non-blank mismatch is a 409 via validate_customer_consistency."""
+    from app.services import chassis_integrity as ci
+    if job_customer and "customer_name" in data and not (data["customer_name"] or "").strip():
+        raise ci.ChassisIntegrityError(
+            f"Customer can't be cleared — it must stay consistent with the linked job ({job_customer}).",
+            status_code=409)
+    ci.validate_customer_consistency(data.get("customer_name", rec.customer_name), job_customer)
 
 
 def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
@@ -282,12 +302,46 @@ def create_expected_chassis(db: Session, *, make, vin, body_gap_mm, created_via,
 
 
 def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRecord:
+    """WO v4.36a §3.5c — link-aware edit chokepoint (the ADR-0024 guard on the EDIT door, symmetric with
+    create_chassis so the edit modal can't be a MICKEYTEST-class bypass). The job↔chassis link is
+    authoritative on production_jobs.chassis_record_id:
+      • LINKED  → the FK + denormalised job_number are read-only here (the payload's production_job_id /
+                  job_number are dropped); the edit door never re-points a link (that's admin Merge), and a
+                  customer edit must stay §0.9-consistent with the linked job.
+      • UNLINKED → LINK (payload.production_job_id set, chassis currently unlinked) → after validating the
+                  job + customer-consistency, ATOMICALLY set production_jobs.chassis_record_id and stamp
+                  rec.job_number from the real job (clearing any stale free-text — closes the §3.0 FK-drift).
+      • UNLINKED, no job selected → legacy behaviour (free-text job_number passes through)."""
+    from app.services import chassis_integrity as ci
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="chassis record not found")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    job_id = data.pop("production_job_id", None)         # never a ChassisRecord column
+    linked_job = db.execute(
+        select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
+    link_to = None
+    if linked_job is not None:                           # LINKED — FK/job_number immutable here (swap = Merge)
+        data.pop("job_number", None)
+        _assert_customer_ok(data, rec, _job_customer_name(db, linked_job))
+    elif job_id is not None:                             # UNLINKED → LINK (mirror create's atomic FK link)
+        if rec.deleted_at is not None:
+            raise ci.ChassisIntegrityError(
+                "This chassis is deleted — restore it before linking a job.", status_code=409)
+        job = ci.validate_job_link(db, job_id)           # 422 if unknown
+        if job.chassis_record_id not in (None, record_id):
+            raise ci.ChassisIntegrityError(
+                f"Job {job.job_number or job.id} already has a different chassis. Use Merge Chassis to swap.",
+                status_code=409)
+        _assert_customer_ok(data, rec, _job_customer_name(db, job))
+        data["job_number"] = job.job_number              # stamp from the real job (clears stale free-text)
+        link_to = job
+    for k, v in data.items():
         setattr(rec, k, v)
     rec.updated_by = who
+    if link_to is not None:
+        db.flush()                                       # rec.id stable, same txn — mirror create's atomic link
+        link_to.chassis_record_id = rec.id
     db.commit()
     db.refresh(rec)
     return rec

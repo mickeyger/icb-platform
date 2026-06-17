@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X } from 'lucide-react'
 
-import { apiGet, apiPatch, apiPost, handleApiError } from '../../lib/api'
+import { apiGet, apiPatch, apiPost, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { Card } from '../../components/ui/primitives'
@@ -13,6 +13,7 @@ import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisEvent, type ChassisRecordDetail } from './types'
 import { VclDclForm, type ChecklistItem } from './VclDclForm'
 import { ChassisModelSelect } from './ChassisModelSelect'
+import { type UnlinkedJob, type ChassisPrefill, FilledBadge } from './chassisShared'
 
 function ProvenancePill({ via, source }: { via?: string | null; source: string }) {
   const p = via ? CHASSIS_PROVENANCE[via] : undefined
@@ -228,42 +229,75 @@ export function ChassisDetail() {
   )
 }
 
-/** WO v4.34 §3.7 — edit an existing chassis (chassis.update). Make/model uses the DDM dropdown
- * (preserving an off-list legacy value); other fields are free-text. PATCHes only changed fields. */
+/** WO v4.34 §3.7 / v4.36a §3.5c — edit an existing chassis (chassis.update). Make/model uses the DDM
+ * dropdown (preserving an off-list legacy value). The JOB field is symmetric with the Add-Chassis modal so
+ * the edit door isn't a MICKEYTEST-class bypass: when the chassis is LINKED (a production job's FK points
+ * at it) the job is read-only (swap via admin Merge); when UNLINKED it's a dropdown of unlinked jobs that
+ * atomically creates the FK link on save. Customer auto-fills from the selected job. PATCHes changed fields. */
 function EditChassisModal({ rec, onClose, onSaved }: {
   rec: ChassisRecordDetail
   onClose: () => void
   onSaved: () => void
 }) {
   const toast = useToast()
+  const isLinked = rec.linked_job_id != null              // §3.5c — authoritative FK link
   const [form, setForm] = useState({
     customer_name: rec.customer_name ?? '',
     contact_person: rec.contact_person ?? '',
     telephone: rec.telephone ?? '',
-    job_number: rec.job_number ?? '',
     make: rec.make ?? '',
     description: rec.description ?? '',
     notes: rec.notes ?? '',
   })
+  const [jobId, setJobId] = useState<number | null>(null)  // unlinked → the job to link on save
+  const [jobs, setJobs] = useState<UnlinkedJob[]>([])
+  const [customerPrefilled, setCustomerPrefilled] = useState(false)
   const [saving, setSaving] = useState(false)
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
+
+  // §3.5c — an UNLINKED chassis can be linked here; load the unlinked-jobs dropdown (reused endpoint).
+  useEffect(() => {
+    if (isLinked) return
+    apiGet<UnlinkedJob[]>('/api/production-jobs/unlinked').then(setJobs).catch(() => setJobs([]))
+  }, [isLinked])
+
+  // §3.5c — selecting a job auto-populates Customer (mirrors create §3.5b). VIN is NOT touched here (the
+  // edit modal never edits VIN — that's the separate write-once capture path).
+  useEffect(() => {
+    if (isLinked || jobId == null) { setCustomerPrefilled(false); return }
+    let live = true
+    apiGet<ChassisPrefill>(`/api/production-jobs/${jobId}/chassis-prefill`).then((p) => {
+      if (!live) return
+      if (p.customer_name) { setForm((f) => ({ ...f, customer_name: p.customer_name! })); setCustomerPrefilled(true) }
+      else setCustomerPrefilled(false)
+    }).catch(() => {})
+    return () => { live = false }
+  }, [jobId, isLinked])
 
   async function save() {
     setSaving(true)
     try {
-      await apiPatch(`/api/chassis-records/${rec.id}`, {
+      const body: Record<string, unknown> = {
         customer_name: form.customer_name.trim() || null,
         contact_person: form.contact_person.trim() || null,
         telephone: form.telephone.trim() || null,
-        job_number: form.job_number.trim() || null,
         make: form.make.trim() || null,
         description: form.description.trim() || null,
         notes: form.notes.trim() || null,
-      })
+      }
+      // §3.5c — never send job_number/production_job_id for a LINKED chassis (FK is read-only — swap = Merge).
+      // For an UNLINKED chassis, sending production_job_id atomically links it (backend stamps job_number).
+      if (!isLinked && jobId != null) body.production_job_id = jobId
+      await apiPatch(`/api/chassis-records/${rec.id}`, body)
       toast.push({ kind: 'ok', message: 'Chassis updated.' })
       onSaved()
     } catch (e) {
-      handleApiError(e, toast.push)
+      // §0.9 — 409 (customer mismatch vs the job, or job already taken) surfaces inline with remediation.
+      if (e instanceof ApiError && e.status === 409) {
+        toast.push({ kind: 'warn', message: e.detail || 'That conflicts with the current chassis state.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
     } finally {
       setSaving(false)
     }
@@ -278,9 +312,46 @@ function EditChassisModal({ rec, onClose, onSaved }: {
           <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={20} /></button>
         </div>
         <div className="space-y-3">
-          <label className="block text-xs"><span className="font-semibold text-muted">Customer</span>
+          {/* §3.5c — JOB first (drives the customer prefill), symmetric with the Add-Chassis modal */}
+          {isLinked ? (
+            <div className="block text-xs">
+              <span className="font-semibold text-muted">Job number</span>
+              <div data-testid="chassis-edit-job-locked"
+                   className="mt-1 w-full rounded-md border border-line bg-surface-alt px-2 py-1.5 font-mono text-sm text-body">
+                {rec.linked_job_number || `#${rec.linked_job_id}`}
+              </div>
+              <span className="mt-1 block text-[10px] text-muted">
+                Linked to Job {rec.linked_job_number || rec.linked_job_id} ({rec.linked_customer ?? '—'}). To swap, use admin Merge Chassis.
+              </span>
+            </div>
+          ) : (
+            <label className="block text-xs"><span className="font-semibold text-muted">Link to job</span>
+              <select data-testid="chassis-edit-job" value={jobId ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value ? Number(e.target.value) : null
+                        setJobId(v)
+                        if (v == null && customerPrefilled) {        // deselect → restore the original customer
+                          set('customer_name', rec.customer_name ?? ''); setCustomerPrefilled(false)
+                        }
+                      }}
+                      className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
+                <option value="">— no job —</option>
+                {jobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.job_number || `#${j.id}`}{j.customer ? ` · ${j.customer}` : ''}{j.body_type ? ` · ${j.body_type}` : ''}
+                  </option>
+                ))}
+              </select>
+              {jobId == null && rec.job_number && (
+                <span data-testid="chassis-edit-job-orphan" className="mt-1 block text-[10px] text-muted">
+                  Unlinked provenance: <span className="font-mono">{rec.job_number}</span> — pick a job above to create a real link.
+                </span>
+              )}
+            </label>
+          )}
+          <label className="block text-xs"><span className="font-semibold text-muted">Customer{!isLinked && customerPrefilled && <FilledBadge />}</span>
             <input data-testid="chassis-edit-customer" value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" /></label>
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm${!isLinked && customerPrefilled ? ' bg-status-green/5' : ''}`} /></label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs"><span className="font-semibold text-muted">Contact</span>
               <input value={form.contact_person} onChange={(e) => set('contact_person', e.target.value)}
@@ -291,9 +362,6 @@ function EditChassisModal({ rec, onClose, onSaved }: {
           </div>
           <label className="block text-xs"><span className="font-semibold text-muted">Chassis type</span>
             <ChassisModelSelect testid="chassis-edit-make" value={form.make} onChange={(v) => set('make', v)} /></label>
-          <label className="block text-xs"><span className="font-semibold text-muted">Job number</span>
-            <input data-testid="chassis-edit-job" value={form.job_number} onChange={(e) => set('job_number', e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" /></label>
           <label className="block text-xs"><span className="font-semibold text-muted">Description</span>
             <input value={form.description} onChange={(e) => set('description', e.target.value)}
                    className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" /></label>

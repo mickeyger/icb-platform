@@ -61,6 +61,12 @@ class ChassisRecordDetail(ChassisRecordOut):
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # WO v4.36a §3.5c — the AUTHORITATIVE job link (production_jobs.chassis_record_id back-reference), filled
+    # by get_detail. Drives the Edit modal: linked → job_number read-only ("swap via Merge"); unlinked → the
+    # job dropdown. NOT chassis_records.job_number (free-text/non-unique legacy provenance — not a link).
+    linked_job_id: Optional[int] = None
+    linked_job_number: Optional[str] = None
+    linked_customer: Optional[str] = None
     events: List[ChassisEventOut] = []
 
 
@@ -82,6 +88,10 @@ class ChassisRecordCreate(BaseModel):
 
 class ChassisRecordUpdate(BaseModel):
     job_number: Optional[str] = None
+    # WO v4.36a §3.5c — when the chassis is UNLINKED, the Edit modal sends the selected job here to
+    # atomically set production_jobs.chassis_record_id (mirrors create). Ignored for a LINKED chassis
+    # (job_number is read-only there — swap via admin Merge Chassis), so the edit door can't re-point a link.
+    production_job_id: Optional[int] = None
     customer_name: Optional[str] = None
     contact_person: Optional[str] = None
     telephone: Optional[str] = None
