@@ -81,7 +81,7 @@ def _dealer_names(db: Session, dealer_ids) -> dict:
 
 
 def list_chassis(db: Session, *, q=None, status=None, limit=50, offset=0) -> list[ChassisRecordOut]:
-    stmt = select(ChassisRecord)
+    stmt = select(ChassisRecord).where(ChassisRecord.deleted_at.is_(None))   # §3.6 STEP 1 — hide soft-deleted (merged) losers
     if status:
         stmt = stmt.where(ChassisRecord.status == status)
     if q:

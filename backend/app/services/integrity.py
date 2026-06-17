@@ -139,7 +139,9 @@ def find_anchorless_chassis(db: Session) -> list[dict]:
     """READ-ONLY. expected / expected_orphaned chassis with NO live link — no production_job and no
     prejob_card references them. Surfaced for manual/BA-gated review; NOT a creation block."""
     rows = db.execute(
-        select(ChassisRecord).where(ChassisRecord.status.in_(("expected", "expected_orphaned")))
+        select(ChassisRecord).where(
+            ChassisRecord.status.in_(("expected", "expected_orphaned")),
+            ChassisRecord.deleted_at.is_(None))      # §3.6 STEP 1 — a soft-deleted (merged) loser is not an orphan
     ).scalars().all()
     out: list[dict] = []
     for ch in rows:
