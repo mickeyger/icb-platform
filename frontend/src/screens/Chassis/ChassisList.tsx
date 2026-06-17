@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Truck, Search, Plus, X } from 'lucide-react'
 
-import { apiGet, apiPost, handleApiError } from '../../lib/api'
+import { apiGet, apiPost, ApiError, handleApiError } from '../../lib/api'
 import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { Card } from '../../components/ui/primitives'
@@ -21,6 +21,22 @@ interface ChassisCreateResult {
   adopted: boolean
   adopted_chassis_id: number | null
   message: string | null
+}
+interface ChassisPrefill {
+  customer_name: string | null; customer_id: number | null; chassis_type: string | null
+  dealer_id: number | null; dealer_name: string | null; vin_number: string | null; vin_source: string | null
+}
+// WO v4.36a §3.5b — human label for the VIN-captured provenance note.
+const VIN_PROVENANCE: Record<string, string> = {
+  pre_job_card: 'Pre-Job', planning_ack: 'Planning Ack', chassis_page_manual: 'Chassis page',
+  vcl: 'VCL', vcl_form: 'VCL',
+}
+// Strict VIN (§0.1) — mirrors the backend VIN_RE; used here only to decide whether a captured VIN is
+// safe to LOCK. A legacy/non-conforming captured VIN stays editable so it can be corrected (locking it
+// would dead-end — the field can't be edited but submit would 422 on format).
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/
+function FilledBadge() {
+  return <span className="ml-1 rounded bg-primary/10 px-1 text-[9px] font-medium text-primary align-middle">auto-filled</span>
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -229,7 +245,11 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
   const [make, setMake] = useState('')
   const [jobId, setJobId] = useState<number | null>(null)
   const [dealerId, setDealerId] = useState<number | null>(null)
+  const [dealerName, setDealerName] = useState('')
   const [jobs, setJobs] = useState<UnlinkedJob[]>([])
+  const [prefilled, setPrefilled] = useState<Set<string>>(new Set())
+  const [vinReadOnly, setVinReadOnly] = useState(false)
+  const [vinProvenance, setVinProvenance] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [adoption, setAdoption] = useState<ChassisCreateResult | null>(null)
 
@@ -237,6 +257,30 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
     // §0.6 — the job dropdown lists only jobs with no chassis linked yet.
     apiGet<UnlinkedJob[]>('/api/production-jobs/unlinked').then(setJobs).catch(() => setJobs([]))
   }, [])
+
+  // §3.5b — selecting a job prefills customer + anything captured upstream (PJ/AJ); the VIN is read-only
+  // when already captured (§0.3 write-once — fix a wrong VIN via admin Merge Chassis, not here).
+  useEffect(() => {
+    if (jobId == null) { setPrefilled(new Set()); setVinReadOnly(false); setVinProvenance(null); return }
+    let live = true
+    apiGet<ChassisPrefill>(`/api/production-jobs/${jobId}/chassis-prefill`).then((p) => {
+      if (!live) return
+      const filled = new Set<string>()
+      if (p.customer_name) { setCustomer(p.customer_name); filled.add('customer') }
+      if (p.chassis_type) { setMake(p.chassis_type); filled.add('make') }
+      if (p.dealer_id != null) { setDealerId(p.dealer_id); setDealerName(p.dealer_name ?? ''); filled.add('dealer') }
+      if (p.vin_number) {
+        setVin(p.vin_number); filled.add('vin')
+        if (VIN_RE.test(p.vin_number)) {                 // lock only a conforming captured VIN
+          setVinReadOnly(true); setVinProvenance(VIN_PROVENANCE[p.vin_source ?? ''] ?? 'upstream')
+        } else {                                          // legacy/non-conforming → editable so it can be fixed
+          setVinReadOnly(false); setVinProvenance(null)
+        }
+      } else { setVinReadOnly(false); setVinProvenance(null) }
+      setPrefilled(filled)
+    }).catch(() => {})
+    return () => { live = false }
+  }, [jobId])
 
   async function save() {
     if (!vin.trim()) { toast.push({ kind: 'error', message: 'VIN is required.' }); return }
@@ -254,7 +298,13 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
         onCreated(); onClose()
       }
     } catch (e) {
-      handleApiError(e, toast.push)         // chassis_integrity 422/409 surfaces with full remediation text
+      // §0.5/§0.9 — 409 (VIN clash / customer mismatch / job already has a chassis) surfaces inline with
+      // remediation (handleApiError re-throws 409 for blocking-modal callers); 422 etc. via handleApiError.
+      if (e instanceof ApiError && e.status === 409) {
+        toast.push({ kind: 'warn', message: e.detail || 'That conflicts with the current chassis state.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
     } finally {
       setSaving(false)
     }
@@ -264,6 +314,7 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
     return <AdoptionNotificationModal result={adoption} onClose={() => { onCreated(); onClose() }} />
   }
 
+  const filledBg = (k: string) => (prefilled.has(k) ? ' bg-status-green/5' : '')
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
       <div data-testid="chassis-create-form" onClick={(e) => e.stopPropagation()}
@@ -273,22 +324,13 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
           <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={20} /></button>
         </div>
         <div className="space-y-3">
-          <label className="block text-xs">
-            <span className="font-semibold text-muted">VIN <span className="text-status-red">*</span></span>
-            <input data-testid="chassis-create-vin" value={vin} onChange={(e) => setVin(e.target.value)}
-                   placeholder="17 characters — no I, O or Q"
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm" />
-          </label>
-          <label className="block text-xs">
-            <span className="font-semibold text-muted">Chassis type <span className="text-status-red">*</span></span>
-            <ChassisModelSelect testid="chassis-create-make" value={make} onChange={setMake} />
-          </label>
+          {/* 1 — Link to job (first; drives the prefill, matching the AJ External-Chassis pattern) */}
           <label className="block text-xs">
             <span className="font-semibold text-muted">Link to job</span>
             <select data-testid="chassis-create-job" value={jobId ?? ''}
                     onChange={(e) => setJobId(e.target.value ? Number(e.target.value) : null)}
                     className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
-              <option value="">— no job —</option>
+              <option value="">— no job (enter manually) —</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
                   {j.job_number || `#${j.id}`}{j.customer ? ` · ${j.customer}` : ''}{j.body_type ? ` · ${j.body_type}` : ''}
@@ -296,14 +338,35 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
               ))}
             </select>
           </label>
+          {/* 2 — Customer (auto-fills from the job; editable — a mismatch is caught server-side §0.9) */}
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Customer</span>
+            <span className="font-semibold text-muted">Customer{prefilled.has('customer') && <FilledBadge />}</span>
             <input data-testid="chassis-create-customer" value={customer} onChange={(e) => setCustomer(e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" />
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm${filledBg('customer')}`} />
           </label>
+          {/* 3 — Chassis type (required; auto-fills from the Pre-Job card) */}
           <label className="block text-xs">
-            <span className="font-semibold text-muted">Supplying dealer</span>
-            <DealerSelect value={dealerId} onChange={(id) => setDealerId(id)} testid="chassis-create-dealer" />
+            <span className="font-semibold text-muted">Chassis type <span className="text-status-red">*</span>{prefilled.has('make') && <FilledBadge />}</span>
+            <ChassisModelSelect testid="chassis-create-make" value={make} onChange={setMake} />
+          </label>
+          {/* 4 — Supplying dealer (auto-fills from the Planning ack) */}
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">Supplying dealer{prefilled.has('dealer') && <FilledBadge />}</span>
+            <DealerSelect value={dealerId} valueName={dealerName}
+                          onChange={(id, name) => { setDealerId(id); setDealerName(name) }}
+                          testid="chassis-create-dealer" />
+          </label>
+          {/* 5 — VIN (required; READ-ONLY once captured upstream — §0.3 write-once) */}
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">VIN <span className="text-status-red">*</span>{prefilled.has('vin') && <FilledBadge />}</span>
+            <input data-testid="chassis-create-vin" value={vin} onChange={(e) => setVin(e.target.value)}
+                   disabled={vinReadOnly} placeholder="17 characters — no I, O or Q"
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt${filledBg('vin')}`} />
+            {vinReadOnly && (
+              <span data-testid="chassis-create-vin-locked" className="mt-1 block text-[10px] text-muted">
+                Captured at {vinProvenance} — locked. Use admin Merge Chassis to correct a wrong VIN.
+              </span>
+            )}
           </label>
         </div>
         <div className="mt-4 flex gap-2">

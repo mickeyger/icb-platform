@@ -297,6 +297,42 @@ def list_unlinked_jobs(db: Session) -> list[dict]:
     return out
 
 
+def chassis_prefill(db: Session, job_id: int) -> dict:
+    """WO v4.36a §3.5b — prefill data for the Add-Chassis modal when a job is selected: the customer +
+    anything already captured UPSTREAM (chassis type / dealer / VIN at Pre-Job or Planning-Ack), reading
+    production_jobs + the linked prejob_card + the linked chassis. Each field is None unless captured."""
+    from app.database import CalculationRecord, Customer
+    from app.models.mes import ChassisRecord, PrejobCard
+    job = db.get(ProductionJob, job_id)
+    if job is None:
+        raise NotFoundError(f"production job {job_id} not found")
+    customer_name = customer_id = None
+    card = None
+    if job.calculation_record_id:
+        calc = db.get(CalculationRecord, job.calculation_record_id)
+        if calc and calc.customer_id:
+            c = db.get(Customer, calc.customer_id)
+            if c:
+                customer_name, customer_id = c.name, c.id
+        card = db.execute(
+            select(PrejobCard).where(PrejobCard.calculation_id == job.calculation_record_id)
+            .order_by(PrejobCard.id.desc())).scalars().first()
+    chassis = db.get(ChassisRecord, job.chassis_record_id) if job.chassis_record_id else None
+    chassis_type = (chassis.make if chassis and chassis.make else None) \
+        or (card.chassis_make_model if card and card.chassis_make_model else None)
+    vin_number = (chassis.vin if chassis and chassis.vin else None) \
+        or (card.vin_number if card and card.vin_number else None)
+    vin_source = None
+    if vin_number:
+        vin_source = (chassis.vin_source if chassis and chassis.vin else None) \
+            or ("pre_job_card" if card and card.vin_number else None)
+    dealer_id = chassis.dealer_id if chassis else None
+    dealer_name = (db.get(Customer, dealer_id).name if dealer_id and db.get(Customer, dealer_id) else None)
+    return {"customer_name": customer_name, "customer_id": customer_id, "chassis_type": chassis_type,
+            "dealer_id": dealer_id, "dealer_name": dealer_name, "vin_number": vin_number,
+            "vin_source": vin_source}
+
+
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                         notes: Optional[str], user, chassis_data: Optional[dict] = None,
                         job_number: Optional[str] = None) -> JobRow:

@@ -123,6 +123,16 @@ def list_unlinked_jobs(db: Session = Depends(get_db), user: User = Depends(requi
     return svc.list_unlinked_jobs(db)
 
 
+@router.get("/{job_id}/chassis-prefill")
+def chassis_prefill(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """WO v4.36a §3.5b — Add-Chassis modal prefill when a job is selected (customer + anything captured
+    upstream at Pre-Job/Planning-Ack). Each field is null unless captured."""
+    try:
+        return svc.chassis_prefill(db, job_id)
+    except svc.NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/{job_id}", response_model=ProductionJobDetail)
 def get_production_job(job_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
     """Full detail for one job + WO v4.31 §3.2 read-only enrichment: current BOM lines, chassis
