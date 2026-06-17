@@ -64,7 +64,7 @@ def test_planner_captures_vin(page: Page, live_server: str, role_users, expected
     role_session(page, role_users["planner"], base=live_server)
     _goto_detail(page, expected_chassis)
     shot(page, "01-no-vin", journey=JOURNEY)
-    _capture_vin(page, expected_chassis, "J341VVIN0001")
+    _capture_vin(page, expected_chassis, "J341V000000000001")   # §3.8 — conformant 17-char (capture_vin now strict)
     # VIN now shows with a provenance pill; the capture affordance is gone (write-once).
     pill = page.get_by_test_id("chassis-vin-source")
     expect(pill).to_be_visible(timeout=T)
@@ -76,6 +76,6 @@ def test_planner_captures_vin(page: Page, live_server: str, role_users, expected
 def test_admin_captures_vin(page: Page, expected_chassis) -> None:
     admin_session(page)
     _goto_detail(page, expected_chassis)
-    _capture_vin(page, expected_chassis, "J341VVIN0002")
+    _capture_vin(page, expected_chassis, "J341V000000000002")   # §3.8 — conformant 17-char (capture_vin now strict)
     expect(page.get_by_test_id("chassis-vin-source")).to_contain_text("manually captured", timeout=T)
     expect(page.get_by_test_id("chassis-capture-vin")).to_have_count(0)
