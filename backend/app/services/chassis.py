@@ -161,6 +161,7 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
         detail.linked_job_id = linked_job.id
         detail.linked_job_number = linked_job.job_number
         detail.linked_customer = _job_customer_name(db, linked_job)
+        detail.chassis_eta = linked_job.chassis_eta.date() if linked_job.chassis_eta else None  # §3.5e
     if rec.merged_into_id:                            # §3.6 STEP 7 — resolve the survivor's VIN for the banner
         survivor = db.get(ChassisRecord, rec.merged_into_id)
         detail.merged_into_vin = survivor.vin if survivor else None
@@ -185,6 +186,15 @@ def _job_customer_name(db: Session, job) -> "str | None":
     cid = getattr(calc, "customer_id", None) if calc else None
     cust = db.get(Customer, cid) if cid else None
     return cust.name if cust else None
+
+
+def _stamp_job_eta(job, eta_date, who: str) -> None:
+    """WO v4.36a §3.5e — record a chassis Delivery ETA onto its production job (the §0.13 single ETA
+    source: production_jobs.chassis_eta, mirroring record_planning_ack's stamp). eta_date=None clears it."""
+    from app.services.production_jobs import _now, _to_dt
+    job.chassis_eta = _to_dt(eta_date)
+    job.chassis_eta_captured_at = _now() if eta_date is not None else None
+    job.chassis_eta_captured_by = who if eta_date is not None else None
 
 
 def _assert_customer_ok(data: dict, rec: ChassisRecord, job_customer: "str | None") -> None:
@@ -215,6 +225,8 @@ def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
         raise ci.ChassisIntegrityError("Chassis make/model is required", status_code=422)
     dealer_id = ci.validate_dealer(db, getattr(payload, "dealer_id", None))
     job = ci.validate_job_link(db, getattr(payload, "production_job_id", None))
+    if job is not None and getattr(payload, "chassis_eta", None) is not None:
+        _stamp_job_eta(job, payload.chassis_eta, who)           # §3.5e — Delivery ETA onto the linked job
     existing = ci.resolve_existing_chassis(db, vin)              # §0.8 — does this VIN already live somewhere?
     if job is not None:                                          # §0.9 — customer consistency (vs whoever we'd link)
         ci.validate_customer_consistency(
@@ -321,6 +333,8 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
         raise HTTPException(status_code=404, detail="chassis record not found")
     data = payload.model_dump(exclude_unset=True)
     job_id = data.pop("production_job_id", None)         # never a ChassisRecord column
+    eta_sent = "chassis_eta" in data                     # §3.5e — ETA lives on the linked job, not the chassis
+    eta_val = data.pop("chassis_eta", None)
     linked_job = db.execute(
         select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
     link_to = None
@@ -339,6 +353,10 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
         _assert_customer_ok(data, rec, _job_customer_name(db, job))
         data["job_number"] = job.job_number              # stamp from the real job (clears stale free-text)
         link_to = job
+    # §3.5e — a Delivery ETA edit persists onto the linked job (linked or just-linked); ignored if no job.
+    eta_job = linked_job if linked_job is not None else link_to
+    if eta_sent and eta_job is not None:
+        _stamp_job_eta(eta_job, eta_val, who)
     for k, v in data.items():
         setattr(rec, k, v)
     rec.updated_by = who

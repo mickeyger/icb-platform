@@ -9,6 +9,7 @@ export interface UnlinkedJob {
 export interface ChassisPrefill {
   customer_name: string | null; customer_id: number | null; chassis_type: string | null
   dealer_id: number | null; dealer_name: string | null; vin_number: string | null; vin_source: string | null
+  chassis_eta: string | null   // §3.5e — the linked job's Delivery ETA (YYYY-MM-DD)
 }
 
 // Human label for the VIN-captured provenance note.

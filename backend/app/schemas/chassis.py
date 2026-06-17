@@ -73,6 +73,7 @@ class ChassisRecordDetail(ChassisRecordOut):
     deleted_at: Optional[datetime] = None
     merged_into_id: Optional[int] = None
     merged_into_vin: Optional[str] = None
+    chassis_eta: Optional[date] = None              # WO v4.36a §3.5e — the LINKED job's ETA (get_detail fills it)
     events: List[ChassisEventOut] = []
 
 
@@ -83,6 +84,9 @@ class ChassisRecordCreate(BaseModel):
     # production_jobs.chassis_record_id) + the supplying dealer (validated is_dealer=true).
     production_job_id: Optional[int] = None
     dealer_id: Optional[int] = None
+    # WO v4.36a §3.5e — Delivery ETA. There is NO chassis_eta column; it persists onto the LINKED job's
+    # production_jobs.chassis_eta (the §0.13 single source, set at Planning Ack). Ignored if no job linked.
+    chassis_eta: Optional[date] = None
     customer_name: Optional[str] = None
     contact_person: Optional[str] = None
     telephone: Optional[str] = None
@@ -98,6 +102,9 @@ class ChassisRecordUpdate(BaseModel):
     # atomically set production_jobs.chassis_record_id (mirrors create). Ignored for a LINKED chassis
     # (job_number is read-only there — swap via admin Merge Chassis), so the edit door can't re-point a link.
     production_job_id: Optional[int] = None
+    # WO v4.36a §3.5e — Delivery ETA → persists onto the linked job's production_jobs.chassis_eta (popped
+    # before the setattr loop — chassis_records has no chassis_eta column).
+    chassis_eta: Optional[date] = None
     customer_name: Optional[str] = None
     contact_person: Optional[str] = None
     telephone: Optional[str] = None

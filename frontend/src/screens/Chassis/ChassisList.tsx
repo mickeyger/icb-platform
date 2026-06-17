@@ -237,6 +237,7 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
   const [jobId, setJobId] = useState<number | null>(null)
   const [dealerId, setDealerId] = useState<number | null>(null)
   const [dealerName, setDealerName] = useState('')
+  const [eta, setEta] = useState('')                  // §3.5e — Delivery ETA (persists onto the linked job)
   const [jobs, setJobs] = useState<UnlinkedJob[]>([])
   const [prefilled, setPrefilled] = useState<Set<string>>(new Set())
   const [vinReadOnly, setVinReadOnly] = useState(false)
@@ -252,7 +253,7 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
   // §3.5b — selecting a job prefills customer + anything captured upstream (PJ/AJ); the VIN is read-only
   // when already captured (§0.3 write-once — fix a wrong VIN via admin Merge Chassis, not here).
   useEffect(() => {
-    if (jobId == null) { setPrefilled(new Set()); setVinReadOnly(false); setVinProvenance(null); return }
+    if (jobId == null) { setPrefilled(new Set()); setVinReadOnly(false); setVinProvenance(null); setEta(''); return }
     let live = true
     apiGet<ChassisPrefill>(`/api/production-jobs/${jobId}/chassis-prefill`).then((p) => {
       if (!live) return
@@ -260,6 +261,7 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
       if (p.customer_name) { setCustomer(p.customer_name); filled.add('customer') }
       if (p.chassis_type) { setMake(p.chassis_type); filled.add('make') }
       if (p.dealer_id != null) { setDealerId(p.dealer_id); setDealerName(p.dealer_name ?? ''); filled.add('dealer') }
+      if (p.chassis_eta) { setEta(p.chassis_eta); filled.add('eta') }      // §3.5e — ETA from the job
       if (p.vin_number) {
         setVin(p.vin_number); filled.add('vin')
         if (VIN_RE.test(p.vin_number)) {                 // lock only a conforming captured VIN
@@ -281,6 +283,7 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
       const result = await apiPost<ChassisCreateResult>('/api/chassis-records', {
         vin: vin.trim(), customer_name: customer.trim() || null, make: make.trim() || null,
         production_job_id: jobId, dealer_id: dealerId,
+        chassis_eta: jobId != null ? (eta || null) : null,   // §3.5e — only the linked job can hold an ETA
       })
       if (result.adopted) {
         setAdoption(result)                 // §0.8 — surface the adoption before closing
@@ -347,7 +350,17 @@ function CreateChassisModal({ onClose, onCreated }: { onClose: () => void; onCre
                           onChange={(id, name) => { setDealerId(id); setDealerName(name) }}
                           testid="chassis-create-dealer" />
           </label>
-          {/* 5 — VIN (required; READ-ONLY once captured upstream — §0.3 write-once) */}
+          {/* 5 — Delivery ETA (§3.5e; persists onto the LINKED job — disabled until a job is selected) */}
+          <label className="block text-xs">
+            <span className="font-semibold text-muted">Delivery ETA{prefilled.has('eta') && <FilledBadge />}</span>
+            <input type="date" data-testid="chassis-create-eta" value={eta} onChange={(e) => setEta(e.target.value)}
+                   disabled={jobId == null}
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm disabled:bg-surface-alt${filledBg('eta')}`} />
+            <span className="mt-1 block text-[10px] text-muted">
+              {jobId == null ? 'Links to the job’s ETA — select a job above to capture it.' : 'When will the chassis arrive at Icecold?'}
+            </span>
+          </label>
+          {/* 6 — VIN (required; READ-ONLY once captured upstream — §0.3 write-once) */}
           <label className="block text-xs">
             <span className="font-semibold text-muted">VIN <span className="text-status-red">*</span>{prefilled.has('vin') && <FilledBadge />}</span>
             <input data-testid="chassis-create-vin" value={vin} onChange={(e) => setVin(e.target.value)}

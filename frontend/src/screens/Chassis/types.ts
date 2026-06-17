@@ -66,6 +66,7 @@ export interface ChassisRecordDetail extends ChassisRecord {
   deleted_at?: string | null
   merged_into_id?: number | null
   merged_into_vin?: string | null
+  chassis_eta?: string | null   // §3.5e — the linked job's Delivery ETA (YYYY-MM-DD)
   events: ChassisEvent[]
 }
 

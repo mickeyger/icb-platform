@@ -292,6 +292,8 @@ function EditChassisModal({ rec, onClose, onSaved }: {
   const [jobId, setJobId] = useState<number | null>(null)  // unlinked → the job to link on save
   const [jobs, setJobs] = useState<UnlinkedJob[]>([])
   const [customerPrefilled, setCustomerPrefilled] = useState(false)
+  const [eta, setEta] = useState(rec.chassis_eta ?? '')    // §3.5e — the linked job's Delivery ETA
+  const [etaPrefilled, setEtaPrefilled] = useState(false)
   const [saving, setSaving] = useState(false)
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -310,6 +312,7 @@ function EditChassisModal({ rec, onClose, onSaved }: {
       if (!live) return
       if (p.customer_name) { setForm((f) => ({ ...f, customer_name: p.customer_name! })); setCustomerPrefilled(true) }
       else setCustomerPrefilled(false)
+      if (p.chassis_eta) { setEta(p.chassis_eta); setEtaPrefilled(true) } else setEtaPrefilled(false)  // §3.5e
     }).catch(() => {})
     return () => { live = false }
   }, [jobId, isLinked])
@@ -328,6 +331,7 @@ function EditChassisModal({ rec, onClose, onSaved }: {
       // §3.5c — never send job_number/production_job_id for a LINKED chassis (FK is read-only — swap = Merge).
       // For an UNLINKED chassis, sending production_job_id atomically links it (backend stamps job_number).
       if (!isLinked && jobId != null) body.production_job_id = jobId
+      if (isLinked || jobId != null) body.chassis_eta = eta || null   // §3.5e — persists onto the linked job
       await apiPatch(`/api/chassis-records/${rec.id}`, body)
       toast.push({ kind: 'ok', message: 'Chassis updated.' })
       onSaved()
@@ -377,8 +381,9 @@ function EditChassisModal({ rec, onClose, onSaved }: {
                       onChange={(e) => {
                         const v = e.target.value ? Number(e.target.value) : null
                         setJobId(v)
-                        if (v == null && customerPrefilled) {        // deselect → restore the original customer
-                          set('customer_name', rec.customer_name ?? ''); setCustomerPrefilled(false)
+                        if (v == null) {                              // deselect → restore the originals
+                          if (customerPrefilled) { set('customer_name', rec.customer_name ?? ''); setCustomerPrefilled(false) }
+                          setEta(rec.chassis_eta ?? ''); setEtaPrefilled(false)
                         }
                       }}
                       className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
@@ -399,6 +404,15 @@ function EditChassisModal({ rec, onClose, onSaved }: {
           <label className="block text-xs"><span className="font-semibold text-muted">Customer{!isLinked && customerPrefilled && <FilledBadge />}</span>
             <input data-testid="chassis-edit-customer" value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)}
                    className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm${!isLinked && customerPrefilled ? ' bg-status-green/5' : ''}`} /></label>
+          {/* §3.5e — Delivery ETA (persists onto the linked job; enabled once a job is linked/selected) */}
+          <label className="block text-xs"><span className="font-semibold text-muted">Delivery ETA{etaPrefilled && <FilledBadge />}</span>
+            <input type="date" data-testid="chassis-edit-eta" value={eta} onChange={(e) => setEta(e.target.value)}
+                   disabled={!isLinked && jobId == null}
+                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm disabled:bg-surface-alt${etaPrefilled ? ' bg-status-green/5' : ''}`} />
+            {!isLinked && jobId == null && (
+              <span className="mt-1 block text-[10px] text-muted">Links to the job’s ETA — link a job to capture it.</span>
+            )}
+          </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs"><span className="font-semibold text-muted">Contact</span>
               <input value={form.contact_person} onChange={(e) => set('contact_person', e.target.value)}

@@ -330,7 +330,10 @@ def chassis_prefill(db: Session, job_id: int) -> dict:
     dealer_name = (db.get(Customer, dealer_id).name if dealer_id and db.get(Customer, dealer_id) else None)
     return {"customer_name": customer_name, "customer_id": customer_id, "chassis_type": chassis_type,
             "dealer_id": dealer_id, "dealer_name": dealer_name, "vin_number": vin_number,
-            "vin_source": vin_source}
+            "vin_source": vin_source,
+            # §3.5e — the job's Delivery ETA (production_jobs.chassis_eta) as a YYYY-MM-DD string, for the
+            # Add-Chassis modal's ETA auto-populate.
+            "chassis_eta": (job.chassis_eta.date().isoformat() if job.chassis_eta else None)}
 
 
 def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
