@@ -112,7 +112,7 @@ export function ChassisList() {
         {q && <button onClick={() => setQ('')} className="text-xs text-muted hover:text-body">clear</button>}
       </div>
 
-      <div className="mb-3 flex flex-wrap gap-1.5" data-testid="chassis-status-filters">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="chassis-status-filters">
         {STATUS_CHIPS.map((chip) => {
           const active = statusFilter === chip.key
           const n = chip.key ? (counts[chip.key] ?? 0) : rows.length
@@ -124,6 +124,13 @@ export function ChassisList() {
             </button>
           )
         })}
+        {/* WO v4.36a §3.6 — the chip is a display filter; the authoritative FK-based orphan view is admin-only */}
+        {isAdmin && (
+          <button data-testid="chassis-review-orphans" onClick={() => nav('/admin/orphan-chassis')}
+                  className="ml-auto rounded-full px-3 py-1 text-xs font-semibold text-primary hover:underline">
+            Review orphans →
+          </button>
+        )}
       </div>
 
       {loading ? (

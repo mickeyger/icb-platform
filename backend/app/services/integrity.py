@@ -135,14 +135,15 @@ def reconcile_calc_status(db: Session, calc_id: int, *, allow_revert: bool = Fal
 
 
 # ── Invariant 3 — no anchorless 'expected' chassis ───────────────────────────────
-def find_anchorless_chassis(db: Session) -> list[dict]:
-    """READ-ONLY. expected / expected_orphaned chassis with NO live link — no production_job and no
-    prejob_card references them. Surfaced for manual/BA-gated review; NOT a creation block."""
-    rows = db.execute(
-        select(ChassisRecord).where(
-            ChassisRecord.status.in_(("expected", "expected_orphaned")),
-            ChassisRecord.deleted_at.is_(None))      # §3.6 STEP 1 — a soft-deleted (merged) loser is not an orphan
-    ).scalars().all()
+def find_anchorless_chassis(db: Session, *, statuses=("expected", "expected_orphaned")) -> list[dict]:
+    """READ-ONLY. LIVE chassis (deleted_at IS NULL) with NO live link — no production_job and no
+    prejob_card references them. Default scope = the 'expected'/'expected_orphaned' pipeline rows
+    (Inv3 health-check / reconcile). Pass statuses=None for the WIDE §3.6 admin Find-Orphan view (ANY
+    status — catches MICKEYTEST-class 'received' orphans the narrow scope misses). NOT a creation block."""
+    stmt = select(ChassisRecord).where(ChassisRecord.deleted_at.is_(None))   # §3.6 STEP 1 — merged losers aren't orphans
+    if statuses is not None:
+        stmt = stmt.where(ChassisRecord.status.in_(statuses))
+    rows = db.execute(stmt).scalars().all()
     out: list[dict] = []
     for ch in rows:
         has_job = db.execute(
@@ -150,8 +151,9 @@ def find_anchorless_chassis(db: Session) -> list[dict]:
         has_card = db.execute(
             select(PrejobCard.id).where(PrejobCard.chassis_record_id == ch.id)).first()
         if has_job is None and has_card is None:
-            out.append({"id": ch.id, "make": ch.make, "status": ch.status,
-                        "created_via": ch.created_via, "created_source_ref": ch.created_source_ref})
+            out.append({"id": ch.id, "vin": ch.vin, "make": ch.make, "status": ch.status,
+                        "customer_name": ch.customer_name, "created_via": ch.created_via,
+                        "created_source_ref": ch.created_source_ref})
     return out
 
 
