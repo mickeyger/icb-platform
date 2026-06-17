@@ -13,7 +13,7 @@ import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisEvent, type ChassisRecordDetail } from './types'
 import { VclDclForm, type ChecklistItem } from './VclDclForm'
 import { ChassisModelSelect } from './ChassisModelSelect'
-import { type UnlinkedJob, type ChassisPrefill, FilledBadge } from './chassisShared'
+import { type UnlinkedJob, type ChassisPrefill, VIN_PROVENANCE, FilledBadge } from './chassisShared'
 
 function ProvenancePill({ via, source }: { via?: string | null; source: string }) {
   const p = via ? CHASSIS_PROVENANCE[via] : undefined
@@ -311,6 +311,13 @@ function EditChassisModal({ rec, onClose, onSaved }: {
           <h3 className="text-lg font-bold text-body">Edit chassis <span className="font-mono text-sm text-muted">{rec.vin || '(no VIN)'}</span></h3>
           <button onClick={onClose} className="rounded p-2 hover:bg-surface-alt"><X size={20} /></button>
         </div>
+        {/* §3.5c (BA ruling) — VIN is read-only here: write-once (§0.3). Correct a wrong/legacy VIN via admin
+            Merge Chassis; a NULL VIN is captured via the Capture VIN button on the detail page. */}
+        {rec.vin && (
+          <p data-testid="chassis-edit-vin-note" className="-mt-1 mb-3 text-[10px] text-muted">
+            VIN <span className="font-mono">{rec.vin}</span>{rec.vin_source ? ` · captured at ${VIN_PROVENANCE[rec.vin_source] ?? 'upstream'}` : ''} — write-once. Use admin Merge Chassis to correct a wrong VIN.
+          </p>
+        )}
         <div className="space-y-3">
           {/* §3.5c — JOB first (drives the customer prefill), symmetric with the Add-Chassis modal */}
           {isLinked ? (
