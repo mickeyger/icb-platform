@@ -6,7 +6,14 @@ the first real backend enforcement of sign-off integrity, ADR 0022 footnote); du
 """
 import pytest
 
-_MARK = "V4341VIN"
+# WO v4.36a §3.8 — capture_vin now enforces strict ISO-3779 (the 4th write path). The marker is conformant
+# (no I/O/Q — 'V4341VIN' had an 'I') and the VINs are a full 17 chars via _vin().
+_MARK = "V4341VN"
+
+
+def _vin(tag: str) -> str:
+    """A conformant 17-char marker VIN ([A-HJ-NPR-Z0-9], no I/O/Q)."""
+    return f"{_MARK}{tag}".ljust(17, "0")[:17]
 
 
 def _purge(db):
@@ -56,23 +63,23 @@ def _expected_chassis(make: str) -> int:
 def test_vin_capture_null_to_value_and_write_once(api):
     rid = _expected_chassis("Isuzu FTR")
     # NULL -> value: accepted, provenance stamped
-    r = api.post(f"/api/chassis-records/{rid}/vin", json={"vin": f"{_MARK}001"})
+    r = api.post(f"/api/chassis-records/{rid}/vin", json={"vin": _vin("001")})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["vin"] == f"{_MARK}001"
+    assert body["vin"] == _vin("001")
     assert body["vin_source"] == "chassis_page_manual"
     # write-once: a second capture is refused (the NULL-state guard)
-    r2 = api.post(f"/api/chassis-records/{rid}/vin", json={"vin": f"{_MARK}999"})
+    r2 = api.post(f"/api/chassis-records/{rid}/vin", json={"vin": _vin("999")})
     assert r2.status_code == 409
-    assert api.get(f"/api/chassis-records/{rid}").json()["vin"] == f"{_MARK}001"   # unchanged
+    assert api.get(f"/api/chassis-records/{rid}").json()["vin"] == _vin("001")   # unchanged
 
 
 def test_vin_capture_rejects_duplicate(api):
     r1 = _expected_chassis("Hino 500")
     r2 = _expected_chassis("UD Croner")
-    assert api.post(f"/api/chassis-records/{r1}/vin", json={"vin": f"{_MARK}DUP"}).status_code == 200
+    assert api.post(f"/api/chassis-records/{r1}/vin", json={"vin": _vin("DUP")}).status_code == 200
     # same VIN on another record -> 409 clash (uq_chassis_records_vin)
-    assert api.post(f"/api/chassis-records/{r2}/vin", json={"vin": f"{_MARK}DUP"}).status_code == 409
+    assert api.post(f"/api/chassis-records/{r2}/vin", json={"vin": _vin("DUP")}).status_code == 409
 
 
 def test_vin_capture_empty_422(api):
