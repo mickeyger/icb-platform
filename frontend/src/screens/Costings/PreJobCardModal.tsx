@@ -240,6 +240,21 @@ export function PreJobCardModal({
     } finally { setBusy(false) }
   }
 
+  // WO v4.36a §3.5d Patch 2 — switch template on an existing draft. Persist the current header first (so
+  // the backend re-seed substitutes against the latest vin/chassis/fridge), then PATCH template_id → the
+  // service re-seeds + substitutes the sections; setCard refreshes the modal INLINE (no confirm — Michael).
+  const changeTemplate = async (newId: number) => {
+    if (!card || newId === card.template_id) return
+    const saved = await saveDraft(true)
+    if (!saved) return
+    setBusy(true)
+    try {
+      const reseeded = await apiPatch<PrejobCard>(`/api/prejob-cards/${saved.id}`, { template_id: newId })
+      setCard(reseeded)
+      toast.push({ kind: 'ok', message: 'Template applied — sections refreshed.' })
+    } catch (e) { handleApiError(e, toast.push) } finally { setBusy(false) }
+  }
+
   const openPdf = () => {
     if (card) window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')
   }
@@ -395,7 +410,24 @@ export function PreJobCardModal({
                   </div>
                 </label>
                 <div className="text-xs text-muted">Template
-                  <div className="mt-1 rounded-md bg-surface-alt px-2 py-1.5 text-sm text-body">{card.template_name ?? '—'}</div>
+                  {/* WO v4.36a §3.5d Patch 2 — editable on a draft: switching re-seeds + re-substitutes the
+                      sections inline (no confirm). Empty list → keep current. Read-only once submitted. */}
+                  {editable ? (
+                    <select data-testid="prejob-edit-template-select" value={card.template_id ?? ''} disabled={busy}
+                      onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; if (v) void changeTemplate(v) }}
+                      className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body disabled:bg-surface-alt">
+                      {sortedTemplates.length === 0
+                        ? <option value="">No templates available — keep current</option>
+                        : sortedTemplates.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.suggested ? '★ ' : ''}{t.name}
+                              {t.product_line !== 'standard' ? ` (${t.product_line === 'rhinorange_2_0' ? 'Rhinorange 2.0' : 'Rhinorange legacy'})` : ''}
+                            </option>
+                          ))}
+                    </select>
+                  ) : (
+                    <div className="mt-1 rounded-md bg-surface-alt px-2 py-1.5 text-sm text-body">{card.template_name ?? '—'}</div>
+                  )}
                 </div>
               </div>
 

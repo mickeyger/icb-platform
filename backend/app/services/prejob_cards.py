@@ -329,18 +329,35 @@ def update_card(db: Session, card_id: int, data: dict, user) -> PrejobCard:
         # bad VIN is rejected 422 here); the normalized value is stored. NULL/blank clears it (allowed).
         from app.services import chassis_integrity as ci
         data["vin_number"] = ci.validate_vin_format(data["vin_number"])
-    if "template_id" in data and data["template_id"] is not None:
-        tpl = db.get(PrejobTemplate, data["template_id"])
-        if tpl is None or not tpl.is_active:
-            raise HTTPException(status_code=422, detail="template not found or not approved")
-        # switching template re-seeds the sections from it (the modal confirms first)
-        card.sections = copy.deepcopy(tpl.sections)
-        card.body_description = tpl.header_format or tpl.name
+    # Apply the plain field edits FIRST so a subsequent template re-seed substitutes against the LATEST
+    # header (vin / chassis / fridge), and so the template's sections always win over any stale payload.
     for k, v in data.items():
         if k != "template_id":
             setattr(card, k, v)
     if "body_gap_mm" in data:
         card.body_gap_pending = data["body_gap_mm"] is None
+    if data.get("template_id") is not None:
+        tpl = db.get(PrejobTemplate, data["template_id"])
+        if tpl is None or not tpl.is_active:
+            raise HTTPException(status_code=422, detail="template not found or not approved")
+        # WO v4.36a §3.5d — switching template re-seeds the sections + header, THEN applies the SAME token
+        # substitution CREATE does (else the re-seed ships raw {{tokens}} — the §3.0-discovery catch). The
+        # modal refreshes inline, NO confirm (Michael's call). UNLIKE create we substitute fridge tokens too
+        # (the card may already have a fridge selected at edit-time) — mirrors the PDF-render sweep.
+        from app.models.mes import FridgeUnit
+        from app.services.template_variables import build_context, substitute_sections, substitute_text
+        card.template_id = tpl.id                         # §3.5d — record the switch (else template_id/_name go stale)
+        card.sections = copy.deepcopy(tpl.sections)
+        card.body_description = tpl.header_format or tpl.name
+        fridge = (db.execute(select(FridgeUnit).where(FridgeUnit.display_name == card.fridge_model))
+                  .scalars().first() if card.fridge_model else None)
+        ctx = build_context(
+            db, card,
+            calc=db.get(CalculationRecord, card.calculation_id) if card.calculation_id else None,
+            chassis=db.get(ChassisRecord, card.chassis_record_id) if card.chassis_record_id else None,
+            fridge=fridge)
+        card.sections = substitute_sections(card.sections, ctx)
+        card.body_description = substitute_text(card.body_description, ctx) or card.body_description
     card.version = (card.version or 1) + 1
     db.commit()
     db.refresh(card)
