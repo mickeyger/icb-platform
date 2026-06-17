@@ -11,6 +11,7 @@ from ...database import User, get_db
 from ...deps import require_admin
 from ...schemas.chassis import ChassisRecordDetail
 from ...services import chassis as chassis_svc
+from ...services import chassis_merge
 from ...services import integrity
 
 router = APIRouter(prefix="/api/admin/chassis", tags=["admin-chassis"])
@@ -44,3 +45,11 @@ def soft_delete(chassis_id: int, reason: str | None = None,
     live job / card / lifecycle-event still references it (409). The optional reason is appended to notes."""
     chassis_svc.soft_delete_chassis(db, chassis_id, who=user.username, reason=reason)
     return chassis_svc.get_detail(db, chassis_id)
+
+
+@router.get("/{loser_id}/merge-preview")
+def merge_preview(loser_id: int, winner_id: int,
+                  db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    """§3.6 STEP 5 — read-only dry-run for the merge confirm modal: repoint counts, the proposed lifecycle
+    cycle renumbering, vin_conflict, non-blocking warnings, and a `blocking` flag. No mutation."""
+    return chassis_merge.preview_merge(db, loser_id, winner_id)
