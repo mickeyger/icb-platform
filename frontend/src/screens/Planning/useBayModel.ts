@@ -8,13 +8,14 @@
 //                     current_assembly_bay_id (latest assembly_assigned event)
 import { useCallback, useEffect, useState } from 'react'
 import { apiGet, apiPost, apiDelete, handleApiError, type PushToast } from '../../lib/api'
-import type { Bay, ChassisRecord } from '../Chassis/types'
+import type { AwaitingQaRow, Bay, ChassisRecord } from '../Chassis/types'
 
 export interface BayModel {
   mode: 'loading' | 'live' | 'mock'
   bays: Bay[]                                    // the 5 assembly bays (sorted) — carry the 6-state + occupant
   parking: ChassisRecord[]                       // booked-in, not yet on a bay (status in_workshop)
   occupantByBay: Record<number, ChassisRecord>   // assembly bay id -> the chassis currently on it
+  awaitingQa: AwaitingQaRow[]                     // WO v4.36a.1 — chassis moved off the bay to QA (status awaiting_qa)
   refresh: () => Promise<Bay[]>                  // resolves with the freshly fetched bay rows
   /** parking -> assembly. Re-throws ApiError(409) (bay occupied) so the caller can flash an inline reject.
    *  Resolves with the post-assign bay rows so the caller can detect a completed merge (ready_to_merge). */
@@ -26,6 +27,12 @@ export interface BayModel {
   markBodyAttached: (chassisId: number, productionJobId: number, notes?: string) => Promise<void>
   /** WO v4.35 §3.3b — the move-panels-back undo: remove a job's panels from its bay (corrects a wrong drop). */
   clearPanels: (productionJobId: number) => Promise<Bay[]>
+  /** WO v4.36a.1 — move a body-attached chassis off its bay into the Awaiting-QA queue (status-promoting:
+   *  the bay clears + the chassis appears in the zone). Thin — the confirm modal owns error handling. */
+  moveToAwaitingQa: (chassisId: number, notes?: string) => Promise<void>
+  /** WO v4.36a.2 — move a chassis off its bay BACK to the parking pool (re-prioritise; only before a
+   *  merge). The bay clears + the chassis reappears in Parking. Thin — the confirm modal owns errors. */
+  returnToParking: (chassisId: number, reason?: string) => Promise<void>
 }
 
 export function useBayModel(pushToast: PushToast): BayModel {
@@ -33,12 +40,14 @@ export function useBayModel(pushToast: PushToast): BayModel {
   const [bays, setBays] = useState<Bay[]>([])
   const [parking, setParking] = useState<ChassisRecord[]>([])
   const [occupantByBay, setOccupantByBay] = useState<Record<number, ChassisRecord>>({})
+  const [awaitingQa, setAwaitingQa] = useState<AwaitingQaRow[]>([])
 
   const refresh = useCallback(async (): Promise<Bay[]> => {
     try {
-      const [bayRows, chassis] = await Promise.all([
+      const [bayRows, chassis, qaRows] = await Promise.all([
         apiGet<Bay[]>('/api/chassis-records/bays/assembly'),
         apiGet<ChassisRecord[]>('/api/chassis-records?limit=200'),
+        apiGet<AwaitingQaRow[]>('/api/chassis-records/awaiting-qa'),
       ])
       const occ: Record<number, ChassisRecord> = {}
       const pool: ChassisRecord[] = []
@@ -52,12 +61,14 @@ export function useBayModel(pushToast: PushToast): BayModel {
       setBays(bayRows)
       setParking(pool)
       setOccupantByBay(occ)
+      setAwaitingQa(qaRows)
       setMode('live')
       return bayRows
     } catch {
       setBays([])
       setParking([])
       setOccupantByBay({})
+      setAwaitingQa([])
       setMode('mock')
       return []
     }
@@ -118,6 +129,28 @@ export function useBayModel(pushToast: PushToast): BayModel {
     [refresh, pushToast],
   )
 
-  return { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached,
-           clearPanels }
+  const moveToAwaitingQa = useCallback(
+    // Thin — the confirm modal owns error handling (so a 409 already-moved message isn't double-toasted).
+    async (chassisId: number, notes?: string): Promise<void> => {
+      await apiPost(`/api/chassis-records/${chassisId}/move-to-awaiting-qa`, {
+        notes: (notes ?? '').trim() || null,
+      })
+      await refresh()
+    },
+    [refresh],
+  )
+
+  const returnToParking = useCallback(
+    // Thin — the confirm modal owns error handling (so a 409 body-attached message isn't double-toasted).
+    async (chassisId: number, reason?: string): Promise<void> => {
+      await apiPost(`/api/chassis-records/${chassisId}/return-to-parking`, {
+        reason: (reason ?? '').trim() || null,
+      })
+      await refresh()
+    },
+    [refresh],
+  )
+
+  return { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
+           markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking }
 }

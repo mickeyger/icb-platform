@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.database import Customer            # WO v4.34.1 §3.4 — cross-schema dealer-name resolve
 from app.models.mes import (
     AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, PrejobCard, ProductionJob,
+    ProductionJobAudit,
 )
 from app.schemas.chassis import (
     ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
@@ -55,7 +56,10 @@ CHASSIS_CHECKLIST_TEMPLATES = {
 # assign_assembly_bay(); 'body_attached' (WO v4.35) is written by record_body_attached() — a PHASE
 # marker (DEV-2): it is logged as an event but deliberately does NOT change chassis_records.status,
 # which stays 'in_assembly' (status promotion is a v4.36+ workshop-tablet concern).
-ALLOWED_EVENT_TYPES = {"VCL", "DCL", "assembly_assigned", "body_attached"}
+# 'moved_to_awaiting_qa' (WO v4.36a.1) is written by record_moved_to_awaiting_qa() — UNLIKE body_attached
+# it is a workflow-PHASE TRANSITION (the chassis has LEFT assembly), so it DOES promote the status to
+# 'awaiting_qa' atomically with the event (ADR 0026 footnote — phase-only-refines vs status-promotes).
+ALLOWED_EVENT_TYPES = {"VCL", "DCL", "assembly_assigned", "body_attached", "moved_to_awaiting_qa"}
 
 # WO v4.35 §3.3b (STRETCH) — the JOB-side bay events live in a SEPARATE table (production_job_bay_events)
 # with their OWN allowlist; deliberately NOT folded into ALLOWED_EVENT_TYPES so a job-bay event can never
@@ -792,6 +796,113 @@ def record_body_attached(db: Session, record_id: int, production_job_id: int, wh
     db.commit()
     db.refresh(evt)
     return evt
+
+
+def record_moved_to_awaiting_qa(db: Session, record_id: int, who: str, notes=None) -> ChassisLifecycleEvent:
+    """WO v4.36a.1 §0.5 — the Awaiting-QA handoff chokepoint. A body-attached chassis is moved off its
+    assembly bay into the QA queue: this logs a 'moved_to_awaiting_qa' event AND promotes the chassis
+    status to 'awaiting_qa' ATOMICALLY (one txn). Unlike body_attached (a phase-only EVENT that keeps
+    status='in_assembly'), this is a workflow-phase TRANSITION — the chassis has LEFT assembly — so the
+    status write is correct (ADR 0026 footnote). Because current_occupants() / the merge double-bay check /
+    bay_code all gate on status=='in_assembly', that single write drops the chassis out of bay occupancy
+    EVERYWHERE (the bay derives 'empty') with no per-derivation change — status is the single source.
+
+    Pre-conditions (§0.5, actor permission gated at the router): the chassis exists and is live (not
+    soft-deleted), it is currently on a bay (status 'in_assembly' + a prior 'assembly_assigned' this cycle),
+    it has a 'body_attached' event this cycle, and it hasn't already been moved. Idempotent: 409 if already
+    in Awaiting QA."""
+    rec = db.get(ChassisRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is not None:
+        raise HTTPException(status_code=409, detail="this chassis has been deleted")
+    if rec.status != "in_assembly":
+        raise HTTPException(
+            status_code=422,
+            detail=f"chassis is '{rec.status}', not on an assembly bay — only an in-assembly chassis can "
+                   "move to Awaiting QA")
+    cycle = _latest_cycle(db, record_id)
+    if not _has_event(db, record_id, "assembly_assigned", cycle):
+        raise HTTPException(status_code=422, detail="chassis is not on an assembly bay — assign it first")
+    if not _has_event(db, record_id, "body_attached", cycle):
+        raise HTTPException(status_code=422,
+                            detail="attach the body first — only a body-attached chassis can move to Awaiting QA")
+    if _has_event(db, record_id, "moved_to_awaiting_qa", cycle):
+        raise HTTPException(status_code=409, detail="chassis is already in Awaiting QA for this cycle")
+    evt = ChassisLifecycleEvent(chassis_record_id=record_id, cycle_number=cycle,
+                                event_type="moved_to_awaiting_qa", event_date=date.today(),
+                                notes=notes, created_by=who)
+    db.add(evt)
+    rec.status = "awaiting_qa"                        # PHASE TRANSITION — left assembly → clears the bay
+    rec.updated_by = who
+    db.commit()
+    db.refresh(evt)
+    return evt
+
+
+def list_awaiting_qa(db: Session) -> list[dict]:
+    """WO v4.36a.1 §0.7 — chassis currently in the Awaiting-QA queue (status='awaiting_qa', live), for the
+    Planning Board zone. job_number is the linked production job (back-ref), if any. Newest first."""
+    rows = db.execute(
+        select(ChassisRecord.id, ChassisRecord.vin, ChassisRecord.make, ChassisRecord.model,
+               ChassisRecord.customer_name, ProductionJob.job_number)
+        .outerjoin(ProductionJob, ProductionJob.chassis_record_id == ChassisRecord.id)
+        .where(ChassisRecord.status == "awaiting_qa", ChassisRecord.deleted_at.is_(None))
+        .order_by(ChassisRecord.id.desc())
+    ).all()
+    return [{"chassis_id": cid, "vin": vin, "make": make, "model": model,
+             "customer_name": cust, "job_number": jn}
+            for cid, vin, make, model, cust, jn in rows]
+
+
+def return_chassis_to_parking(db: Session, record_id: int, user, reason=None) -> dict:
+    """WO v4.36a.2 — the REVERSE of assign_assembly_bay: move a chassis OFF its assembly bay back to the
+    parking pool (status 'in_assembly' → 'in_workshop'), so a more urgent job can take the bay. Allowed
+    ONLY before a merge — i.e. no 'body_attached' event this cycle (after a merge the only exit is forward,
+    to Awaiting QA). Mechanism mirrors clear_panels_arrived: DELETE the cycle's 'assembly_assigned' event +
+    flip status. Because current_occupants() gates on 'in_assembly', the bay clears across every read for
+    free (it derives 'empty', or 'pre_assembly' if the job's panels are still staged — D1: panels stay).
+    When a production job is linked, the transition is recorded in production_jobs_audit (the
+    re-prioritisation decision trail) with an optional reason (≤500); an unlinked chassis has nothing
+    downstream to audit. The chassis is immediately re-assignable (open VCL cycle, status 'in_workshop')."""
+    who = getattr(user, "username", None)
+    rec = db.get(ChassisRecord, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    if rec.deleted_at is not None:
+        raise HTTPException(status_code=409, detail="this chassis has been deleted")
+    if rec.status != "in_assembly":
+        raise HTTPException(
+            status_code=422,
+            detail=f"chassis is '{rec.status}', not on an assembly bay — only an in-assembly chassis can "
+                   "be returned to parking")
+    cycle = _latest_cycle(db, record_id)
+    if _has_event(db, record_id, "body_attached", cycle):
+        raise HTTPException(
+            status_code=409,
+            detail="body already attached to this chassis — it can't go back to parking; move it forward to "
+                   "Awaiting QA instead")
+    bay_id = _current_assembly_bay_id(db, record_id)             # resolve BEFORE the delete (for the audit)
+    bay = db.get(AssemblyBay, bay_id) if bay_id is not None else None
+    bay_code = bay.code if bay is not None else None
+    # DELETE the cycle's assembly_assigned event (mirrors clear_panels_arrived) — the bay derivation then
+    # falls away on its own; no reversing event, so the six assembly_assigned consumers are unchanged.
+    db.query(ChassisLifecycleEvent).filter(
+        ChassisLifecycleEvent.chassis_record_id == record_id,
+        ChassisLifecycleEvent.event_type == "assembly_assigned",
+        ChassisLifecycleEvent.cycle_number == cycle).delete(synchronize_session=False)
+    rec.status = "in_workshop"                                   # back to the parking pool
+    rec.updated_by = who
+    job = db.execute(
+        select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
+    if job is not None:
+        clean_reason = (reason or "").strip()[:500] or None     # empty accepted; server-cap at 500
+        db.add(ProductionJobAudit(
+            production_job_id=job.id, action="chassis_returned_to_parking",
+            previous_status="in_assembly", new_status="in_workshop", previous_bay=bay_code,
+            user_id=getattr(user, "id", None), user_name=who, reason=clean_reason))
+    db.commit()
+    return {"chassis_id": record_id, "bay_code": bay_code, "reverted": True}
 
 
 def record_panels_arrived_in_bay(db: Session, production_job_id: int, bay_id: int, *,

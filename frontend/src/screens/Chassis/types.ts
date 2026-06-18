@@ -10,7 +10,8 @@ export interface ChassisEventPhoto {
 export interface ChassisEvent {
   id: number
   cycle_number: number
-  event_type: 'VCL' | 'DCL' | 'assembly_assigned'   // WO v4.31 §0.4
+  // WO v4.31 §0.4 · v4.35 body_attached · v4.36a.1 moved_to_awaiting_qa (status-promoting handoff)
+  event_type: 'VCL' | 'DCL' | 'assembly_assigned' | 'body_attached' | 'moved_to_awaiting_qa'
   assembly_bay_id?: number | null                   // set only on assembly_assigned events
   event_date?: string | null
   legacy_reference?: string | null
@@ -37,6 +38,17 @@ export interface ChassisRecord {
   vin_source?: string | null                // WO v4.34.1 §0.17 — VIN provenance (chassis_page_manual = Gap A)
   event_count: number
   latest_event_date?: string | null
+}
+
+// WO v4.36a.1 §0.7 — one chassis in the Awaiting-QA Planning Board zone (mirrors backend
+// schemas/chassis.py AwaitingQaOut). Fed by GET /api/chassis-records/awaiting-qa.
+export interface AwaitingQaRow {
+  chassis_id: number
+  vin?: string | null
+  make?: string | null
+  model?: string | null
+  customer_name?: string | null
+  job_number?: string | null
 }
 
 // WO v4.34 §3.7 — one chassis-type DDM entry (mirrors backend schemas/chassis.py ChassisModelOut).
@@ -76,6 +88,7 @@ export const CHASSIS_STATUS_STYLE: Record<string, string> = {
   received: 'bg-status-amber/15 text-status-amber',
   in_workshop: 'bg-primary-light text-primary',
   in_assembly: 'bg-status-green/15 text-status-green',   // WO v4.31 — on an assembly bay
+  awaiting_qa: 'bg-sky-100 text-sky-700',                // WO v4.36a.1 — body attached, moved off the bay to QA
   dispatched: 'bg-status-green/15 text-status-green',
 }
 

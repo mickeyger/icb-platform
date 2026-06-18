@@ -173,6 +173,29 @@ class PanelsArrivedRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
+class MoveToAwaitingQaRequest(BaseModel):
+    """WO v4.36a.1 §0.5 — move a body-attached chassis off its assembly bay into the QA queue
+    (POST /api/chassis-records/{id}/move-to-awaiting-qa). Optional handover note only — the chassis
+    identity comes from the path; pre-conditions are enforced server-side."""
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+class ReturnToParkingRequest(BaseModel):
+    """WO v4.36a.2 — move a chassis off its assembly bay back to the parking pool, before any merge
+    (POST /api/chassis-records/{id}/return-to-parking). Optional re-prioritisation reason only."""
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class AwaitingQaOut(BaseModel):
+    """WO v4.36a.1 §0.7 — one chassis in the Awaiting-QA Planning Board zone."""
+    chassis_id: int
+    vin: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    customer_name: Optional[str] = None
+    job_number: Optional[str] = None
+
+
 class BayOut(BaseModel):
     """A parking or assembly bay (master reference data, WO v4.31 §0.3).
 

@@ -12,9 +12,10 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    AssemblyAssignRequest, BayOut, BodyAttachedRequest, ChassisCreateResult, ChassisEventCapture,
-    ChassisEventOut, ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate, ChassisRecordDetail,
-    ChassisRecordOut, ChassisRecordUpdate, ChassisVinCapture,
+    AssemblyAssignRequest, AwaitingQaOut, BayOut, BodyAttachedRequest, ChassisCreateResult,
+    ChassisEventCapture, ChassisEventOut, ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate,
+    ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate, ChassisVinCapture,
+    MoveToAwaitingQaRequest, ReturnToParkingRequest,
 )
 from ..services import chassis as svc
 
@@ -54,6 +55,13 @@ def bays_assembly(db: Session = Depends(get_db), user: User = Depends(require_us
 def bays_parking(db: Session = Depends(get_db), user: User = Depends(require_user)):
     """WO v4.31 §0.3 — the ~24 outside parking bays (Planning Board parking lane)."""
     return svc.list_parking_bays(db)
+
+
+@router.get("/awaiting-qa", response_model=List[AwaitingQaOut])
+def awaiting_qa(db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """WO v4.36a.1 §0.7 — chassis currently in the Awaiting-QA queue (status='awaiting_qa'), feeding the
+    Planning Board AWAITING QA zone. Read-only; any authenticated user (the zone is informational)."""
+    return svc.list_awaiting_qa(db)
 
 
 @router.get("/photos/{photo_id}")
@@ -128,6 +136,27 @@ def body_attached(record_id: int, payload: BodyAttachedRequest, db: Session = De
     signal) are enforced in services.chassis.record_body_attached — the single chokepoint."""
     return svc.record_body_attached(db, record_id, payload.production_job_id, who=user.username,
                                     notes=payload.notes)
+
+
+@router.post("/{record_id}/move-to-awaiting-qa", response_model=ChassisEventOut, status_code=201)
+def move_to_awaiting_qa(record_id: int, payload: MoveToAwaitingQaRequest, db: Session = Depends(get_db),
+                        user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v4.36a.1 §0.5 — move a body-attached chassis off its bay into the Awaiting-QA queue. Gated on
+    `chassis.assembly_assign` (planner/admin/production; workshop + sales → 403), matching body-attached.
+    The pre-conditions (on a bay + body attached + not already moved) AND the atomic status promotion to
+    'awaiting_qa' are enforced in services.chassis.record_moved_to_awaiting_qa — the single chokepoint."""
+    return svc.record_moved_to_awaiting_qa(db, record_id, who=user.username, notes=payload.notes)
+
+
+@router.post("/{record_id}/return-to-parking", status_code=200)
+def return_to_parking(record_id: int, payload: ReturnToParkingRequest, db: Session = Depends(get_db),
+                      user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v4.36a.2 — move a chassis off its assembly bay back to the parking pool, to free the bay for a
+    more urgent job. Gated `chassis.assembly_assign` (planner/admin/production; workshop + sales → 403),
+    matching the other yard moves. Allowed ONLY before a merge — the 'no body_attached' precondition + the
+    status flip + the optional audit are enforced in services.chassis.return_chassis_to_parking (the single
+    chokepoint). The full user is passed so the re-prioritisation audit can record who."""
+    return svc.return_chassis_to_parking(db, record_id, user, reason=payload.reason)
 
 
 @router.post("/{record_id}/events/{event_id}/photos", response_model=List[ChassisPhotoOut],
