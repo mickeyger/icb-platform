@@ -188,6 +188,17 @@ def _reseed(db):
     mk_event(ch, "assembly_assigned", days_ago=9, bay_id=bays[0].id)        # AssemblyBay-1
     mk_event(ch, "body_attached", days_ago=3)                              # attached 3 days ago
 
+    # ── Stage G2 — moved off the bay to AWAITING QA ×1 (status-promoting; WO v4.36a.1) ──
+    # Pre-staged so the Planning Board AWAITING QA zone has visible content on first load. status is
+    # 'awaiting_qa' (NOT in_assembly) so it occupies NO bay — current_occupants excludes it.
+    c = mk_calc("D4080/06/2026", "in_production")
+    ch = mk_chassis("FAW", _vin(800), "awaiting_qa")
+    mk_job(c, "in_production", "40800", chassis_id=ch.id)
+    mk_event(ch, "VCL", days_ago=20)
+    mk_event(ch, "assembly_assigned", days_ago=10, bay_id=bays[0].id)       # was on a bay…
+    mk_event(ch, "body_attached", days_ago=2)
+    mk_event(ch, "moved_to_awaiting_qa", days_ago=0)                        # …handed to QA today
+
     # ── Stage H — completed / dispatched ×1 ──────────────────────────────────────
     c = mk_calc("D4070/06/2026", "completed")
     ch = mk_chassis("Isuzu", _vin(700), "dispatched")

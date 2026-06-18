@@ -491,7 +491,9 @@ def chassis_received(job, chassis_status: Optional[str]) -> bool:
     created record, NOT a booked-in chassis."""
     if job.chassis_received_at is not None:
         return True
-    return chassis_status in ("in_workshop", "in_assembly", "dispatched")
+    # WO v4.36a.1 — 'awaiting_qa' is PAST in_assembly (body attached, moved to the QA queue): the chassis
+    # is unambiguously booked-in/on-site, so it belongs in this set alongside in_assembly/dispatched.
+    return chassis_status in ("in_workshop", "in_assembly", "awaiting_qa", "dispatched")
 
 
 def _chassis_status_map(db: Session, jobs) -> dict:

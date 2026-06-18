@@ -38,12 +38,35 @@ interface MergePrompt {
   vin: string
 }
 
+// WO v4.36a.1 — the chassis a bay-tile drag dropped onto the Awaiting-QA zone (the confirm modal's subject).
+interface QaPrompt {
+  bayCode: string
+  chassisId: number
+  vin: string
+  customerName: string
+}
+
+// MIME for a bay-tile -> Awaiting-QA drag (decoupled, mirrors the §3.3b panel-job DataTransfer pattern).
+const QA_MIME = 'application/x-awaiting-qa'
+
+// WO v4.36a.2 — the chassis a bay-tile drag dropped onto the Parking pool (the return-confirm modal's subject).
+interface ParkingPrompt {
+  bayCode: string
+  chassisId: number
+  vin: string
+  customerName: string
+}
+
+// MIME for a bay-tile -> Parking (return) drag. Disjoint from QA_MIME: a tile is EITHER QA-draggable
+// (body attached) OR parking-draggable (no body), never both — the bay state decides.
+const PARK_MIME = 'application/x-return-to-parking'
+
 export function BayModelLanes() {
   const toast = useToast()
   const { hasPermission, isAdmin } = useAppData()
   const canAssign = isAdmin || hasPermission('chassis.assembly_assign')
-  const { mode, bays, parking, occupantByBay, refresh, assign, markPanelsArrived, markBodyAttached,
-          clearPanels } = useBayModel(toast.push)
+  const { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
+          markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking } = useBayModel(toast.push)
   const [drag, setDrag] = useState<ChassisRecord | null>(null)
   const [rejectBay, setRejectBay] = useState<number | null>(null)
   const [busyBay, setBusyBay] = useState<number | null>(null)
@@ -51,6 +74,20 @@ export function BayModelLanes() {
   const [panelHoverBay, setPanelHoverBay] = useState<number | null>(null)
   const [mergePrompt, setMergePrompt] = useState<MergePrompt | null>(null)
   const [mergeBusy, setMergeBusy] = useState(false)
+  // WO v4.36a.1 — the Awaiting-QA handoff: a bay-tile drag (attached_today / post_attached) lights up the
+  // zone below, and a drop opens the confirm-with-notes modal before the status-promoting move.
+  const [qaDragActive, setQaDragActive] = useState(false)
+  const [qaHover, setQaHover] = useState(false)
+  const [qaPrompt, setQaPrompt] = useState<QaPrompt | null>(null)
+  const [qaNotes, setQaNotes] = useState('')
+  const [qaBusy, setQaBusy] = useState(false)
+  // WO v4.36a.2 — return-to-parking: a pre-merge bay-tile drag onto the Parking pool, to free the bay for
+  // a more urgent job. Mirror of the QA flow (disjoint by bay state) + an optional re-prioritisation reason.
+  const [parkingDragActive, setParkingDragActive] = useState(false)
+  const [parkingHover, setParkingHover] = useState(false)
+  const [parkingPrompt, setParkingPrompt] = useState<ParkingPrompt | null>(null)
+  const [parkingReason, setParkingReason] = useState('')
+  const [parkingBusy, setParkingBusy] = useState(false)
 
   useRefetchOnFocus(refresh)        // §3.3b — cross-page sync: the lanes refetch on tab focus
 
@@ -64,6 +101,31 @@ export function BayModelLanes() {
     }
     document.addEventListener('icb:panel-drag', onPanelDrag)
     return () => document.removeEventListener('icb:panel-drag', onPanelDrag)
+  }, [])
+
+  // WO v4.36a.1 — a bay-tile drag announces itself on `document` so the Awaiting-QA zone lights up as the
+  // drop target for its duration (the cue without which the planner can't see where to drop). Same decoupled
+  // pattern as §3.3b's panel-drag — no shared context between the bay tiles and the zone.
+  useEffect(() => {
+    const onQaDrag = (e: Event) => {
+      const active = !!(e as CustomEvent).detail?.active
+      setQaDragActive(active)
+      if (!active) setQaHover(false)
+    }
+    document.addEventListener('icb:awaiting-qa-drag', onQaDrag)
+    return () => document.removeEventListener('icb:awaiting-qa-drag', onQaDrag)
+  }, [])
+
+  // WO v4.36a.2 — a pre-merge bay-tile drag announces itself so the Parking pool lights up as the drop
+  // target for its duration (same decoupled CustomEvent pattern as the QA + panel drags).
+  useEffect(() => {
+    const onParkDrag = (e: Event) => {
+      const active = !!(e as CustomEvent).detail?.active
+      setParkingDragActive(active)
+      if (!active) setParkingHover(false)
+    }
+    document.addEventListener('icb:return-to-parking-drag', onParkDrag)
+    return () => document.removeEventListener('icb:return-to-parking-drag', onParkDrag)
   }, [])
 
   if (mode === 'mock') return null // bay model is a live-only surface (API unreachable → offline demo)
@@ -180,12 +242,115 @@ export function BayModelLanes() {
     }
   }
 
+  // WO v4.36a.1 — bay-tile drag SOURCE (attached_today / post_attached). DataTransfer carries the chassis id;
+  // the CustomEvent lights up the zone. effectAllowed='move' so the cursor reads as a move, not a copy.
+  function onTileDragStart(e: React.DragEvent, chassisId: number) {
+    e.dataTransfer.setData(QA_MIME, String(chassisId))
+    e.dataTransfer.effectAllowed = 'move'
+    document.dispatchEvent(new CustomEvent('icb:awaiting-qa-drag', { detail: { active: true } }))
+  }
+  function onTileDragEnd() {
+    document.dispatchEvent(new CustomEvent('icb:awaiting-qa-drag', { detail: { active: false } }))
+  }
+
+  // A drop on the zone opens the confirm-with-notes modal (the move itself is deferred to confirmMoveToQa).
+  function onZoneDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setQaHover(false)
+    const raw = e.dataTransfer.getData(QA_MIME)
+    if (!raw || !canAssign) return
+    const chassisId = Number(raw)
+    let bayCode = '—'
+    let occ: ChassisRecord | undefined
+    for (const b of bays) {
+      const o = occupantByBay[b.id]
+      if (o && o.id === chassisId) { bayCode = b.code; occ = o; break }
+    }
+    setQaNotes('')
+    setQaPrompt({ bayCode, chassisId, vin: occ?.vin ?? '—', customerName: occ?.customer_name ?? '—' })
+  }
+
+  async function confirmMoveToQa() {
+    if (!qaPrompt) return
+    setQaBusy(true)
+    try {
+      await moveToAwaitingQa(qaPrompt.chassisId, qaNotes)
+      toast.push({ kind: 'ok', message: `Moved to Awaiting QA — ${qaPrompt.vin}. Bay ${qaPrompt.bayCode} is now free.` })
+      setQaPrompt(null)
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 409 || e.status === 422)) {
+        toast.push({ kind: 'warn', message: e.detail || 'Could not move to Awaiting QA — refresh and retry.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
+    } finally {
+      setQaBusy(false)
+    }
+  }
+
+  // WO v4.36a.2 — bay-tile drag SOURCE for the pre-merge return to Parking (awaiting_attachment /
+  // ready_to_merge). Same DataTransfer + CustomEvent shape as the QA drag, but a different MIME so the
+  // Parking pool (not the QA zone) is the drop target.
+  function onParkingTileDragStart(e: React.DragEvent, chassisId: number) {
+    e.dataTransfer.setData(PARK_MIME, String(chassisId))
+    e.dataTransfer.effectAllowed = 'move'
+    document.dispatchEvent(new CustomEvent('icb:return-to-parking-drag', { detail: { active: true } }))
+  }
+  function onParkingTileDragEnd() {
+    document.dispatchEvent(new CustomEvent('icb:return-to-parking-drag', { detail: { active: false } }))
+  }
+
+  // A drop on the Parking pool opens the confirm-with-reason modal (the move is deferred to confirm).
+  function onParkingDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setParkingHover(false)
+    const raw = e.dataTransfer.getData(PARK_MIME)
+    if (!raw || !canAssign) return
+    const chassisId = Number(raw)
+    let bayCode = '—'
+    let occ: ChassisRecord | undefined
+    for (const b of bays) {
+      const o = occupantByBay[b.id]
+      if (o && o.id === chassisId) { bayCode = b.code; occ = o; break }
+    }
+    setParkingReason('')
+    setParkingPrompt({ bayCode, chassisId, vin: occ?.vin ?? '—', customerName: occ?.customer_name ?? '—' })
+  }
+
+  async function confirmReturnToParking() {
+    if (!parkingPrompt) return
+    setParkingBusy(true)
+    try {
+      await returnToParking(parkingPrompt.chassisId, parkingReason)
+      toast.push({ kind: 'ok', message: `Returned to parking — ${parkingPrompt.vin}. Bay ${parkingPrompt.bayCode} is now free.` })
+      setParkingPrompt(null)
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 409 || e.status === 422)) {
+        toast.push({ kind: 'warn', message: e.detail || 'Could not move to parking — refresh and retry.' })
+      } else {
+        handleApiError(e, toast.push)
+      }
+    } finally {
+      setParkingBusy(false)
+    }
+  }
+
   const freeBays = bays.filter((b) => !occupantByBay[b.id] && (b.state ?? 'empty') === 'empty').length
 
   return (
     <div className="mt-4 grid grid-cols-[260px_1fr] gap-4" data-testid="bay-model">
-      {/* Parking pool — booked-in chassis awaiting an assembly bay (status in_workshop). */}
-      <Card className="self-start">
+      {/* Parking pool — booked-in chassis awaiting an assembly bay (status in_workshop). WO v4.36a.2: also
+          a DROP TARGET for a pre-merge bay-tile drag (return a chassis to parking to free the bay). */}
+      <Card
+        data-testid="parking-zone"
+        data-park-drop-active={parkingDragActive && canAssign ? 'true' : 'false'}
+        className={`self-start${parkingDragActive && canAssign ? (parkingHover ? ' ring-2 ring-status-amber' : ' ring-1 ring-status-amber/50') : ''}`}
+        onDragOver={(e) => {
+          if (canAssign && e.dataTransfer.types.includes(PARK_MIME)) { e.preventDefault(); setParkingHover(true) }
+        }}
+        onDragLeave={() => setParkingHover(false)}
+        onDrop={onParkingDrop}
+      >
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-semibold uppercase tracking-wide text-muted">Parking</span>
           <span className="text-[11px] text-muted">24 bays</span>
@@ -215,8 +380,12 @@ export function BayModelLanes() {
           ))}
           {parking.length === 0 && <div className="text-sm text-muted">No chassis in parking.</div>}
         </div>
-        <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
-          Booked-in, awaiting a bay.{canAssign ? ' Drag onto an assembly bay →' : ''}
+        <div className={`mt-3 border-t pt-3 text-[11px] ${
+          parkingDragActive && canAssign ? 'border-status-amber font-medium text-status-amber' : 'border-line text-muted'
+        }`}>
+          {parkingDragActive && canAssign
+            ? '↩ Drop here to return the chassis to parking'
+            : <>Booked-in, awaiting a bay.{canAssign ? ' Drag onto an assembly bay →' : ''}</>}
         </div>
       </Card>
 
@@ -240,6 +409,12 @@ export function BayModelLanes() {
             const dropCue = panelDragActive && canAssign
               ? (panelHoverBay === bay.id ? ' ring-2 ring-primary' : ' ring-1 ring-primary/40')
               : ''
+            // §0.6 — a body-attached, on-bay chassis can be dragged off to the QA zone. The affordance is
+            // permission-gated (canAssign): workshop/sales get no drag handle (Q5 RO).
+            const isQaDraggable = canAssign && occ != null && (state === 'attached_today' || state === 'post_attached')
+            // §0.x — a chassis on a bay BEFORE a merge (no body attached) can be dragged back to Parking.
+            // Disjoint from isQaDraggable by state, so each tile has exactly one drag behaviour.
+            const isParkingDraggable = canAssign && occ != null && (state === 'awaiting_attachment' || state === 'ready_to_merge')
             return (
               <div
                 key={bay.id}
@@ -247,6 +422,12 @@ export function BayModelLanes() {
                 data-bay-id={bay.id}
                 data-bay-code={bay.code}
                 data-bay-state={state}
+                draggable={isQaDraggable || isParkingDraggable}
+                onDragStart={(e) => {
+                  if (isQaDraggable && occ) onTileDragStart(e, occ.id)
+                  else if (isParkingDraggable && occ) onParkingTileDragStart(e, occ.id)
+                }}
+                onDragEnd={() => { onTileDragEnd(); onParkingTileDragEnd() }}
                 onDragOver={(e) => {
                   if (!canAssign) return
                   const isPanel = e.dataTransfer.types.includes('application/x-panel-job')
@@ -263,7 +444,7 @@ export function BayModelLanes() {
                     : mismatch
                       ? 'border border-line border-l-4 border-l-status-red bg-status-red/5'
                       : ui.border
-                }${dropCue}`}
+                }${dropCue}${isQaDraggable || isParkingDraggable ? ' cursor-grab active:cursor-grabbing' : ''}`}
               >
                 {busy && (
                   <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-white/60 text-[11px] text-muted">
@@ -303,6 +484,18 @@ export function BayModelLanes() {
                     panels: job {bay.panels_job_number ?? bay.panels_job_id} (different job)
                   </div>
                 )}
+                {isQaDraggable && (
+                  <div data-testid="qa-drag-hint"
+                       className="mt-1 flex items-center gap-1 text-[10px] font-medium text-sky-700">
+                    <GripVertical size={11} className="shrink-0" /> drag to QA →
+                  </div>
+                )}
+                {isParkingDraggable && (
+                  <div data-testid="parking-drag-hint"
+                       className="mt-1 flex items-center gap-1 text-[10px] font-medium text-status-amber">
+                    <GripVertical size={11} className="shrink-0" /> ← drag to parking
+                  </div>
+                )}
                 {state === 'ready_to_merge' && canAssign && (
                   <button
                     data-testid="merge-button"
@@ -334,6 +527,58 @@ export function BayModelLanes() {
         </div>
       </Card>
 
+      {/* WO v4.36a.1 — AWAITING QA zone: full-width, below the assembly bays (workflow flows PARKING →
+          ASSEMBLY → AWAITING QA). Drop target for a bay-tile drag; an inverted parking lot of chassis that
+          have left their bay for QC. The drop opens the confirm-with-notes modal; the move is status-promoting
+          (bay clears + chassis lands here on refresh). */}
+      <Card
+        data-testid="awaiting-qa-zone"
+        data-qa-drop-active={qaDragActive && canAssign ? 'true' : 'false'}
+        className={`col-span-2${qaDragActive && canAssign ? (qaHover ? ' ring-2 ring-sky-500' : ' ring-1 ring-sky-400/50') : ''}`}
+        onDragOver={(e) => {
+          if (canAssign && e.dataTransfer.types.includes(QA_MIME)) { e.preventDefault(); setQaHover(true) }
+        }}
+        onDragLeave={() => setQaHover(false)}
+        onDrop={onZoneDrop}
+      >
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-semibold uppercase tracking-wide text-muted">Awaiting QA</span>
+          <span className="text-[11px] text-muted">{awaitingQa.length} chassis</span>
+        </div>
+        {awaitingQa.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {awaitingQa.map((c) => (
+              <div
+                key={c.chassis_id}
+                data-testid="awaiting-qa-chassis"
+                data-id={c.chassis_id}
+                className="w-[184px] rounded-md border border-line border-l-4 border-l-sky-500 bg-sky-50 p-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-semibold">{c.vin || '—'}</span>
+                  <span className="rounded px-1 text-[10px] font-medium bg-sky-100 text-sky-700">QA</span>
+                </div>
+                <div className="truncate text-xs text-body">{c.customer_name || '—'}</div>
+                <div className="truncate text-[11px] text-muted">
+                  {[c.make, c.model].filter(Boolean).join(' ') || '—'}
+                  {c.job_number ? ` · ${c.job_number}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div
+            className={`rounded-md border border-dashed p-4 text-center text-xs ${
+              qaDragActive && canAssign ? 'border-sky-400 bg-sky-50 text-sky-700' : 'border-line text-muted'
+            }`}
+          >
+            {canAssign
+              ? 'Drag a completed (body-attached) chassis here to free the bay.'
+              : 'No chassis awaiting QA.'}
+          </div>
+        )}
+      </Card>
+
       {/* §3.3b auto-merge prompt — fires when a drop leaves the bay ready_to_merge (panels + chassis, same job). */}
       {mergePrompt && (
         <div
@@ -363,6 +608,105 @@ export function BayModelLanes() {
                 className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50"
               >
                 {mergeBusy ? 'Merging…' : '🔗 Mark body attached'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WO v4.36a.1 — Awaiting-QA confirm: opened by a drop on the zone; optional handover note (the
+          v4.34.2 confirm-modal pattern). Confirm fires the status-promoting move (bay clears + chassis lands
+          in the zone on refresh). */}
+      {qaPrompt && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          data-testid="qa-prompt"
+          onClick={() => { if (!qaBusy) setQaPrompt(null) }}
+        >
+          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-body">Move to Awaiting QA — {qaPrompt.bayCode}</div>
+            <p className="mt-2 text-sm text-muted">
+              Chassis <span className="font-mono text-body">{qaPrompt.vin}</span>
+              {qaPrompt.customerName !== '—' ? <> ({qaPrompt.customerName})</> : null} leaves the bay and joins
+              the QA queue. Bay <span className="font-semibold text-body">{qaPrompt.bayCode}</span> frees up.
+            </p>
+            <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Handover note (optional)
+            </label>
+            <textarea
+              data-testid="qa-notes"
+              value={qaNotes}
+              onChange={(e) => setQaNotes(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="e.g. minor paint touch-up flagged for QC"
+              className="mt-1 w-full rounded-md border border-line p-2 text-sm focus:border-primary focus:outline-none"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setQaPrompt(null)}
+                disabled={qaBusy}
+                className="rounded-md border border-line px-3 py-1.5 text-sm text-body hover:bg-surface-alt disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmMoveToQa()}
+                data-testid="qa-confirm"
+                disabled={qaBusy}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+              >
+                {qaBusy ? 'Moving…' : 'Move to QA'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WO v4.36a.2 — return-to-parking confirm: opened by a drop on the Parking pool; optional
+          re-prioritisation reason (the v4.34.2 unschedule-revert pattern). Confirm frees the bay + the
+          chassis reappears in Parking on refresh. */}
+      {parkingPrompt && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          data-testid="parking-prompt"
+          onClick={() => { if (!parkingBusy) setParkingPrompt(null) }}
+        >
+          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="text-sm font-semibold text-body">Return to parking — {parkingPrompt.bayCode}</div>
+            <p className="mt-2 text-sm text-muted">
+              Chassis <span className="font-mono text-body">{parkingPrompt.vin}</span>
+              {parkingPrompt.customerName !== '—' ? <> ({parkingPrompt.customerName})</> : null} leaves the bay
+              and goes back to the parking pool. Bay <span className="font-semibold text-body">{parkingPrompt.bayCode}</span> frees
+              up for a more urgent job.
+            </p>
+            <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Reason (optional)
+            </label>
+            <textarea
+              data-testid="parking-reason"
+              value={parkingReason}
+              onChange={(e) => setParkingReason(e.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="e.g. bumped for a rush order"
+              className="mt-1 w-full rounded-md border border-line p-2 text-sm focus:border-primary focus:outline-none"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setParkingPrompt(null)}
+                disabled={parkingBusy}
+                className="rounded-md border border-line px-3 py-1.5 text-sm text-body hover:bg-surface-alt disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void confirmReturnToParking()}
+                data-testid="parking-confirm"
+                disabled={parkingBusy}
+                className="rounded-md bg-status-amber px-3 py-1.5 text-sm font-semibold text-white hover:bg-status-amber/90 disabled:opacity-50"
+              >
+                {parkingBusy ? 'Moving…' : '↩ Move to parking'}
               </button>
             </div>
           </div>

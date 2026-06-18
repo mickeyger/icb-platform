@@ -191,3 +191,37 @@ dedicated chassis-audit table.
 - **G5 · Forward-looking soft-delete-on-referencer flag.** When soft-delete is introduced on a referenced
   table, the refuse-if-live-FK guards on referencers must be revisited if those referencers ever gain
   their own `deleted_at` (today only `chassis_records` has one, so existence == liveness for the guards).
+
+### H. State-promotion patterns (WO v4.36a.1 — Awaiting-QA handoff)
+- **H1 · Phase-only-refines vs status-promotes-transitions.** A lifecycle EVENT is one of two kinds, and the
+  kind decides whether it touches `chassis_records.status`. `body_attached` (v4.35) is **phase-only**: it
+  refines the *current* phase (the chassis is still in assembly), so status stays `in_assembly` and the event
+  alone carries the meaning. `moved_to_awaiting_qa` (v4.36a.1) is a **phase transition**: the chassis has
+  *left* assembly for the QA queue, so the event AND `status='awaiting_qa'` are written in one transaction.
+  The test is "did the chassis change which phase it is in?" — if no, event-only; if yes, event + status.
+- **H2 · Status-promoting events require a grep-style audit of every read that gates on the PRIOR status.**
+  When a new status value transitions out of an existing one, audit every `WHERE status = '<old>'` read and
+  decide, per read, whether the new status should be **INCLUDED** (a downstream consumer that *inherits* from
+  the old phase) or **EXCLUDED** (a sibling-phase consumer). The semantic question per read is whether that
+  consumer cares about "inherits-or-not" from the prior status. In v4.36a.1 the sweep of `in_assembly` reads
+  found all bay-occupancy reads correctly EXCLUDE `awaiting_qa` for free (they ask "on a bay *now*?"), while
+  exactly one — `chassis_received()` ("booked-in / on-site?") — had to INCLUDE it, because Awaiting-QA is
+  unambiguously past the booked-in line. This per-read INCLUDE/EXCLUDE triage is the transferable discipline
+  for the v4.36c status-promotion work (`in_qc`, `qc_complete`, `dispatched`); a denormalised status is cheap
+  to *write* but every prior-status read is a latent place to get the new value's membership wrong.
+- **H3 · A reverse transition is the inverse of its forward write — DELETE the event, don't add one (WO
+  v4.36a.2 return-to-parking).** Moving a chassis back from a bay to Parking is the exact inverse of
+  `assign_assembly_bay`: it DELETEs the cycle's `assembly_assigned` event and flips `status` back to
+  `in_workshop` (mirroring the panels move-back undo `clear_panels_arrived`). Deleting the event — rather
+  than writing a new "unassigned" event — keeps all six `assembly_assigned` consumers (occupancy, bay
+  derivation, KPIs) working UNCHANGED; a reversing event would force every one of them to learn the new
+  type. Audit lives separately (a `production_jobs_audit` row, reuse of the v4.34.2 unschedule trail), so
+  current-state stays clean while the decision is still recorded.
+- **H4 · Reversibility is gated on the commitment point.** When designing reversibility in a workflow
+  state machine, identify the **commitment point** — the transition where reversal becomes destructive —
+  and gate reverse operations on it. `body_attached` is the chassis-cycle commitment gate: reverse *before*
+  it (return to Parking) preserves bay-clearing flexibility for re-prioritisation; reverse *after* it
+  requires forward progression (to Awaiting QA, **not** back to Parking — the panels are merged to the
+  body). The same `_has_event(body_attached)` check that the merge guard uses becomes the *return* guard —
+  one event, read by both the forward and the reverse path, keeps the dual-direction state machine's gates
+  consistent (forward → QA after the gate, reverse → Parking only before it).
