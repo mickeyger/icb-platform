@@ -118,13 +118,20 @@ def test_make_model_null_vin_creates_expected_row(api, staged):   # BA case 3
     assert ch["body_gap_mm"] == 100                              # §0.8 gap carried from the card
 
 
-def test_empty_make_model_no_chassis_created(api, staged):        # BA case 2
+def test_empty_make_model_creates_expected_stub(api, staged):     # BA case 2 — REVERSED in v4.36a.4
+    """Reverses §3.2 case 2 (v4.34) deliberately. With v4.36a chassis_integrity
+    + v4.36b visual integrity + v4.36.5 single-editor direction, silent deferral
+    on empty make_model is an H6-class UX defect. Pre-Job submission MUST
+    anchor a chassis stub regardless of make_model state; the stub becomes a
+    v4.36b RED flag for operator attention. ADR 0026 H6."""
     client, admin = api
     cid = _create_card(client, admin, staged, make_model=None)    # never set → stays None
     r = client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={})
     assert r.status_code == 200, r.text
     crid, ch = _chassis_of(cid)
-    assert crid is None and ch is None                            # graceful no-op
+    assert crid is not None and ch is not None                    # stub anchored (was: graceful no-op)
+    assert ch["make"] is None and ch["vin"] is None               # NULL make + VIN — a true stub
+    assert ch["status"] == "expected" and ch["created_via"] == "pre_job_card"
 
 
 def test_double_submit_no_duplicate_chassis(api, staged):         # BA case 1
@@ -325,12 +332,15 @@ def test_resubmit_syncs_corrected_make(api, staged):              # review MED �
     assert ch2["make"] == "P434A Corrected Make"                  # correction synced through
 
 
-def test_whitespace_make_model_no_chassis(api, staged):          # review LOW — .strip() no-op branch
+def test_whitespace_make_model_creates_expected_stub(api, staged):   # REVERSED in v4.36a.4
+    """Same reasoning as test_empty_make_model_creates_expected_stub. Whitespace
+    collapsed to empty is functionally identical; both must anchor a stub."""
     client, admin = api
     cid = _create_card(client, admin, staged, make_model="   ")
     assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
     crid, ch = _chassis_of(cid)
-    assert crid is None and ch is None                            # whitespace strips to empty → no-op
+    assert crid is not None and ch is not None                    # whitespace → empty → still anchors a stub
+    assert ch["make"] is None and ch["status"] == "expected"
 
 
 def test_source_ref_quote_then_card_fallback():                  # review MED — unreachable fallback branch
