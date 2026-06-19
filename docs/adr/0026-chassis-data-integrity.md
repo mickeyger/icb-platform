@@ -239,3 +239,13 @@ dedicated chassis-audit table.
   a journey that asserted chassis-side clearing but never panel-side clearing after `moved_to_awaiting_qa` —
   when a state machine has parallel derivation streams, every transition assertion must cover ALL streams,
   not just the one the feature was "about."
+- **H6 · Silent deferrals on workflow-critical paths are correct-but-silent UX defects (WO v4.36a.4).**
+  A guard that returns None on missing-data input is operationally correct (no bad row written) but
+  UX-defective when the operator expects an outcome. The §3.2 case 2 decision (v4.34) silently deferred
+  chassis creation on empty `make_model`; this aged into a defect once v4.36a guarded the bad-data
+  ingestion and v4.36b visual integrity made incomplete stubs actionable. v4.36a.4 reverses the deferral:
+  anchor the stub unconditionally; let visual integrity surface its incompleteness. The general lesson:
+  when adding visual-integrity coverage, audit existing silent-deferral patterns — they're now
+  correct-but-silent rather than correct. (Sibling of ADR 0025 footnote J: a correct-but-silent *guard* is
+  a UX defect; H6 is the same for a correct-but-silent *deferral*.) Surfaced by Michael's BA live
+  click-around 19 Jun 2026 (the A32755 zero-chassis catch).

@@ -137,8 +137,11 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
                 ch.vin = vin
                 ch.vin_source = ch.vin_source or "pre_job_card"
         return                                             # already linked — idempotent (sync only, no new row)
-    if not make_model:
-        return                                             # §3.2 case 2 — empty make/model: graceful no-op
+    # WO v4.36a.4 — REVERSES §3.2 case 2 (v4.34): we no longer no-op on empty make_model. Pre-Job submit
+    # MUST anchor a chassis stub unconditionally (create_expected_chassis accepts make=None → an 'expected'
+    # row, make=NULL/VIN=NULL, filled later via the §3.5c Edit modal). Silent deferral aged into a
+    # correct-but-silent UX defect once v4.36a guarded bad-data ingestion + v4.36b RED-flags incomplete
+    # stubs (ADR 0026 H6). Do NOT re-add an `if not make_model: return` guard here.
     job = _job_for_calc(db, card.calculation_id)
     if vin:                                                # §0.8 — a known VIN already on a live chassis → adopt it
         existing_vin = ci.resolve_existing_chassis(db, vin)
