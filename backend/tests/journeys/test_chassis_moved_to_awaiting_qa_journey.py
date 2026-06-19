@@ -6,6 +6,10 @@ status-promoting outcome (status='awaiting_qa' atomically with the event), the b
 bay falls to 'empty' for free — current_occupants gates on in_assembly), the guards (body-attached
 precondition / idempotency), role gating (Q5 workshop = RO), and the UI: the Planning bay tile carries the
 'drag to QA' affordance, then clears, and the chassis lands in the AWAITING QA zone. Runs on icb_test (CI).
+
+WO v4.36a.3 extension: when the bay also held the job's PANELS, body_attached CONSUMES them, so the
+move-to-QA must clear the bay on the PANEL side too (state 'empty', not a stray 'pre_assembly'). The
+original suite only asserted chassis-side clearing — that gap is what let the BA's bug through.
 """
 from __future__ import annotations
 
@@ -93,3 +97,30 @@ def test_planning_zone_drag_affordance_and_bay_clear(page: Page, live_server: st
     card = page.locator('[data-testid="awaiting-qa-chassis"]', has_text=s["vin"])
     expect(card).to_be_visible(timeout=T)                                    # chassis now in the AWAITING QA zone
     shot(page, "02-moved-to-qa-zone", journey=JOURNEY)
+
+
+# ── WO v4.36a.3 — panel-side bay state clears with the body (the BA click-around catch) ───────────
+def test_panels_consumed_clear_with_body_on_move_to_qa(page: Page, live_server: str) -> None:
+    """Asserts BOTH chassis-side AND panel-side bay state clear after forward-to-QA — panel-side clearing
+    was the v4.36a.3 catch (the gap: the original journey only asserted chassis-side clearing). Once
+    body_attached fires, the job's panels are CONSUMED (part of the body); when the body moves to QA the bay
+    must derive 'empty', NOT 'pre_assembly' with a stray 'move panels back' affordance. The panels event row
+    is NOT deleted (consumed ≠ removed) — and move-back on consumed panels is refused (409)."""
+    s = h.make_assembly_job(attached=False)                    # chassis on a bay, no body yet
+    admin_session(page)
+    panels = h.api_post(page, live_server, f"/api/production-jobs/{s['job_id']}/panels-arrived-in-bay",
+                        {"bay_id": s["bay_id"]})
+    assert panels.status == 201, panels.text()
+    assert h.bay_merge_state(s["bay_id"]) == "ready_to_merge"   # panels loose + matched chassis, no body
+    body = h.api_post(page, live_server, f"/api/chassis-records/{s['chassis_id']}/body-attached",
+                      {"production_job_id": s["job_id"]})
+    assert body.status == 201, body.text()
+    assert h.bay_merge_state(s["bay_id"]) == "attached_today"   # panels now CONSUMED (no longer loose)
+    # §0.4 — move-back on consumed panels is a 409 (they're part of the body, not loose)
+    r409 = h.api_delete(page, live_server, f"/api/production-jobs/{s['job_id']}/panels-arrived-in-bay")
+    assert r409.status == 409 and "body" in r409.text().lower()
+    # move the body to QA → the bay clears on BOTH sides
+    assert _move(page, live_server, s["chassis_id"]).status == 201
+    assert h.chassis_status(s["chassis_id"]) == "awaiting_qa"
+    assert h.bay_merge_state(s["bay_id"]) == "empty"           # ← v4.36a.3 fix: NOT 'pre_assembly'
+    assert h.panels_event_count(s["job_id"]) == 1             # the panels event persists (consumed, not removed)
