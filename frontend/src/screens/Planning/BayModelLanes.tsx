@@ -61,6 +61,27 @@ interface ParkingPrompt {
 // (body attached) OR parking-draggable (no body), never both — the bay state decides.
 const PARK_MIME = 'application/x-return-to-parking'
 
+// WO v4.36a.5 — days a chassis has been on its bay, from the assembly_assigned event date (BayOut.since).
+// Day 0 = same calendar day, Day 1 = next day, etc. Returns null when there's no date (no counter shown).
+function dayCount(since?: string | null): number | null {
+  if (!since) return null
+  const start = new Date(`${since.slice(0, 10)}T00:00:00`).getTime()
+  if (Number.isNaN(start)) return null
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const days = Math.floor((today.getTime() - start) / 86_400_000)
+  return days >= 0 ? days : 0
+}
+
+// WO v4.36a.5 — VISUAL-ONLY Pre-Assembly placeholders (HARDCODED, not DB rows — §0.14; the [DEMO] pill +
+// footer make that explicit). Bay 2 + Bay 4 only; 1/3/5 render an empty cell. Job numbers are deliberately
+// off the live canonical 404xx/405xx/406xx range so no real MERGE job appears twice. Full functional wiring
+// + V/P counters + colour-coded ageing pills land in the v4.36b sprint.
+interface PreAssemblyDemoCard { job: string; customer: string; body: string; day: number }
+const DEMO_PREASSEMBLY_CARDS: Record<number, PreAssemblyDemoCard> = {
+  2: { job: '40910', customer: 'Mzansi Cold Chain (Pty) Ltd', body: '5.4 m Chiller body', day: 2 },
+  4: { job: '40920', customer: 'TransCarriers SA', body: '6.0 m Freezer body', day: 4 },
+}
+
 export function BayModelLanes() {
   const toast = useToast()
   const { hasPermission, isAdmin } = useAppData()
@@ -389,10 +410,63 @@ export function BayModelLanes() {
         </div>
       </Card>
 
-      {/* Assembly bays — drop targets for a parked chassis AND for a scheduled job's panels. */}
-      <Card>
+      {/* WO v4.36a.5 — right column splits the (mis-named) Assembly stage into PRE-ASSEMBLY (panels build
+          down the chute) above MERGE (chassis joins the body at the chute end). VISUAL ONLY for the Burt
+          demo; functional wiring + V/P counters + colour-coded ageing land in v4.36b. */}
+      <div className="flex flex-col gap-4">
+        {/* PRE-ASSEMBLY — placeholder section. The 2 cards are hardcoded demo data (§0.14); the [DEMO] pill +
+            footer + amber fill mark them as not-real. Bays 1/3/5 are clean empty cells (no drop affordance). */}
+        <Card data-testid="preassembly-zone">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-semibold uppercase tracking-wide text-muted">Pre-Assembly</span>
+            <span className="text-[11px] text-muted">5 bays</span>
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
+            {[1, 2, 3, 4, 5].map((n) => {
+              const card = DEMO_PREASSEMBLY_CARDS[n]
+              return (
+                <div
+                  key={n}
+                  data-testid="preassembly-bay"
+                  data-bay-label={`Bay ${n}`}
+                  className={card
+                    ? 'relative rounded-md border border-line border-l-4 border-l-status-amber bg-status-amber/10 p-2'
+                    : 'rounded-md border border-dashed border-line bg-surface-alt/40 p-2'}
+                >
+                  <div className="flex items-center justify-between text-[11px] text-muted">
+                    <span>Bay {n}</span>
+                    {card && (
+                      <span className="flex items-center gap-1">
+                        <span data-testid="day-counter"
+                              className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted">Day {card.day}</span>
+                        <span data-testid="demo-pill"
+                              className="rounded bg-status-amber px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">DEMO</span>
+                      </span>
+                    )}
+                  </div>
+                  {card ? (
+                    <>
+                      <div className="font-mono text-xs font-semibold">Job {card.job}</div>
+                      <div className="truncate text-xs text-body">{card.customer}</div>
+                      <div className="truncate text-[11px] text-muted">{card.body}</div>
+                      <div className="mt-1 text-[9px] italic text-muted">Placeholder for demo only</div>
+                    </>
+                  ) : (
+                    <div className="flex min-h-[32px] items-center justify-center text-[11px] text-muted">empty</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
+            Panels move down the bay during pre-assembly · merge below when chassis arrives
+          </div>
+        </Card>
+
+        {/* MERGE bays — drop targets for a parked chassis AND for a scheduled job's panels. */}
+        <Card>
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold uppercase tracking-wide text-muted">Assembly</span>
+          <span className="text-sm font-semibold uppercase tracking-wide text-muted">Merge</span>
           <span className="text-[11px] text-muted">{bays.length} bays · {freeBays} free</span>
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
@@ -453,12 +527,19 @@ export function BayModelLanes() {
                 )}
                 <div className="flex items-center justify-between text-[11px] text-muted">
                   <span>{bay.code}</span>
-                  {mismatch ? (
-                    <span data-testid="bay-mismatch" title="The panels and the chassis in this bay are different jobs — they won’t merge."
-                          className="rounded px-1 text-[10px] font-medium bg-status-red/15 text-status-red">⚠ Different jobs</span>
-                  ) : ui.badge ? (
-                    <span className={`rounded px-1 text-[10px] font-medium ${ui.badgeClass}`}>{ui.badge}</span>
-                  ) : null}
+                  <span className="flex items-center gap-1">
+                    {/* WO v4.36a.5 — days on the bay since assembly_assigned (computed; MERGE occupant tiles only) */}
+                    {occ && dayCount(bay.since) !== null && (
+                      <span data-testid="day-counter"
+                            className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted">Day {dayCount(bay.since)}</span>
+                    )}
+                    {mismatch ? (
+                      <span data-testid="bay-mismatch" title="The panels and the chassis in this bay are different jobs — they won’t merge."
+                            className="rounded px-1 text-[10px] font-medium bg-status-red/15 text-status-red">⚠ Different jobs</span>
+                    ) : ui.badge ? (
+                      <span className={`rounded px-1 text-[10px] font-medium ${ui.badgeClass}`}>{ui.badge}</span>
+                    ) : null}
+                  </span>
                 </div>
                 {occ ? (
                   <>
@@ -525,7 +606,8 @@ export function BayModelLanes() {
             ? 'Drop a chassis or a scheduled job’s panels · body attaches when both meet (same job).'
             : 'A job’s chassis and its panels meet here · the body attaches when both are in the bay.'}
         </div>
-      </Card>
+        </Card>
+      </div>
 
       {/* WO v4.36a.1 — AWAITING QA zone: full-width, below the assembly bays (workflow flows PARKING →
           ASSEMBLY → AWAITING QA). Drop target for a bay-tile drag; an inverted parking lot of chassis that
