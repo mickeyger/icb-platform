@@ -135,4 +135,7 @@ export interface Bay {
   mismatch?: boolean
   panels_job_id?: number | null
   panels_job_number?: string | null
+  // WO — the panels-job's OWN linked chassis VIN + customer, for the bay right-click "unlink panels" menu.
+  panels_chassis_vin?: string | null
+  panels_customer_name?: string | null
 }

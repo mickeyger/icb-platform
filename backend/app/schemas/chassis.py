@@ -227,3 +227,7 @@ class BayOut(BaseModel):
     mismatch: bool = False                         # panels + a chassis that belong to DIFFERENT jobs (wrong-bay drop)
     panels_job_id: Optional[int] = None            # the job whose panels are on this bay (drives the move-back undo)
     panels_job_number: Optional[str] = None
+    # WO — the panels-job's OWN linked chassis VIN + customer (distinct from the occupant chassis above),
+    # for the bay right-click "unlink panels" menu so the operator can identify the blocking job/chassis.
+    panels_chassis_vin: Optional[str] = None
+    panels_customer_name: Optional[str] = None
