@@ -74,6 +74,17 @@ export function useBayModel(pushToast: PushToast): BayModel {
     }
   }, [])
 
+  // WO — after a bay-model MUTATION, tell the Planning Board week-grid to refetch. A job that just gained or
+  // lost panels (or was merged / moved to QA) changes whether it appears on the board (PR #39 excludes
+  // panels-in-bay / merged / QA jobs). The two surfaces are decoupled (separate contexts), so a document
+  // CustomEvent bridges them — same pattern as icb:panel-drag. NOT wired into the mount/focus refresh (those
+  // would double-fetch the board, which already refetches on focus).
+  const refreshAndNotifyBoard = useCallback(async (): Promise<Bay[]> => {
+    const rows = await refresh()
+    document.dispatchEvent(new CustomEvent('icb:planning-refetch'))
+    return rows
+  }, [refresh])
+
   useEffect(() => {
     void refresh()
   }, [refresh])
@@ -82,26 +93,26 @@ export function useBayModel(pushToast: PushToast): BayModel {
     async (recordId: number, bayId: number): Promise<Bay[]> => {
       try {
         await apiPost(`/api/chassis-records/${recordId}/assembly`, { assembly_bay_id: bayId })
-        return await refresh()
+        return await refreshAndNotifyBoard()
       } catch (e) {
         handleApiError(e, pushToast) // 409 (occupied) re-throws → caller shows an inline reject
         throw e
       }
     },
-    [refresh, pushToast],
+    [refreshAndNotifyBoard, pushToast],
   )
 
   const markPanelsArrived = useCallback(
     async (productionJobId: number, bayId: number): Promise<Bay[]> => {
       try {
         await apiPost(`/api/production-jobs/${productionJobId}/panels-arrived-in-bay`, { bay_id: bayId })
-        return await refresh()
+        return await refreshAndNotifyBoard()
       } catch (e) {
         handleApiError(e, pushToast) // 409 (idempotency / busy-bay) re-throws → caller flashes a reject
         throw e
       }
     },
-    [refresh, pushToast],
+    [refreshAndNotifyBoard, pushToast],
   )
 
   const markBodyAttached = useCallback(
@@ -111,22 +122,22 @@ export function useBayModel(pushToast: PushToast): BayModel {
         production_job_id: productionJobId,
         notes: (notes ?? '').trim() || null,
       })
-      await refresh()
+      await refreshAndNotifyBoard()
     },
-    [refresh],
+    [refreshAndNotifyBoard],
   )
 
   const clearPanels = useCallback(
     async (productionJobId: number): Promise<Bay[]> => {
       try {
         await apiDelete(`/api/production-jobs/${productionJobId}/panels-arrived-in-bay`)
-        return await refresh()
+        return await refreshAndNotifyBoard()
       } catch (e) {
         handleApiError(e, pushToast)
         throw e
       }
     },
-    [refresh, pushToast],
+    [refreshAndNotifyBoard, pushToast],
   )
 
   const moveToAwaitingQa = useCallback(
@@ -135,9 +146,9 @@ export function useBayModel(pushToast: PushToast): BayModel {
       await apiPost(`/api/chassis-records/${chassisId}/move-to-awaiting-qa`, {
         notes: (notes ?? '').trim() || null,
       })
-      await refresh()
+      await refreshAndNotifyBoard()
     },
-    [refresh],
+    [refreshAndNotifyBoard],
   )
 
   const returnToParking = useCallback(
@@ -146,9 +157,9 @@ export function useBayModel(pushToast: PushToast): BayModel {
       await apiPost(`/api/chassis-records/${chassisId}/return-to-parking`, {
         reason: (reason ?? '').trim() || null,
       })
-      await refresh()
+      await refreshAndNotifyBoard()
     },
-    [refresh],
+    [refreshAndNotifyBoard],
   )
 
   return { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,

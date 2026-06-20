@@ -773,6 +773,14 @@ function LivePlanningBoard() {
   const nav = useNavigate()
   const { board, schedule, move, unschedule, revertToUnscheduled, lastUpdated, refresh, jumpTo, today, nextWindow, prevWindow } = usePlanning()
   useRefetchOnFocus(refresh)        // WO v4.35 §3.3b — cross-page sync: the board refetches on tab focus
+  // WO — same-page sync: the bay-model lanes (BayModelLanes, below) dispatch icb:planning-refetch after a
+  // bay mutation (panels arrive/clear, mark body attached, move to QA) that changes whether a job belongs on
+  // the board (PR #39). Refetch so the week-grid drops/restores the job immediately — no manual reload.
+  useEffect(() => {
+    const onBoardChange = () => { void refresh() }
+    document.addEventListener('icb:planning-refetch', onBoardChange)
+    return () => document.removeEventListener('icb:planning-refetch', onBoardChange)
+  }, [refresh])
   const panRef = useMiddleButtonPan<HTMLDivElement>()   // WO v4.29 — middle-button drag-to-pan
   const { profile, hasPermission } = useAppData()
   // WO v4.19: planning-ack + chassis-received route through the rewired
