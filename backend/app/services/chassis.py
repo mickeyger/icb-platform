@@ -686,6 +686,25 @@ def _panels_for_bay(db: Session, bay_id: int):
     return (row[0], row[1]) if row else (None, None)
 
 
+def _panels_consumed(db: Session, panels_job_id) -> bool:
+    """WO v4.36a.3 — the panels staged for a job are CONSUMED (part of a merged body, no longer loose on
+    the bay) once that job's chassis has a body_attached event. body_attached is the commitment gate
+    (ADR 0026 H4/H5): it both ends the chassis-cycle's reversibility AND consumes the job's panel
+    allocation — the panels are now physically inside the body and move WITH it (to Awaiting QA, or stay
+    merged on the bay). Pre-body_attached (incl. the v4.36a.2 return-to-parking path, which is guarded on
+    no-body_attached) this is False, so loose panels still read as loose."""
+    if panels_job_id is None:
+        return False
+    chassis_id = db.execute(
+        select(ProductionJob.chassis_record_id).where(ProductionJob.id == panels_job_id)).scalar()
+    if chassis_id is None:
+        return False
+    return db.execute(
+        select(ChassisLifecycleEvent.id).where(
+            ChassisLifecycleEvent.chassis_record_id == chassis_id,
+            ChassisLifecycleEvent.event_type == "body_attached").limit(1)).first() is not None
+
+
 def compute_bay_merge_readiness(db: Session, bay_id: int, *, occupants=None) -> dict:
     """WO v4.35 §3.3b (§0.19–0.21) — THE single source of truth for a bay's merge state, shared by the
     6-state tile derivation (assembly_bays_utilisation) AND the auto-merge prompt firing logic, so the two
@@ -700,6 +719,14 @@ def compute_bay_merge_readiness(db: Session, bay_id: int, *, occupants=None) -> 
     awaiting_attachment (chassis, no matching panels, no body) · attached_today · post_attached."""
     occ = (occupants if occupants is not None else current_occupants(db)).get(bay_id)
     panels_job_id, panels_job_number = _panels_for_bay(db, bay_id)
+    # WO v4.36a.3 — panels CONSUMED by a body (their job's chassis has body_attached) are no longer LOOSE on
+    # the bay: they moved with the body (to Awaiting QA) or are merged on it. Drop them from the loose-panel
+    # signal so a post-body_attached / post-moved_to_awaiting_qa bay doesn't falsely read 'pre_assembly' (the
+    # bug) and doesn't offer 'move panels back'. The occupant path (attached_today/post_attached) still wins
+    # while the chassis is on the bay; once it leaves to QA the bay correctly derives 'empty'. v4.36a.2
+    # return-to-parking is unaffected — its chassis has no body_attached, so its panels stay loose.
+    if panels_job_id is not None and _panels_consumed(db, panels_job_id):
+        panels_job_id, panels_job_number = None, None
     att = _latest_body_attached_dates(db, [occ["chassis_id"]]).get(occ["chassis_id"]) if occ else None
     occ_job_id = occ["job_id"] if occ else None
     matched = panels_job_id is not None and occ_job_id is not None and panels_job_id == occ_job_id
@@ -957,11 +984,21 @@ def record_panels_arrived_in_bay(db: Session, production_job_id: int, bay_id: in
 def clear_panels_arrived(db: Session, production_job_id: int) -> dict:
     """WO v4.35 §3.3b — the move-panels-back undo: remove a job's panels_arrived_in_bay event(s) so a
     wrong-bay drop can be corrected without a full reseed (the one-bay-per-job rule otherwise strands the
-    panels). Idempotent — returns the count removed (0 if the job had none). 404 if the job is unknown."""
+    panels). Idempotent — returns the count removed (0 if the job had none). 404 if the job is unknown.
+
+    WO v4.36a.3 — refuses (409) once the panels are CONSUMED by a body (the job's chassis has body_attached):
+    those panels are physically part of a body in Assembly / Awaiting QA, not loose on the bay, so "move
+    back to planning" is a corruption path. Defence-in-depth behind the UI, which also suppresses the button
+    (the derivation drops consumed panels from the loose signal)."""
     from app.models.mes import ProductionJobBayEvent
     job = db.get(ProductionJob, production_job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="production job not found")
+    if _panels_consumed(db, production_job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Panels are part of a body in Assembly / Awaiting QA — they can't be moved back to "
+                   "planning.")
     removed = db.query(ProductionJobBayEvent).filter(
         ProductionJobBayEvent.production_job_id == production_job_id,
         ProductionJobBayEvent.event_type == "panels_arrived_in_bay").delete(synchronize_session=False)

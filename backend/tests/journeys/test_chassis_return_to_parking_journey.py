@@ -58,6 +58,9 @@ def test_return_blocked_after_body_attached_409(page: Page, live_server: str) ->
 
 # ── D1: panels staged in the bay STAY — the bay derives pre_assembly ──────────────
 def test_return_with_panels_leaves_pre_assembly(page: Page, live_server: str) -> None:
+    """Also the v4.36a.3 NON-regression guard: the panel-consumption gate (panels are consumed only when
+    the job's chassis has body_attached) must NOT over-reach to this NO-body path — a returned chassis's
+    panels stay LOOSE ('pre_assembly'), move-back affordance intact. body_attached is the only gate."""
     s = h.make_assembly_job(attached=False)
     admin_session(page)
     assert _panels(page, live_server, s["job_id"], s["bay_id"]).status == 201

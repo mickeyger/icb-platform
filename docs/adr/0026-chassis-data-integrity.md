@@ -225,3 +225,27 @@ dedicated chassis-audit table.
   body). The same `_has_event(body_attached)` check that the merge guard uses becomes the *return* guard —
   one event, read by both the forward and the reverse path, keeps the dual-direction state machine's gates
   consistent (forward → QA after the gate, reverse → Parking only before it).
+- **H5 · The commitment-point gate (H4) applies RECURSIVELY across derivation streams (WO v4.36a.3).**
+  `body_attached` is the chassis-cycle commitment gate (H4); it is ALSO the **panel-side consumption gate**.
+  A bay has two independent derivation streams — the chassis side (`assembly_assigned → body_attached →
+  moved_to_awaiting_qa`) and the panel side (`panels_arrived_in_bay`). Once a chassis-on-bay has
+  `body_attached`, that job's panel allocation is **consumed** — the panels are physically part of the body
+  and move with it. So the panel-side "is this loose?" read must honor the SAME gate: panels are loose iff
+  *(panels_arrived_in_bay exists for this bay+job) AND (the panels-job's chassis has NO body_attached event)*.
+  No new event type — the existing `body_attached` powers both gates. A bay's `empty` derivation after
+  `moved_to_awaiting_qa` is therefore the **conjunction of both sides cleared**, not just the chassis side.
+  The v4.36a.1 bug (bay still showed "Panels in bay" after the body left to QA) was exactly this: the chassis
+  stream honored the gate, the panel stream did not. **Test-coverage lesson:** the gap that let it through was
+  a journey that asserted chassis-side clearing but never panel-side clearing after `moved_to_awaiting_qa` —
+  when a state machine has parallel derivation streams, every transition assertion must cover ALL streams,
+  not just the one the feature was "about."
+- **H6 · Silent deferrals on workflow-critical paths are correct-but-silent UX defects (WO v4.36a.4).**
+  A guard that returns None on missing-data input is operationally correct (no bad row written) but
+  UX-defective when the operator expects an outcome. The §3.2 case 2 decision (v4.34) silently deferred
+  chassis creation on empty `make_model`; this aged into a defect once v4.36a guarded the bad-data
+  ingestion and v4.36b visual integrity made incomplete stubs actionable. v4.36a.4 reverses the deferral:
+  anchor the stub unconditionally; let visual integrity surface its incompleteness. The general lesson:
+  when adding visual-integrity coverage, audit existing silent-deferral patterns — they're now
+  correct-but-silent rather than correct. (Sibling of ADR 0025 footnote J: a correct-but-silent *guard* is
+  a UX defect; H6 is the same for a correct-but-silent *deferral*.) Surfaced by Michael's BA live
+  click-around 19 Jun 2026 (the A32755 zero-chassis catch).
