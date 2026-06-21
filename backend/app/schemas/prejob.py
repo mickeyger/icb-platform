@@ -166,6 +166,9 @@ class PrejobCardSummary(BaseModel):
     # WO v4.34 §3.9 — attested chassis spec for the Planning-ack lock-down (sign-off integrity).
     chassis_make_model: Optional[str] = None
     vin_number: Optional[str] = None
+    # WO — the LIVE linked chassis_records.vin (VIN of record), distinct from the attested vin_number;
+    # lets the Planning-ack panel back-fill + lock the VIN box when one has been captured on the chassis.
+    chassis_vin: Optional[str] = None
 
 
 class OutstandingSignoffOut(BaseModel):

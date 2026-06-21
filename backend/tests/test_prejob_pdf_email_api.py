@@ -10,7 +10,9 @@ import pytest
 
 def _purge(db) -> None:
     from sqlalchemy import text
+    # cards first (they reference chassis_record_id), then the linked test chassis, then templates.
     db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE body_description LIKE 'P433P%'"))
+    db.execute(text("DELETE FROM icb_mes.chassis_records WHERE make LIKE 'P433P%'"))
     db.execute(text("DELETE FROM icb_mes.prejob_templates WHERE name LIKE 'P433P%'"))
     db.commit()
 
@@ -135,3 +137,28 @@ def test_summaries_carries_card_state_for_the_costings_list(api, card):
     assert mine["status"] == "draft"
     assert mine["sales_rep_username"] == "admin" and mine["planner_username"] == "admin"
     assert mine["sales_rep_signoff_at"] is None and mine["planner_signoff_at"] is None
+
+
+def test_summaries_surfaces_linked_chassis_vin_when_card_vin_is_blank(api, card):
+    """WO — the Planning-ack panel back-fills + locks the VIN box from the LIVE linked
+    chassis_records.vin. A VIN captured later on the Chassis page (chassis_page_manual) lands on
+    chassis.vin but NOT on card.vin_number (propagation is forward-only), so /summaries must surface
+    the chassis VIN DISTINCTLY from the attested vin_number — else the ack modal shows blank (the
+    A32759 bug). Asserts: card.vin_number stays NULL, chassis_vin carries the linked chassis's VIN."""
+    client, _ = api
+    from app.database import SessionLocal
+    from app.models.mes import ChassisRecord, PrejobCard
+    test_vin = "P433PXX0000000001"  # 17 chars, strict-VIN charset (no I/O/Q), unique to this test
+    with SessionLocal() as db:
+        ch = ChassisRecord(make="P433P MAKE", model="X", vin=test_vin, status="expected",
+                           source="manual", created_via="pre_job_card")
+        db.add(ch)
+        db.flush()
+        c = db.get(PrejobCard, card["id"])
+        c.chassis_record_id = ch.id      # link the chassis; leave card.vin_number NULL (the bug condition)
+        db.commit()
+    rows = client.get("/api/prejob-cards/summaries").json()
+    mine = next((r for r in rows if r["id"] == card["id"]), None)
+    assert mine, "summaries must include the created card"
+    assert mine["vin_number"] is None, "card was never attested a VIN — vin_number stays NULL"
+    assert mine["chassis_vin"] == test_vin, "the LIVE linked chassis VIN must surface for the ack back-fill+lock"

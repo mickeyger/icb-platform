@@ -43,13 +43,20 @@ export function PlanningAckPanel({
   // §3.9 refine (BA 2026-06-14) — lock the VIN read-only ONLY when one was actually attested at
   // pre-job; if the card left it blank, the planner captures it here at ack (it then lands on the
   // chassis record server-side).
-  const vinLocked = card?.status === 'pre_job_confirmed' && !!card?.vin_number
+  // WO — broaden the §3.9 lock: lock the VIN read-only when one is KNOWN anywhere — either ATTESTED at
+  // pre-job (card.vin_number) OR already CAPTURED on the linked chassis (card.chassis_vin = the live
+  // chassis_records.vin, e.g. a Chassis-page manual capture after pre-job). Attested wins as the displayed
+  // value (it gates the body_attached swap-rule); else the captured VIN of record. If NEITHER is set the box
+  // stays editable so the planner can fill the VIN in when the chassis physically arrives.
+  const attestedVin = card?.status === 'pre_job_confirmed' ? (card?.vin_number ?? null) : null
+  const knownVin = attestedVin ?? card?.chassis_vin ?? null
+  const vinLocked = !!knownVin
   const seed: ChassisEtaPayload = useMemo(() => {
     if (!costing) return { chassis_eta: '' }
     const cd = costing.chassis_data ?? {}
     return {
       chassis_eta: costing.chassis_eta ?? '',
-      chassis_vin: (vinLocked ? card?.vin_number : cd.chassis_vin) ?? '',
+      chassis_vin: (knownVin ?? cd.chassis_vin) ?? '',
       chassis_model: (chassisLocked ? card?.chassis_make_model : cd.chassis_model) ?? '',
       customer_dealer: cd.customer_dealer ?? '',
       dealer_id: cd.dealer_id ?? null,                   // WO v4.34.1 §0.3 — structured chassis supplier
@@ -58,7 +65,7 @@ export function PlanningAckPanel({
       chassis_inhouse_bom: cd.chassis_inhouse_bom ?? [],
       job_number: costing.job_number_assigned ?? '',     // WO v4.34 §0.8 — pre-fill the override with the current number
     }
-  }, [costing, chassisLocked, vinLocked, card])
+  }, [costing, chassisLocked, vinLocked, knownVin, card])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
   useEffect(() => setForm(seed), [seed])
 

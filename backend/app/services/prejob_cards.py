@@ -188,6 +188,15 @@ def list_card_summaries(db: Session) -> list[dict]:
     uids.discard(None)
     names = {u.id: u.username for u in
              db.execute(select(User).where(User.id.in_(uids or {0}))).scalars().all()}
+    # WO — the LIVE linked chassis VIN (chassis_records.vin), so the Planning-ack panel can back-fill +
+    # lock the VIN box once a VIN has been captured ANYWHERE (Chassis-page manual capture, planning-ack,
+    # or pre-job propagation — all three converge on chassis.vin). card.vin_number is only the EARLIER
+    # pre-job attestation and is never back-filled, so it can be NULL while the chassis VIN is set. One
+    # extra batched SELECT keyed by chassis_record_id — same no-N+1 shape as the username batch above.
+    cids = {c.chassis_record_id for c in cards}
+    cids.discard(None)
+    chassis_vins = {r.id: r.vin for r in
+                    db.execute(select(ChassisRecord).where(ChassisRecord.id.in_(cids or {0}))).scalars().all()}
     return [{
         "id": c.id, "calculation_id": c.calculation_id, "status": c.status,
         "reject_reason": c.reject_reason,
@@ -200,6 +209,8 @@ def list_card_summaries(db: Session) -> list[dict]:
         # (sign-off integrity: no silent rewrite of an attested spec post-confirmation).
         "chassis_make_model": c.chassis_make_model,
         "vin_number": c.vin_number,
+        # WO — the live VIN-of-record on the linked chassis (distinct from the attested vin_number above).
+        "chassis_vin": chassis_vins.get(c.chassis_record_id),
     } for c in cards]
 
 

@@ -150,6 +150,7 @@ export interface PrejobCardSummary {
   planner_username: string | null
   chassis_make_model?: string | null   // WO v4.34 §3.9 — attested spec for the Planning-ack lock-down
   vin_number?: string | null
+  chassis_vin?: string | null          // WO — live linked chassis_records.vin (VIN of record; back-fills + locks the ack VIN box)
 }
 
 export interface ChassisBomItem {
