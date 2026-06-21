@@ -654,6 +654,18 @@ def assembly_bays_utilisation(db: Session) -> list:
             o.occupant_job_id = r["production_job_id"]
             o.occupant_job_number = r["production_job_number"]
         out.append(o)
+    # WO — resolve each panels-job's OWN linked chassis VIN + customer for the bay right-click "unlink
+    # panels" menu (distinct from the occupant chassis above — these identify the BLOCKING job so the
+    # operator can recognise + unlink it). One batched query, no N+1 (mirrors job_by_chassis above).
+    panels_ids = {o.panels_job_id for o in out if o.panels_job_id is not None}
+    if panels_ids:
+        meta = {jid: (vin, cust) for jid, vin, cust in db.execute(
+            select(ProductionJob.id, ChassisRecord.vin, ChassisRecord.customer_name)
+            .join(ChassisRecord, ProductionJob.chassis_record_id == ChassisRecord.id)
+            .where(ProductionJob.id.in_(list(panels_ids)))).all()}
+        for o in out:
+            if o.panels_job_id in meta:
+                o.panels_chassis_vin, o.panels_customer_name = meta[o.panels_job_id]
     return out
 
 

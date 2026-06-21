@@ -28,6 +28,14 @@ def _panels(page, base, job_id, bay_id):
     return h.api_post(page, base, f"/api/production-jobs/{job_id}/panels-arrived-in-bay", {"bay_id": bay_id})
 
 
+def _bay_out(bay_id):
+    """The serialized BayOut for one bay (the /bays/assembly payload the lanes consume), DB-side."""
+    from app.database import SessionLocal
+    from app.services.chassis import assembly_bays_utilisation
+    with SessionLocal() as db:
+        return next((b for b in assembly_bays_utilisation(db) if b.id == bay_id), None)
+
+
 # ── the merge flow (the drag's outcome) ──────────────────────────────────────────
 def test_panels_arrived_makes_bay_ready_to_merge(page: Page, live_server: str) -> None:
     s = h.make_assembly_job()                                  # chassis on a bay → awaiting_attachment
@@ -97,6 +105,36 @@ def test_panels_on_a_different_jobs_chassis_is_a_mismatch(page: Page, live_serve
     merge = r.json()["merge"]
     assert merge["mismatch"] is True and merge["ready"] is False
     assert h.bay_merge_state(a["bay_id"]) == "awaiting_attachment"   # NOT ready_to_merge — different jobs
+
+
+# ── WO: the bay payload carries the panels-job's OWN chassis VIN (the right-click "unlink panels" menu) ──
+def test_bay_payload_carries_the_panels_jobs_chassis_vin(page: Page, live_server: str) -> None:
+    """The right-click 'unlink panels' menu shows which chassis the bay's panels belong to.
+    assembly_bays_utilisation must surface the panels-JOB's OWN linked chassis VIN (panels_chassis_vin)
+    so the operator can identify the blocking job."""
+    s = h.make_assembly_job()
+    admin_session(page)
+    assert _panels(page, live_server, s["job_id"], s["bay_id"]).status == 201
+    bay = _bay_out(s["bay_id"])
+    assert bay is not None
+    assert bay.panels_job_id == s["job_id"]
+    assert bay.panels_chassis_vin == s["vin"]        # the panels job's OWN chassis VIN, surfaced for the menu
+
+
+def test_panels_chassis_vin_is_the_panels_job_not_the_occupant(page: Page, live_server: str) -> None:
+    """Crossed panels: job B's panels dropped on job A's bay. The bay's panels_chassis_vin must be B's VIN
+    (the panels job's own), NOT A's occupant VIN — so the menu names the BLOCKING job, not the chassis on
+    the bay. This is the exact recovery the unlink feature targets."""
+    a = h.make_assembly_job()
+    b = h.make_assembly_job()
+    admin_session(page)
+    assert _panels(page, live_server, b["job_id"], a["bay_id"]).status == 201   # B's panels onto A's bay
+    bay = _bay_out(a["bay_id"])
+    assert bay is not None
+    assert bay.mismatch is True
+    assert bay.panels_job_id == b["job_id"]
+    assert bay.panels_chassis_vin == b["vin"]        # the PANELS job's VIN (B)…
+    assert bay.occupant_vin == a["vin"]              # …distinct from the occupant chassis VIN (A)
 
 
 # ── role gating (Q5 — workshop is read-only) ─────────────────────────────────────

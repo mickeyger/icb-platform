@@ -109,6 +109,8 @@ export function BayModelLanes() {
   const [parkingPrompt, setParkingPrompt] = useState<ParkingPrompt | null>(null)
   const [parkingReason, setParkingReason] = useState('')
   const [parkingBusy, setParkingBusy] = useState(false)
+  // WO — the bay right-click "unlink panels" context menu: the bay it's open for + the cursor anchor.
+  const [ctxMenu, setCtxMenu] = useState<{ bayId: number; x: number; y: number } | null>(null)
 
   useRefetchOnFocus(refresh)        // §3.3b — cross-page sync: the lanes refetch on tab focus
 
@@ -148,6 +150,25 @@ export function BayModelLanes() {
     document.addEventListener('icb:return-to-parking-drag', onParkDrag)
     return () => document.removeEventListener('icb:return-to-parking-drag', onParkDrag)
   }, [])
+
+  // WO — close the right-click "unlink panels" menu on click-away / Escape / scroll / resize. Registered
+  // only while the menu is open; the opening right-click's mousedown fires BEFORE this binds, so it can't
+  // self-close. The menu container stops mousedown propagation so clicks on its own buttons don't close it.
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtxMenu(null) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [ctxMenu])
 
   if (mode === 'mock') return null // bay model is a live-only surface (API unreachable → offline demo)
 
@@ -512,6 +533,7 @@ export function BayModelLanes() {
                 }}
                 onDragLeave={() => setPanelHoverBay((b) => (b === bay.id ? null : b))}
                 onDrop={(e) => onBayDrop(e, bay.id)}
+                onContextMenu={(e) => { if (!canAssign) return; e.preventDefault(); setCtxMenu({ bayId: bay.id, x: e.clientX, y: e.clientY }) }}
                 className={`relative rounded-md p-2 transition ${
                   rejected
                     ? 'border-2 border-status-red bg-status-red/20'
@@ -794,6 +816,56 @@ export function BayModelLanes() {
           </div>
         </div>
       )}
+
+      {/* WO — bay right-click context menu: shows which job + chassis the bay's panels belong to, and an
+          Unlink action (reuses the move-panels-back DELETE) so the operator can free a bay blocked by a
+          crossed-panels drop and return that job to the planner. */}
+      {ctxMenu && (() => {
+        const bay = bays.find((b) => b.id === ctxMenu.bayId)
+        if (!bay) return null                                  // refetched away → auto-close on next render
+        const hasPanels = bay.panels_job_id != null
+        const x = Math.max(8, Math.min(ctxMenu.x, window.innerWidth - 250))   // keep on-screen
+        const y = Math.max(8, Math.min(ctxMenu.y, window.innerHeight - 180))
+        return (
+          <div
+            data-testid="bay-context-menu"
+            onMouseDown={(e) => e.stopPropagation()}           // so clicks inside don't trigger the close listener
+            style={{ left: x, top: y }}
+            className="fixed z-50 w-60 rounded-md border border-line bg-white p-3 text-xs shadow-xl"
+          >
+            <div className="mb-1.5 font-semibold text-body">Bay {bay.code}</div>
+            {hasPanels ? (
+              <div className="space-y-0.5 text-muted">
+                <div>Panels: <span className="font-semibold text-body">Job {bay.panels_job_number ?? bay.panels_job_id}</span></div>
+                <div>Chassis VIN: <span className="font-mono text-body">{bay.panels_chassis_vin ?? '—'}</span></div>
+                <div>Customer: <span className="text-body">{bay.panels_customer_name ?? '—'}</span></div>
+              </div>
+            ) : (
+              <div className="text-muted">No panels on this bay.</div>
+            )}
+            {bay.occupant_chassis_id != null && (
+              <div className="mt-2 border-t border-line pt-2 text-muted">
+                Chassis on bay: <span className="font-semibold text-body">Job {bay.occupant_job_number ?? '—'}</span>
+                {' · '}<span className="font-mono text-body">{bay.occupant_vin ?? '—'}</span>
+              </div>
+            )}
+            {bay.mismatch && (
+              <div className="mt-2 rounded bg-status-red/10 px-2 py-1 text-[10px] text-status-red">
+                ⚠ The panels and the chassis are different jobs — they won’t merge.
+              </div>
+            )}
+            {hasPanels && canAssign && (
+              <button
+                data-testid="unlink-panels"
+                onClick={() => { const b = bay; setCtxMenu(null); void onClearPanels(b) }}
+                className="mt-2 w-full rounded bg-status-red/10 px-2 py-1.5 text-[11px] font-semibold text-status-red hover:bg-status-red/20"
+              >
+                Unlink panels — return job to planner
+              </button>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
