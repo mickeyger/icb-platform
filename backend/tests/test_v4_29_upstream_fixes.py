@@ -307,3 +307,55 @@ def test_signoff_timestamps_surface_in_list(api, fresh_job, user):
     item = next(j for j in api.get("/api/production-jobs?limit=500").json() if j["id"] == jid)
     assert item["pre_job_signoff_sales_at"] is not None                   # surfaced in the LIST item (the fix)
     assert item.get("pre_job_signoff_production_at") is None              # the other box stays unsigned
+
+
+# ── WO v4.36a.5 follow-up — a job that has left V/P (panels in a bay / merged / in QA) drops off the board ──
+def test_panels_in_bay_drops_job_off_board(fresh_job):
+    """The demo snag (Michael, 20 Jun): once a job's panels are dragged from V/P onto an assembly bay it
+    must disappear from the Planning Board — grid AND unscheduled pool. The slot row is left intact."""
+    from datetime import date
+    from app.database import SessionLocal
+    from app.models.mes import AssemblyBay, PlanningSlot, ProductionJobBayEvent
+    from app.services import planning as svc
+    jid = fresh_job(status="planning")
+    with SessionLocal() as db:
+        db.add(PlanningSlot(production_job_id=jid, week=svc._monday(date.today()), bay="V-1",
+                            lane="vacuum", slot_position=1, status="scheduled"))
+        db.commit()
+    with SessionLocal() as db:                                            # before: on the board
+        board = svc.build_board(db)
+        assert jid in [s.production_job.id for s in board.slots if s.production_job]
+    with SessionLocal() as db:                                            # panels dragged to a bay
+        bay = db.query(AssemblyBay).filter_by(is_active=True).first()
+        db.add(ProductionJobBayEvent(production_job_id=jid, bay_id=bay.id,
+                                     event_type="panels_arrived_in_bay"))
+        db.commit()
+    with SessionLocal() as db:                                            # after: gone from grid AND pool
+        board = svc.build_board(db)
+        assert jid not in [s.production_job.id for s in board.slots if s.production_job]
+        assert jid not in [j.id for j in board.unscheduled_pool]
+
+
+def test_merged_chassis_drops_job_off_board(fresh_job):
+    """The other half of Michael's symptom: a job whose chassis is merged (body_attached) — or in
+    Awaiting QA — must also be off the board even though the JOB status stays 'planning'."""
+    from datetime import date
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent, PlanningSlot, ProductionJob
+    from app.services import planning as svc
+    jid = fresh_job(status="planning", vcl_date=date(2026, 5, 1))         # links a chassis + VCL
+    with SessionLocal() as db:
+        db.add(PlanningSlot(production_job_id=jid, week=svc._monday(date.today()), bay="V-2",
+                            lane="vacuum", slot_position=2, status="scheduled"))
+        db.commit()
+        crid = db.get(ProductionJob, jid).chassis_record_id
+    with SessionLocal() as db:
+        assert jid in [s.production_job.id for s in svc.build_board(db).slots if s.production_job]
+    with SessionLocal() as db:                                            # chassis merged
+        db.add(ChassisLifecycleEvent(chassis_record_id=crid, cycle_number=1,
+                                     event_type="body_attached", event_date=date.today()))
+        db.commit()
+    with SessionLocal() as db:
+        board = svc.build_board(db)
+        assert jid not in [s.production_job.id for s in board.slots if s.production_job]
+        assert jid not in [j.id for j in board.unscheduled_pool]

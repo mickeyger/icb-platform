@@ -11,7 +11,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, nulls_last, select
+from sqlalchemy import func, nulls_last, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import CalculationRecord, Customer
@@ -220,8 +220,36 @@ def _unscheduled_pool(db: Session, *, branch_id=None, exclude_ids=()) -> List[Pl
     return [_job_ref(j, c, cu, vcl, vin) for (j, c, cu, vcl, vin) in db.execute(stmt).all()]
 
 
+def _progressed_job_ids(db: Session) -> set:
+    """WO v4.36a.5 follow-up — jobs that have LEFT V/P scheduling and must drop off the Planning Board
+    (grid AND unscheduled pool): their panels have been dragged onto an assembly bay
+    (panels_arrived_in_bay — the JOB-side merge signal), their chassis is merged (a body_attached event),
+    or the chassis has moved to Awaiting QA. The PlanningSlot rows are left intact (non-destructive); they
+    are simply hidden now that the job is in the assembly / merge / QA phase. Note the JOB status stays
+    'planning' through merge+QA (16-Jun ruling — no auto-transition), so without this filter such a job
+    leaks into BOTH the grid (via its lingering slot) and the pool (via status='planning')."""
+    ids = set(db.execute(
+        select(ProductionJobBayEvent.production_job_id)
+        .where(ProductionJobBayEvent.event_type == "panels_arrived_in_bay")).scalars().all())
+    ids |= set(db.execute(
+        select(ProductionJob.id)
+        .join(ChassisRecord, ProductionJob.chassis_record_id == ChassisRecord.id)
+        .where(or_(
+            ChassisRecord.status == "awaiting_qa",
+            select(ChassisLifecycleEvent.id).where(
+                ChassisLifecycleEvent.chassis_record_id == ChassisRecord.id,
+                ChassisLifecycleEvent.event_type == "body_attached").exists()))).scalars().all())
+    ids.discard(None)
+    return ids
+
+
 def build_board(db: Session, *, branch_id=None, weeks_count=12, lane=None, start=None) -> PlanningBoard:
     rows = db.execute(_slot_select(branch_id=branch_id, lane=lane)).all()
+    # WO v4.36a.5 follow-up — a job whose panels have gone to a bay (or is merged / in Awaiting QA) has left
+    # V/P scheduling; drop it from the board entirely (grid below + pool further down). Non-destructive read
+    # filter — the slot row stays, so move-panels-back / unschedule still work.
+    progressed = _progressed_job_ids(db)
+    rows = [r for r in rows if r[0].production_job_id not in progressed]
     all_items = [_slot_item(*r) for r in rows]
     # WO v4.29 D6: show a CONTIGUOUS run of weeks (empty weeks INCLUDED — W17/W18 were being dropped,
     # leaving gaps). When `start` is given (the jump-to control), anchor on that week (normalised to its
@@ -241,7 +269,8 @@ def build_board(db: Session, *, branch_id=None, weeks_count=12, lane=None, start
     # WO v4.29 D5: natural-numeric bay order (Bay-2 < Bay-10), not ASCII string order.
     lanes = sorted({it.bay for it in all_items if it.bay}, key=_bay_sort_key)
     slotted_ids = {r[0].production_job_id for r in rows if r[0].production_job_id}
-    pool = _unscheduled_pool(db, branch_id=branch_id, exclude_ids=slotted_ids)
+    # exclude the progressed jobs from the pool too — they belong to assembly/merge/QA, not the board.
+    pool = _unscheduled_pool(db, branch_id=branch_id, exclude_ids=slotted_ids | progressed)
     grid = len(lanes)
     capacity = []
     for w in weeks_sorted:
