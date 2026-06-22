@@ -90,6 +90,16 @@ Single `icb_app` role granted CREATE/ownership on all three schemas **including 
 - systemd `icb-pg-backup.{service,timer}` (next 02:30 daily); logrotate `/etc/logrotate.d/icb` (dry-run valid). Manual smoke test: dump produced (root:postgres 600, magic `PGDMP`), audit entry landed.
 - **TBC (Marnus):** off-box NAS rsync (placeholder in script).
 
+## Layer 8 — App deployment + migrations  ✓ complete (signed off)
+Two install-side fixes were needed before `alembic upgrade head` ran clean (both DB-config, **no migration/app-code edits**; stop-and-surface gate honoured at each failure):
+1. **v1.1 patch #11 — `GRANT CREATE ON DATABASE icb_platform TO icb_app`.** Option A grants schema *ownership*, but PostgreSQL `CREATE SCHEMA IF NOT EXISTS` (migrations 0003/0008) requires CREATE-on-DATABASE even when the schema already exists (the privilege check precedes the IF-NOT-EXISTS short-circuit). Add after the L2 grants.
+2. **v1.1 patch #12 — `ALTER ROLE icb_app SET search_path TO icb_costings, icb_mes, public`.** 0001 creates schema-less costing tables via `create_all()` → they land in `search_path[0]`. The runbook set the DB-level search_path `icb_mes` first (copying the runtime listener order), so costing tables went to `icb_mes` and 0003's `icb_costings.calculations` 404'd. Migrations use a separate engine without `database.py`'s connect-listener, so they rely on the **role** default — which `env.py` documents must be `icb_costings` first. Runtime unaffected (the app's listener overrides per connection).
+
+Result: **all 25 migrations applied, `current = 0025 (head)`**; tables icb_costings 48 / icb_mes 35 / icb_sap 3; `alembic_version` + `calculations` correctly in `icb_costings`. Backend restarted; seed created `admin` + `user` (defaults `admin/admin123`, `user/user123` from `seed_data.py` — **ROTATE on first login**). `/api/materials` → 200 `[]` (graceful empty-state, no 500).
+
+## Layer 4 — nginx CORRECTION (v1.1 patch #13, the biggest)
+The v1.0 "React `dist` at `/` + `/api` proxy + SPA fallback" model is **wrong for this hybrid FastAPI app** and **violated the `/calculator` byte-identical non-negotiable (§D)** — nginx served the React shell at `/calculator`, `/login`, `/admin`. The app is FastAPI-served hybrid: Jinja (`/calculator`,`/login`,`/admin`) + React (`/mes-app/`) + API (`/api/`) + docs (`/docs`). **Fix:** nginx = TLS termination + reverse-proxy **all** paths to `127.0.0.1:8000`; dropped static root / `try_files` SPA fallback / per-path locations. Health endpoint is **`/health`** (app-native, 200); `/healthz` was a runbook fiction (no such app route) — **§I stand-down should use `/health`**. Verified via nginx: authed `/calculator` → Jinja `Calculator — IceCold` (not React); `/login` → Jinja; `/mes-app/` → React; `/api/materials` → 200 `[]`; `/` → 307 `/login`; http→https 301.
+
 ## Open TBC (Marnus → Michael), by blocking layer
 - VPN pool CIDR + tech → ufw (post-L1)
 - SAP host + RO creds → Layer 6
@@ -102,8 +112,10 @@ Single `icb_app` role granted CREATE/ownership on all three schemas **including 
 | Layer 1 — Base OS | ✓ | 2026-06-22 |
 | Layer 2 — PostgreSQL | ✓ | 2026-06-22 |
 | Layer 3 — Runtime | ✓ | 2026-06-22 |
-| Layer 4 — Nginx/TLS | ✓ | 2026-06-22 |
+| Layer 4 — Nginx/TLS | ✓ (reworked → proxy-all, patch #13) | 2026-06-22 |
 | Layer 5 — systemd | ✓ | 2026-06-22 |
 | Layer 6 — SAP ODBC | ✓ (smoke TBC) | 2026-06-22 |
 | Layer 7 — Backups | ✓ (NAS TBC) | 2026-06-22 |
-| Layer 8 — App deploy | ☐ | |
+| Layer 8 — App deploy | ✓ | 2026-06-22 |
+| End-to-end (curl) | ✓ — `/calculator` Jinja, `/mes-app/` React, `/api` 200, `/health` 200 | 2026-06-22 |
+| Browser click-through | ☐ Michael's human gate | |
