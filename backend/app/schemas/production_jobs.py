@@ -87,6 +87,14 @@ class PlanningAckRequest(BaseModel):
     # onto the linked chassis_records.dealer_id at ack (cross-schema FK, SET NULL). None leaves it untouched.
     dealer_id: Optional[int] = None
     tail_lift_code: Optional[str] = None
+    # WO v4.36b — chassis-field unification: the ack panel's shared chassis form persists these onto
+    # chassis_records (single source of truth). chassis_notes is the CHASSIS note — DISTINCT from `notes`
+    # above, which is the ack comment that lands on PlanningAck.notes.
+    customer_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    telephone: Optional[str] = None
+    description: Optional[str] = None
+    chassis_notes: Optional[str] = None
     # WO v4.34 §0.8 — optional job-number override (SAP-assigned during the parallel run). None
     # (field absent) keeps the quote-derived value; refused when locked / SAP_RETIRED (§0.9).
     job_number: Optional[str] = None

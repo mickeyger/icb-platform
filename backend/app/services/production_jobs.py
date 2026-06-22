@@ -331,6 +331,13 @@ def chassis_prefill(db: Session, job_id: int) -> dict:
     return {"customer_name": customer_name, "customer_id": customer_id, "chassis_type": chassis_type,
             "dealer_id": dealer_id, "dealer_name": dealer_name, "vin_number": vin_number,
             "vin_source": vin_source,
+            # WO v4.36b — chassis-field unification: surface the rest of the linked chassis fields so the
+            # Planning-ack panel seeds from chassis_records (single source of truth), not the costing blob.
+            "contact_person": (chassis.contact_person if chassis else None),
+            "telephone": (chassis.telephone if chassis else None),
+            "description": (chassis.description if chassis else None),
+            "chassis_notes": (chassis.notes if chassis else None),
+            "tail_lift_code": (chassis.tail_lift_code if chassis else None),
             # §3.5e — the job's Delivery ETA (production_jobs.chassis_eta) as a YYYY-MM-DD string, for the
             # Add-Chassis modal's ETA auto-populate.
             "chassis_eta": (job.chassis_eta.date().isoformat() if job.chassis_eta else None)}
@@ -414,6 +421,19 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
             dealer_id = (chassis_data or {}).get("dealer_id")
             if dealer_id is not None:
                 chassis.dealer_id = ci.validate_dealer(db, dealer_id)
+            # WO v4.36b — chassis-field unification: the ack persists the chassis fields onto chassis_records
+            # (single source of truth), not just the costing chassis_data blob. The panel sends the attested
+            # make when §3.9-locked, so make<-chassis_model equals the attested value (safe). VIN keeps its
+            # dedicated write-once path above; ETA stays on the job; the blob is still written (belt-and-braces).
+            cd = chassis_data or {}
+            if cd.get("chassis_model"):
+                chassis.make = (cd["chassis_model"] or "").strip()[:64] or None
+            _widths = {"customer_name": 128, "contact_person": 128, "telephone": 64,
+                       "description": 255, "notes": None, "tail_lift_code": 64}
+            for col, w in _widths.items():
+                if cd.get(col) is not None:
+                    val = (cd[col] or "").strip()
+                    setattr(chassis, col, (val[:w] if w else val) or None)
             chassis.updated_by = actor
     job.status = "planning"
     # hotfix (fix/prejob-card-status-sync) — keep the costing's status in lock-step so the Costings

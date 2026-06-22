@@ -7,8 +7,9 @@ import { Tooltip } from '../../components/ui/Tooltip'
 import { useAppData } from '../../store/AppDataContext'
 import { useCostings, type ChassisCatalogue, type ChassisEtaPayload } from '../../store/CostingsContext'
 import { data as mockData } from '../../data/mockData'
-import { ChassisModelSelect } from '../Chassis/ChassisModelSelect'
-import { DealerSelect } from '../Chassis/DealerSelect'
+import { apiGet } from '../../lib/api'
+import { ChassisFieldsForm, type ChassisFieldValues, type ChassisFieldLocks } from '../Chassis/ChassisFieldsForm'
+import type { ChassisPrefill } from '../Chassis/chassisShared'
 import { zar, dmy, hhmm } from '../../lib/format'
 import type { Costing } from '../../data/costingsData'
 
@@ -68,6 +69,33 @@ export function PlanningAckPanel({
   }, [costing, chassisLocked, vinLocked, knownVin, card])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
   useEffect(() => setForm(seed), [seed])
+
+  // WO v4.36b — chassis-field unification: overlay the LIVE linked chassis fields from chassis_records (the
+  // single source of truth) so the ack shows what the Chassis page shows — the identity fields
+  // (customer/contact/telephone/description/notes) the seed lacks, and the live dealer/type/tail-lift. The
+  // seed memo still provides the costing-blob fallback + the §3.9 attested values; this overlays the chassis
+  // row when present. costing is a click-time snapshot, so this fires once per open (no mid-edit clobber).
+  useEffect(() => {
+    const jobId = costing?.production_job_id
+    if (!jobId) return
+    let live = true
+    apiGet<ChassisPrefill>(`/api/production-jobs/${jobId}/chassis-prefill`).then((p) => {
+      if (!live) return
+      setForm((f) => ({
+        ...f,
+        customer_name: p.customer_name ?? f.customer_name,
+        contact_person: p.contact_person ?? f.contact_person,
+        telephone: p.telephone ?? f.telephone,
+        description: p.description ?? f.description,
+        chassis_notes: p.chassis_notes ?? f.chassis_notes,
+        chassis_model: chassisLocked ? f.chassis_model : (p.chassis_type ?? f.chassis_model),
+        dealer_id: p.dealer_id ?? f.dealer_id,
+        dealer_name: p.dealer_name ?? f.dealer_name,
+        tail_lift_code: p.tail_lift_code ?? f.tail_lift_code,
+      }))
+    }).catch(() => {})
+    return () => { live = false }
+  }, [costing, chassisLocked])
 
   const etaCaptured = !!form.chassis_eta
 
@@ -324,8 +352,42 @@ function ChassisExternalSection({
   chassisLocked?: boolean
   vinLocked?: boolean
 }) {
-  // Real-world tail-lift catalogue from icb_mock_data.json; chassis types now come from the DDM (§3.7).
-  const tailLifts = mockData.tail_lifts
+  // WO v4.36b — chassis-field unification: the ack uses the SAME ChassisFieldsForm as the Chassis page Edit
+  // modal, so both present these fields identically over chassis_records. Map the ack form (ChassisEtaPayload)
+  // <-> ChassisFieldValues (make<->chassis_model, vin<->chassis_vin, notes<->chassis_notes). §3.9 locks map to
+  // per-field read-only; a non-acknowledger (read-only) locks every field.
+  const values: ChassisFieldValues = {
+    customer_name: form.customer_name ?? '',
+    make: form.chassis_model ?? '',
+    dealer_id: form.dealer_id ?? null,
+    dealer_name: form.dealer_name ?? null,
+    chassis_eta: dateOnly(form.chassis_eta),
+    contact_person: form.contact_person ?? '',
+    telephone: form.telephone ?? '',
+    vin: form.chassis_vin ?? '',
+    tail_lift_code: form.tail_lift_code ?? '',
+    description: form.description ?? '',
+    notes: form.chassis_notes ?? '',
+  }
+  const onField = (patch: Partial<ChassisFieldValues>) => setForm((f) => {
+    const n: ChassisEtaPayload = { ...f }
+    if ('customer_name' in patch) n.customer_name = patch.customer_name
+    if ('make' in patch) n.chassis_model = patch.make
+    if ('dealer_id' in patch) n.dealer_id = patch.dealer_id ?? null
+    if ('dealer_name' in patch) n.dealer_name = patch.dealer_name ?? undefined
+    if ('chassis_eta' in patch) n.chassis_eta = patch.chassis_eta ?? ''
+    if ('contact_person' in patch) n.contact_person = patch.contact_person
+    if ('telephone' in patch) n.telephone = patch.telephone
+    if ('vin' in patch) n.chassis_vin = patch.vin
+    if ('tail_lift_code' in patch) n.tail_lift_code = patch.tail_lift_code
+    if ('description' in patch) n.description = patch.description
+    if ('notes' in patch) n.chassis_notes = patch.notes
+    return n
+  })
+  const locks: ChassisFieldLocks = canEdit
+    ? { chassisType: chassisLocked, vin: vinLocked }
+    : { customer: true, chassisType: true, dealer: true, eta: true, contact: true, telephone: true,
+        vin: true, tailLift: true, description: true, notes: true }
 
   return (
     <Tooltip k="costings_detail.chassis_external_section">
@@ -333,106 +395,12 @@ function ChassisExternalSection({
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-status-amber">
           External (customer-supplied) chassis
         </div>
-
-        <div className="space-y-2">
-          <label className="block text-xs">
-            <span className="font-semibold text-muted">Chassis type</span>
-            {/* WO v4.34 §3.7 — the chassis-type DDM (was the hardcoded icb_mock_data list); stores the
-                display string so it agrees with the Pre-Job Card + Chassis surfaces.
-                §3.9 — locked read-only once the linked card is confirmed WITH a chassis (sign-off
-                integrity: the attested spec is the source of truth, not the planner's edit). */}
-            {chassisLocked ? (
-              <div data-testid="planning-ack-chassis-locked"
-                   className="mt-1 flex w-full items-center justify-between rounded-md border border-line bg-surface-alt px-2 py-1.5 text-sm text-body">
-                <span>{form.chassis_model || '—'}</span>
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">attested · locked</span>
-              </div>
-            ) : (
-              <ChassisModelSelect testid="planning-ack-chassis-model" value={form.chassis_model}
-                disabled={!canEdit} onChange={(v) => setForm((f) => ({ ...f, chassis_model: v }))} />
-            )}
-            <span className="mt-1 block text-[10px] text-muted">
-              {chassisLocked
-                ? 'From the confirmed Pre-Job Card — locked after sign-off.'
-                : 'Pre-filled from the costing; override if the customer has changed their mind.'}
-            </span>
-          </label>
-
-          <label className="block text-xs">
-            <span className="font-semibold text-muted">Chassis dealer <span className="text-[10px]">(supplier)</span></span>
-            {/* WO v4.34.1 §3.3 — structured dealer picker (replaces the free-text input). Stores the
-                dealer_id; propagated onto chassis_records.dealer_id at ack. Not part of the §3.9
-                sign-off lock (only chassis_type + VIN lock), so it stays editable here. */}
-            <DealerSelect
-              testid="planning-ack-dealer"
-              value={form.dealer_id}
-              valueName={form.dealer_name}
-              disabled={!canEdit}
-              onChange={(id, name) => setForm((f) => ({ ...f, dealer_id: id, dealer_name: name }))}
-            />
-            <span className="mt-1 block text-[10px] text-muted">
-              The dealer that supplied this chassis — from the Customers list (flagged as dealers).
-            </span>
-          </label>
-
-          <Tooltip k="costings_detail.chassis_eta_picker">
-            <label className="block text-xs">
-              <span className="font-semibold text-muted">Delivery ETA <span className="text-status-red">*</span></span>
-              <input
-                type="date"
-                value={dateOnly(form.chassis_eta)}
-                disabled={!canEdit}
-                onChange={(e) => setForm((f) => ({ ...f, chassis_eta: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm disabled:bg-surface-alt"
-              />
-              <span className="mt-1 block text-[10px] text-muted">
-                <Calendar size={10} className="mr-1 inline-block" />
-                Required — when will the customer's chassis arrive at Icecold?
-              </span>
-            </label>
-          </Tooltip>
-
-          <Tooltip k="costings_detail.chassis_vin_field">
-            <label className="block text-xs">
-              <span className="font-semibold text-muted">Chassis VIN</span>
-              {/* §3.9 — VIN locks read-only ONLY when one was attested at pre-job (vinLocked); if the
-                  card left it blank, the planner captures it here and it lands on the chassis record. */}
-              {vinLocked ? (
-                <div data-testid="planning-ack-vin-locked"
-                     className="mt-1 w-full rounded-md border border-line bg-surface-alt px-2 py-1.5 font-mono text-sm text-body">
-                  {form.chassis_vin || '—'}
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  data-testid="planning-ack-vin"
-                  value={form.chassis_vin ?? ''}
-                  disabled={!canEdit}
-                  onChange={(e) => setForm((f) => ({ ...f, chassis_vin: e.target.value }))}
-                  placeholder="(filled when the chassis physically arrives)"
-                  className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 font-mono text-sm disabled:bg-surface-alt"
-                />
-              )}
-            </label>
-          </Tooltip>
-
-          <Tooltip k="costings_detail.chassis_tail_lift_selector">
-            <label className="block text-xs">
-              <span className="font-semibold text-muted">Tail lift</span>
-              <select
-                value={form.tail_lift_code ?? ''}
-                disabled={!canEdit}
-                onChange={(e) => setForm((f) => ({ ...f, tail_lift_code: e.target.value }))}
-                className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm disabled:bg-surface-alt"
-              >
-                <option value="">— select —</option>
-                {tailLifts.map((l) => (
-                  <option key={l.code} value={l.code}>{l.supplier} {l.model}</option>
-                ))}
-              </select>
-            </label>
-          </Tooltip>
-        </div>
+        <ChassisFieldsForm
+          values={values} onChange={onField} tailLifts={mockData.tail_lifts} testidPrefix="planning-ack"
+          locks={locks}
+          etaHint={<><Calendar size={10} className="mr-1 inline-block" />Required — when will the customer’s chassis arrive at Icecold?</>}
+          vinNote={vinLocked ? 'Attested upstream — locked.' : undefined}
+        />
       </div>
     </Tooltip>
   )

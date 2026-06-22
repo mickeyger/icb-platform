@@ -224,6 +224,10 @@ def planning_ack(
         "customer_dealer": body.customer_dealer, "tail_lift_code": body.tail_lift_code,
         "chassis_inhouse_bom": body.chassis_inhouse_bom,
         "dealer_id": body.dealer_id,              # WO v4.34.1 §0.3 — structured chassis supplier
+        # WO v4.36b — chassis-field unification (record_planning_ack persists these onto chassis_records);
+        # chassis_notes maps to the chassis `notes` column (the ack `notes` arg above is a separate audit comment).
+        "customer_name": body.customer_name, "contact_person": body.contact_person,
+        "telephone": body.telephone, "description": body.description, "notes": body.chassis_notes,
     }
     try:
         return _detail(svc.record_planning_ack(
