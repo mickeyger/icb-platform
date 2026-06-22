@@ -92,6 +92,9 @@ export function PlanningAckPanel({
         dealer_id: p.dealer_id ?? f.dealer_id,
         dealer_name: p.dealer_name ?? f.dealer_name,
         tail_lift_code: p.tail_lift_code ?? f.tail_lift_code,
+        // ETA lives on production_jobs.chassis_eta; prefer the LIVE job value so an ETA captured on the
+        // Chassis page seeds the ack (both directions — the Chassis page already reads it via get_detail).
+        chassis_eta: p.chassis_eta ?? f.chassis_eta,
       }))
     }).catch(() => {})
     return () => { live = false }
