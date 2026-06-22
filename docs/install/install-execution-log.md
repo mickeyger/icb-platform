@@ -67,6 +67,29 @@ Single `icb_app` role granted CREATE/ownership on all three schemas **including 
 
 ---
 
+## Layer 3 — Application runtime  ✓ complete (signed off)
+- Python deps (venv/dev, build-essential, libpq-dev, git); Node **v22.23.0** + npm 10.9.8 (NodeSource).
+- Repo cloned → `/opt/icb-platform` (icb-owned, `main`); HEAD `0a83f82` (past v4.36a.5 / `3f188a3` ancestor).
+- Backend venv: 50 wheels (uvicorn 0.42.0, fastapi 0.115.12, sqlalchemy 2.0.48). Frontend `npm install` + `npm run build` (`tsc -b && vite build`) → `dist/` (1.1 MB). No CA1-env divergence.
+
+## Layer 4 — Nginx + TLS  ✓ complete (signed off)
+- nginx 1.24.0; self-signed cert `CN=mes.icb.internal` (to 2031-06-21); site config (React static + `/api/` proxy + health), HTTP→HTTPS 301. Verified https/2 200, React shell served, `/healthz` proxy wired (502 until L5).
+- **Deviations:** Option B (ufw 80/tcp from LAN, 301-shim); `/healthz`→`/health` nginx map (deviation #1 implemented); `listen 443 ssl http2` (1.24 syntax, not `http2 on;` which is 1.25.1+) → **v1.1 patch**.
+
+## Layer 5 — systemd backend  ✓ complete (signed off)
+- `/etc/icb/backend.env` (root:icb 600); `icb-backend.service` (uvicorn `app.main:app --app-dir backend`, 127.0.0.1:8000, 4 workers), enabled + running.
+- `/health` 200 `{"status":"ok"}`; https `/healthz` 200 end-to-end; access logs in journal. Expected non-fatal: `Seed failed: relation "users" does not exist` (admin-seed pre-alembic; resolves after L8 + restart).
+- **Deviations (runbook §5.1 env template wrong → v1.1 patches #6–#9):** `SESSION_SECRET` (not `SECRET_KEY`, REQUIRED — boot would fail), `ALLOWED_ORIGINS` (not `ALLOWED_HOSTS`), `DEPLOYMENT_MODE=on_prem` (not `ICB_ENV`), `SAP_DSN` dropped (`SAP_ENABLED=false`; app reads `icb_sap` from PG). `WorkingDirectory=/opt/icb-platform` + `--app-dir backend`.
+
+## Layer 6 — SAP ODBC  ✓ complete (signed off); live smoke test TBC (Marnus)
+- MS repo key → `/usr/share/keyrings/microsoft-prod.gpg` (signed-by pin; **v1.1 patch #10**, not `trusted.gpg.d`). `msodbcsql18` 18.6.2.1, `mssql-tools18`, `unixodbc` 2.3.12; `pyodbc` 5.3.0 in venv. `pyodbc.drivers()` = `['ODBC Driver 18 for SQL Server']`; `sqlcmd` on PATH.
+- **TBC (Marnus):** live `sqlcmd -S <sap-host> -U <ro> … "SELECT TOP 1 * FROM OITM"`. ODBC path serves the SAP→`icb_sap` ETL loader, not the app runtime.
+
+## Layer 7 — Backups + logrotate  ✓ complete (signed off); off-box NAS TBC (Marnus)
+- `/usr/local/sbin/icb-pg-backup` (root:postgres 750): `runuser pg_dump -Fc | gzip` → `/var/backups/postgres` (chown root:postgres 600), **30-day retention** (simplified per BA vs fragile weekly predicate), audit entry → `backend/scripts_audit.log`.
+- systemd `icb-pg-backup.{service,timer}` (next 02:30 daily); logrotate `/etc/logrotate.d/icb` (dry-run valid). Manual smoke test: dump produced (root:postgres 600, magic `PGDMP`), audit entry landed.
+- **TBC (Marnus):** off-box NAS rsync (placeholder in script).
+
 ## Open TBC (Marnus → Michael), by blocking layer
 - VPN pool CIDR + tech → ufw (post-L1)
 - SAP host + RO creds → Layer 6
@@ -78,9 +101,9 @@ Single `icb_app` role granted CREATE/ownership on all three schemas **including 
 |---|---|---|
 | Layer 1 — Base OS | ✓ | 2026-06-22 |
 | Layer 2 — PostgreSQL | ✓ | 2026-06-22 |
-| Layer 3 — Runtime | ☐ | |
-| Layer 4 — Nginx/TLS | ☐ | |
-| Layer 5 — systemd | ☐ | |
-| Layer 6 — SAP ODBC | ☐ | |
-| Layer 7 — Backups | ☐ | |
+| Layer 3 — Runtime | ✓ | 2026-06-22 |
+| Layer 4 — Nginx/TLS | ✓ | 2026-06-22 |
+| Layer 5 — systemd | ✓ | 2026-06-22 |
+| Layer 6 — SAP ODBC | ✓ (smoke TBC) | 2026-06-22 |
+| Layer 7 — Backups | ✓ (NAS TBC) | 2026-06-22 |
 | Layer 8 — App deploy | ☐ | |
