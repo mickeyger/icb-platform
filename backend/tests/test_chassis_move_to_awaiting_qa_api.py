@@ -169,9 +169,14 @@ def test_move_clears_bay_occupancy(app_mod, on_bay_with_body):
     with SessionLocal() as db:
         svc.record_moved_to_awaiting_qa(db, rid, who="admin")
     with SessionLocal() as db:
+        from app.models.mes import ChassisRecord
         occ = svc.current_occupants(db)
         assert bay not in occ                                          # bay derives EMPTY after the move
-        assert svc._current_assembly_bay_id(db, rid) is None
+        # The bay clears via the STATUS transition (current_occupants gates on in_assembly). move-to-qa is
+        # status-promoting, NOT event-deleting — the assembly_assigned event intentionally persists — so
+        # _current_assembly_bay_id (status-BLIND by design, v4.31 §0.12) still returns the bay. Assert the
+        # actual bay-clearing mechanism instead: the chassis has left in_assembly.
+        assert db.get(ChassisRecord, rid).status == "awaiting_qa"
 
 
 def test_move_without_body_attached_422(app_mod, fresh_chassis):
