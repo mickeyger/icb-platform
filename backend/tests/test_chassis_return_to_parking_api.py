@@ -177,6 +177,13 @@ def on_bay_linked():
             j = db.get(ProductionJob, jid)                            # cascades production_jobs_audit
             if j:
                 db.delete(j)
+                db.flush()                                            # FK-safe: emit the job DELETE (clears the
+                                                                      # chassis_record_id reference) BEFORE the chassis
+                                                                      # DELETE below. production_jobs.chassis_record_id
+                                                                      # is a bare-column FK (no ORM relationship), so
+                                                                      # the unit-of-work won't order these for us →
+                                                                      # without the flush the chassis can delete first
+                                                                      # → fk_production_jobs_chassis_record violation.
             for e in db.query(ChassisLifecycleEvent).filter_by(chassis_record_id=rid).all():
                 db.delete(e)
             r = db.get(ChassisRecord, rid)
