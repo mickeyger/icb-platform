@@ -426,7 +426,11 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
             # make when §3.9-locked, so make<-chassis_model equals the attested value (safe). VIN keeps its
             # dedicated write-once path above; ETA stays on the job; the blob is still written (belt-and-braces).
             cd = chassis_data or {}
-            if cd.get("chassis_model"):
+            # WO v4.36b — fill the chassis make from the ack's chassis-type ONLY when it's blank; NEVER
+            # overwrite an existing/attested make. The §3.9 frontend lock sends the attested value (no-op
+            # here), and the §3.2 pre_job_card contract makes the pre-job-attested spec the source of truth
+            # (test_ack_skips_when_already_linked / test_ack_noops_after_real_prejob_submit).
+            if cd.get("chassis_model") and not (chassis.make or "").strip():
                 chassis.make = (cd["chassis_model"] or "").strip()[:64] or None
             _widths = {"customer_name": 128, "contact_person": 128, "telephone": 64,
                        "description": 255, "notes": None, "tail_lift_code": 64}
