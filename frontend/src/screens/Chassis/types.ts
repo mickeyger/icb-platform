@@ -67,6 +67,7 @@ export interface ChassisRecordDetail extends ChassisRecord {
   description?: string | null
   submit_status?: string | null
   notes?: string | null
+  tail_lift_code?: string | null   // WO v4.36b — chassis-field unification (Edit modal Tail-lift)
   created_at?: string | null
   updated_at?: string | null
   // WO v4.36a §3.5c — authoritative job link (production_jobs.chassis_record_id back-ref); drives the

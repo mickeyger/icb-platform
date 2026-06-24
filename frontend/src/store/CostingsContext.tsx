@@ -65,6 +65,13 @@ export interface ChassisEtaPayload {
   tail_lift_code?: string
   chassis_inhouse_bom?: { category: string; description: string; item_code: string }[]
   job_number?: string                        // WO v4.34 §0.8 — Planning-ack override (SAP-assigned)
+  // WO v4.36b — chassis-field unification: the ack persists these onto chassis_records (single source of
+  // truth). chassis_notes is the CHASSIS note, distinct from the ack `notes` audit comment.
+  customer_name?: string
+  contact_person?: string
+  telephone?: string
+  description?: string
+  chassis_notes?: string
 }
 
 export interface ChassisCatalogue {
@@ -383,6 +390,12 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
           customer_dealer: payload?.customer_dealer,
           dealer_id: payload?.dealer_id ?? null,       // §0.3 — structured chassis supplier → chassis_records.dealer_id
           tail_lift_code: payload?.tail_lift_code,
+          // WO v4.36b — chassis-field unification (record_planning_ack persists these onto chassis_records)
+          customer_name: payload?.customer_name,
+          contact_person: payload?.contact_person,
+          telephone: payload?.telephone,
+          description: payload?.description,
+          chassis_notes: payload?.chassis_notes,
           chassis_inhouse_bom: payload?.chassis_inhouse_bom,
           job_number: payload?.job_number,             // §0.8 — override (backend ignores if unchanged/locked/retired)
         })
