@@ -21,12 +21,14 @@ import {
   ClipboardCheck,
   Building2,
   Truck,
+  AlertTriangle,
   type LucideIcon,
 } from 'lucide-react'
 import { useAppData, type BranchRef } from '../../store/AppDataContext'
 import { Tooltip } from '../ui/Tooltip'
 import { Spinner } from '../ui/feedback'
 import { costingsMock, type PermissionKey } from '../../data/costingsData'
+import { useFlagSummary } from '../../hooks/useFlags'   // WO v4.36b §3.2 — nav aggregate flag badge
 
 interface NavEntry {
   to: string
@@ -85,6 +87,7 @@ function entryVisible(entry: NavEntry, has: (k: PermissionKey) => boolean, isAdm
 export function TopNav({ dark = false }: { dark?: boolean }) {
   const { tooltipsEnabled, setTooltipsEnabled, profile, setProfile, hasPermission, isAdmin, apiMode, activeBranch, accessibleBranches, switchBranch } = useAppData()
   const visibleLinks = NAV_LINKS.filter((l) => entryVisible(l, hasPermission, isAdmin))
+  const { summary } = useFlagSummary()   // WO v4.36b §3.2 — aggregate flag count → Health Check (§3.3)
 
   return (
     <header
@@ -116,6 +119,20 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
         ))}
       </nav>
       <div className="flex items-center gap-2 py-2 pl-4">
+        {/* WO v4.36b §3.2 — aggregate "N attention items" badge → Health Check dashboard (§3.3). Hidden
+            when clean or when the flag API is unavailable (mock mode). */}
+        {summary && summary.total > 0 && (
+          <NavLink
+            to="/admin/health-check"
+            data-testid="nav-flag-badge"
+            title={`${summary.total} attention item${summary.total === 1 ? '' : 's'} — open Health Check`}
+            className="flex items-center gap-1.5 rounded-md bg-status-red/25 px-2.5 py-1.5 text-xs font-bold text-white ring-1 ring-status-red/40 transition hover:bg-status-red/40"
+          >
+            <AlertTriangle size={14} />
+            <span className="tabular-nums">{summary.total}</span>
+            <span className="hidden md:inline">attention</span>
+          </NavLink>
+        )}
         {apiMode === 'live' && activeBranch && (
           <BranchPicker
             active={activeBranch}

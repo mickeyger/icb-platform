@@ -21,6 +21,15 @@ export interface ResourceConfig {
 }
 
 export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
+  // WO v4.36b §3.3 — Health Check dashboard (custom screen; aggregates the visual-integrity flag streams).
+  'health-check': {
+    key: 'health-check',
+    title: 'Health Check',
+    basePath: '/api/visual-integrity/flags/summary',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
   'spec-options': {
     key: 'spec-options',
     title: 'Spec options (DDM dropdowns)',
@@ -168,4 +177,4 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
   },
 }
 
-export const ADMIN_ORDER = ['spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']
+export const ADMIN_ORDER = ['health-check', 'spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']

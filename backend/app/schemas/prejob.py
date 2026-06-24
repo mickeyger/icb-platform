@@ -175,6 +175,7 @@ class OutstandingSignoffOut(BaseModel):
     """WO v4.33.1 §3.1 — a card awaiting sign-off (status='sent_for_check'), for the admin
     Outstanding Pre-Job Sign-offs nav-aid page."""
     id: int
+    production_job_id: Optional[int] = None   # WO v4.36b §3.4 — flag-join key (card carries no job FK)
     quote_number: Optional[str] = None
     customer_name: Optional[str] = None
     sent_for_check_at: Optional[datetime] = None

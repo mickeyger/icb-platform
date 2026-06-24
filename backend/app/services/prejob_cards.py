@@ -233,6 +233,11 @@ def list_outstanding_signoffs(db: Session) -> list[dict]:
     cust_ids = {calc.customer_id for calc in calcs.values() if calc.customer_id}
     customers = {cu.id: cu.name for cu in db.execute(
         select(Customer).where(Customer.id.in_(cust_ids))).scalars().all()} if cust_ids else {}
+    # WO v4.36b §3.4 — the linked production job per card (via calc), so the admin Outstanding Sign-offs
+    # screen can join the job-keyed visual-integrity flags (the card itself carries no job FK).
+    job_by_calc = {jc: jid for jid, jc in db.execute(
+        select(ProductionJob.id, ProductionJob.calculation_record_id).where(
+            ProductionJob.calculation_record_id.in_({c.calculation_id for c in cards}))).all()}
     uids = ({c.sales_rep_user_id for c in cards} | {c.planner_user_id for c in cards})
     uids.discard(None)
     names = {u.id: u.username for u in db.execute(
@@ -242,6 +247,7 @@ def list_outstanding_signoffs(db: Session) -> list[dict]:
         calc = calcs.get(c.calculation_id)
         out.append({
             "id": c.id,
+            "production_job_id": job_by_calc.get(c.calculation_id),   # WO v4.36b §3.4 — flag-join key
             "quote_number": calc.quote_number if calc else None,
             "customer_name": customers.get(calc.customer_id) if (calc and calc.customer_id) else None,
             "sent_for_check_at": c.sent_for_check_at,
