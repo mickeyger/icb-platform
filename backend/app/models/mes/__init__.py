@@ -1080,6 +1080,7 @@ class FeedbackSubmission(Base):
     status = Column(String(20), nullable=False, default="submitted")  # submitted|triaged|in_progress|resolved|closed
     assigned_to = Column(String(120))
     resolution_notes = Column(Text)
+    status_history = Column(JSONB)             # WO v4.38 W2 — append-only audit: [{at,by,from,to,note}]
 
 
 __all__ = [

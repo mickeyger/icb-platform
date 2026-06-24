@@ -99,8 +99,37 @@ def _detail_dict(r: FeedbackSubmission) -> dict:
         "resolution_notes": r.resolution_notes or "",
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         "screenshot_url": f"/api/admin/feedback/{r.id}/screenshot" if r.screenshot_path else None,
+        "status_history": r.status_history or [],
     })
     return d
+
+
+def _append_history(row: FeedbackSubmission, by: str, to_status: str,
+                    from_status: str | None = None, note: str | None = None) -> None:
+    """Append an append-only audit entry to status_history. Reassigns the list (not
+    in-place mutate) so SQLAlchemy detects the JSONB change."""
+    entry = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "by": by or "system",
+        "from": from_status,
+        "to": to_status,
+        "note": (note or "").strip()[:200] or None,
+    }
+    row.status_history = (row.status_history or []) + [entry]
+
+
+def _notify_answers(row: FeedbackSubmission) -> None:
+    """Best-effort follow-up email when the submitter answers the AI's clarifying
+    questions — closes the loop so the BA sees the clarifications. Never raises."""
+    try:
+        answers = row.user_answers or []
+        lines = [f"Q: {qa.get('q', '')}\nA: {qa.get('a', '')}"
+                 for qa in answers if isinstance(qa, dict)] if isinstance(answers, list) else []
+        body = (f"The submitter answered the clarifying questions on MES feedback #{row.id}.\n\n"
+                + ("\n\n".join(lines) if lines else str(answers)))
+        _notify.send_email(f"[MES feedback #{row.id}] submitter answered clarifying questions", body)
+    except Exception:  # noqa: BLE001
+        logger.warning("feedback answer-notify failed", exc_info=True)
 
 
 async def _save_screenshot(screenshot: UploadFile) -> str | None:
@@ -217,6 +246,7 @@ async def submit_feedback(
         row.ai_model = classification.get("_model")
         row.ai_classification = {k: v for k, v in classification.items() if not k.startswith("_")}
 
+    _append_history(row, user.username, "submitted", note="report submitted")
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -258,12 +288,16 @@ async def answer_feedback(
     if row.user_id and row.user_id != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Not your ticket.")
 
+    old_status = row.status
     row.user_answers = answers
     if row.status == "submitted":
         row.status = "triaged"
+    _append_history(row, user.username, row.status, from_status=old_status,
+                    note="submitter answered clarifying questions")
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
+    _notify_answers(row)
     return {"ticket_id": row.id, "status": row.status}
 
 
@@ -304,15 +338,26 @@ async def update_feedback(ticket_id: int, request: Request,
     row = db.query(FeedbackSubmission).filter_by(id=ticket_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Ticket not found.")
+    old_status = row.status
+    changes: list[str] = []
     if "status" in body:
         new = str(body["status"])
         if new not in _STATUSES:
             raise HTTPException(status_code=400, detail=f"Invalid status (allowed: {', '.join(_STATUSES)}).")
         row.status = new
     if "assigned_to" in body:
-        row.assigned_to = (str(body["assigned_to"]).strip() or None)
+        new_assignee = (str(body["assigned_to"]).strip() or None)
+        if new_assignee != row.assigned_to:
+            changes.append(f"assigned to {new_assignee}" if new_assignee else "unassigned")
+            row.assigned_to = new_assignee
     if "resolution_notes" in body:
-        row.resolution_notes = (str(body["resolution_notes"]).strip() or None)
+        rn = (str(body["resolution_notes"]).strip() or None)
+        if rn != row.resolution_notes:
+            changes.append("resolution notes updated")
+            row.resolution_notes = rn
+    if row.status != old_status or changes:
+        _append_history(row, _admin.username, row.status, from_status=old_status,
+                        note="; ".join(changes) or None)
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)

@@ -22,6 +22,13 @@ interface Summary {
   assigned_to: string
   has_screenshot: boolean
 }
+interface HistoryEntry {
+  at: string
+  by: string
+  from: string | null
+  to: string
+  note: string | null
+}
 interface Detail extends Summary {
   user_text: string
   probable_cause: string
@@ -31,6 +38,7 @@ interface Detail extends Summary {
   resolution_notes: string
   updated_at: string | null
   screenshot_url: string | null
+  status_history: HistoryEntry[]
 }
 
 const SEV_CLS: Record<string, string> = {
@@ -227,6 +235,23 @@ export function FeedbackInbox() {
               </Field>
               {detail.updated_at && <p className="text-xs text-muted">Updated {when(detail.updated_at)}</p>}
             </div>
+
+            {detail.status_history.length > 0 && (
+              <div className="border-t border-line pt-3" data-testid="feedback-history">
+                <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">History</div>
+                <ol className="space-y-1">
+                  {detail.status_history.map((h, i) => (
+                    <li key={i} className="text-xs text-muted">
+                      <span className="text-body">{when(h.at)}</span> · {h.by}
+                      {' · '}
+                      {h.from ? `${STATUS_LABEL[h.from] || h.from} → ` : ''}
+                      <span className="font-medium text-body">{STATUS_LABEL[h.to] || h.to}</span>
+                      {h.note ? ` · ${h.note}` : ''}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
           </div>
         )}
       </SidePanel>
