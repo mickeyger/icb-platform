@@ -11,6 +11,7 @@ import { OutstandingPrejobSignoffsPage } from './OutstandingPrejobSignoffsPage'
 import { CustomersAdmin } from './CustomersAdmin'
 import { OrphanChassisAdmin } from './OrphanChassisAdmin'
 import { MergeChassisAdmin } from './MergeChassisAdmin'
+import { HealthCheckAdmin } from './HealthCheck'   // WO v4.36b §3.3
 import { ADMIN_ORDER, ADMIN_RESOURCES } from './adminResources'
 
 // WO v4.33.1 §3.1 — custom (non-CRUD) admin screens dispatch by resource key. A future custom
@@ -22,6 +23,7 @@ const CUSTOM_ADMIN_SCREENS: Record<string, ComponentType> = {
   customers: CustomersAdmin,                       // WO v4.34.1 §3.5
   'orphan-chassis': OrphanChassisAdmin,            // WO v4.36a §3.6
   'merge-chassis': MergeChassisAdmin,              // WO v4.36a §3.6 STEP 6
+  'health-check': HealthCheckAdmin,                // WO v4.36b §3.3
 }
 
 export function AdminModule() {

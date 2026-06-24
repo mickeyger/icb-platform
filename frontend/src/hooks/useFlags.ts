@@ -73,3 +73,27 @@ export function useFlaggedMap(domain: FlagDomain, flag?: string) {
 export const useFlaggedChassis = (flag?: string) => useFlaggedMap('chassis', flag)
 export const useFlaggedJobs = (flag?: string) => useFlaggedMap('jobs', flag)
 export const useFlaggedBays = (flag?: string) => useFlaggedMap('bays', flag)
+
+/** Static flag-registry metadata (label, domain, group, remediation, age bands) — for the Health Check
+ *  dashboard grouping + drill-through routing without hard-coding the catalog on the frontend. */
+export interface FlagCatalogEntry {
+  flag: string
+  domain: FlagDomain
+  group: string
+  label: string
+  remediation: string
+  pulse: boolean
+  bands: Array<{ gt_days: number; severity: FlagSeverity }>
+}
+
+export function useFlagCatalog() {
+  const [catalog, setCatalog] = useState<Record<string, FlagCatalogEntry>>({})
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    apiGet<Record<string, FlagCatalogEntry>>('/api/visual-integrity/flags/catalog')
+      .then(setCatalog)
+      .catch(() => setCatalog({}))
+      .finally(() => setLoading(false))
+  }, [])
+  return { catalog, loading }
+}
