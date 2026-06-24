@@ -86,7 +86,8 @@ def fresh_chassis(app_mod):
 
     def _make(booked_in=True):
         with SessionLocal() as db:
-            rec = ChassisRecord(vin=f"TST{uuid.uuid4().hex[:12].upper()}", source="manual", status="received")
+            rec = ChassisRecord(vin=f"TST{uuid.uuid4().hex[:12].upper()}", source="manual", status="received",
+                                customer_name="Bay Test Cust")   # WO v4.36b §3.4 — Gate 1 needs a resolvable customer
             db.add(rec)
             db.commit()
             db.refresh(rec)

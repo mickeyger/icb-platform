@@ -84,7 +84,8 @@ def fresh_chassis(app_mod):
 
     def _make(booked_in=True):
         with SessionLocal() as db:
-            rec = ChassisRecord(vin=f"TST{uuid.uuid4().hex[:12].upper()}", source="manual", status="received")
+            rec = ChassisRecord(vin=f"TST{uuid.uuid4().hex[:12].upper()}", source="manual", status="received",
+                                customer_name="Bay Test Cust")   # WO v4.36b §3.4 — Gate 1 needs a resolvable customer
             db.add(rec)
             db.commit()
             db.refresh(rec)
@@ -145,6 +146,40 @@ def test_assign_refuses_chassis_without_vin(app_mod):   # WO v4.36b §3.4 NEW Ga
             try:
                 svc.assign_assembly_bay(db, rid, bay, who="admin")
                 raise AssertionError("expected 409 — a VIN-less chassis can't be assigned to a bay")
+            except HTTPException as e:
+                assert e.status_code == 409
+    finally:
+        with SessionLocal() as db:
+            for e in db.query(ChassisLifecycleEvent).filter_by(chassis_record_id=rid).all():
+                db.delete(e)
+            r = db.get(ChassisRecord, rid)
+            if r:
+                db.delete(r)
+            db.commit()
+
+
+def test_assign_refuses_chassis_without_resolvable_customer(app_mod):   # WO v4.36b §3.4 Gate 1 (customer dim)
+    """A VIN'd but customerless chassis with NO linked job (→ no customer resolvable anywhere) is refused
+    (409). The re-aim: customer lives on production_jobs by design, so chassis.customer_name alone must NOT
+    gate — only the absence of a customer on BOTH the chassis row and the linked job does."""
+    from datetime import date as _date
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent, ChassisRecord
+    from app.services import chassis as svc
+    with SessionLocal() as db:
+        rec = ChassisRecord(vin=f"NOCUST{uuid.uuid4().hex[:8].upper()}", source="manual",
+                            status="in_workshop", make="HINO", created_by="t", updated_by="t")
+        db.add(rec); db.flush()
+        db.add(ChassisLifecycleEvent(chassis_record_id=rec.id, cycle_number=1,
+                                     event_type="VCL", event_date=_date.today()))
+        db.commit()
+        rid = rec.id
+    try:
+        bay = _bay_ids(1)[0]
+        with SessionLocal() as db:
+            try:
+                svc.assign_assembly_bay(db, rid, bay, who="admin")
+                raise AssertionError("expected 409 — no customer resolvable anywhere")
             except HTTPException as e:
                 assert e.status_code == 409
     finally:

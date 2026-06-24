@@ -86,7 +86,8 @@ def fresh_chassis(app_mod):
 
     def _make(booked_in=True):
         with SessionLocal() as db:
-            rec = ChassisRecord(vin=f"TST{uuid.uuid4().hex[:12].upper()}", source="manual", status="received")
+            rec = ChassisRecord(vin=f"TST{uuid.uuid4().hex[:12].upper()}", source="manual", status="received",
+                                customer_name="Bay Test Cust")   # WO v4.36b §3.4 — Gate 1 needs a resolvable customer
             db.add(rec)
             db.commit()
             db.refresh(rec)
@@ -152,7 +153,7 @@ def on_bay_linked():
         rid, bay = None, _bay_ids(1)[0]
         with SessionLocal() as db:
             rec = ChassisRecord(vin=f"RTP{uuid.uuid4().hex[:12].upper()}", source="manual", status="received",
-                                make="RTP Test", model="X")
+                                make="RTP Test", model="X", customer_name="Bay Test Cust")   # §3.4 Gate 1
             db.add(rec); db.flush()
             db.add(ChassisLifecycleEvent(chassis_record_id=rec.id, cycle_number=1, event_type="VCL",
                                          event_date=date.today()))

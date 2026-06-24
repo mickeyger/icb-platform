@@ -24,41 +24,35 @@
 
 ## NEW v4.36b gates
 
-### Gate 1 — incomplete chassis → assembly bay  (D3)
+### Gate 1 — incomplete chassis → assembly bay  (D3, re-aimed per BA §3.4 ratification) ✅ SHIPPED
 **Chokepoint:** `services.chassis.assign_assembly_bay` (`chassis.py:527`).
 **Refusal:** 409 (the existing bay-drop pattern — `BayModelLanes` catches 409 → inline reject flash).
 
-| Dimension | Predicate | Status (this PR) |
+| Dimension | Predicate (refuse when…) | Message |
 |---|---|---|
-| **VIN** | `vin` is null/blank | ✅ **SHIPPED** — refuse: *"Chassis has no VIN — capture it on the Chassis page before assigning a bay"* |
-| **Customer** | (D3 literal) `customer_name` blank | ⏸ **HELD pending BA re-ratification** — see ⚠️ below |
+| **VIN** | `vin` null/blank | *"Chassis has no VIN — capture it on the Chassis page before assigning a bay"* |
+| **Customer** | no customer resolvable on the chassis row **OR** the linked job | *"Chassis has no customer — capture it on the Chassis page before assigning a bay"* |
 
-> ⚠️ **Customer-dimension conflict (data-backed).** Literal D3 (`customer_name blank`) refuses **8 of 9**
-> booked-in chassis on canonical icb: they all carry a VIN but `customer_name` is NULL because the
-> customer is denormalised **onto the linked job, not the chassis row** (the same gap the
-> `chassis_no_customer` flag surfaces). It also breaks the assign API tests (their `fresh_chassis` fixture
-> is customerless + jobless). **Recommended re-aim:** refuse only when **no customer is resolvable
-> anywhere** — `chassis.customer_name` blank **AND** the linked job has no customer (`_job_customer_name`).
-> On icb this refuses **0** of the 9 (all have a job-customer) yet still catches a genuinely customerless
-> chassis. Requires adding `customer_name` to ~3 assign-test fixtures. Awaiting BA ratification before
-> landing the customer dimension.
+> **Re-aim rationale (data-backed).** Literal D3 (`chassis.customer_name` blank) would have refused **8 of
+> 9** booked-in chassis on canonical icb — they carry a VIN but `customer_name` is NULL because the
+> customer lives **on the linked job, not the chassis row** (by design; the same gap the
+> `chassis_no_customer` flag surfaces). Re-aimed to refuse only when **no customer is resolvable anywhere**
+> (`chassis.customer_name` blank **AND** the linked job's customer missing, via `_job_customer_name`): 0
+> false-positives on the 9, still catches a genuinely customerless chassis. ~3 assign-test fixtures gained
+> a `customer_name`. (Phase 1.5 v4.36.5 may denormalise customer onto `chassis_records` for ergonomics — a
+> separate concern that does not affect this gate.)
 
-### Gate 2 — Pre-Job send when customer email missing  (§1)
-**Status:** ⏸ **HELD — premise conflict surfaced.**
+### Gate 2 — Pre-Job send when customer email missing  (§1) ❌ DROPPED
+**Dropped after §3.4 inspection — the premise didn't hold; revisit alongside Phase 2+ customer comms.**
 
-> ⚠️ The §1 premise is "the Pre-Job Card is **delivered to the customer**, so refuse when
-> `customers.email` is null." In code the Pre-Job Card email (`prejob_cards.build_email`, the only
-> pre-job email path, via `GET /api/prejob-cards/{id}/email`) is an **internal sign-off notification** —
-> its body literally states *"Sent from ICB MES (internal document — not for the customer)"*, the
-> recipients are deliberately blank, and the links are sales-rep / planner **sign-off** links. There is
-> **no customer-delivery action** in the pre-job flow to gate. Gating `submit_for_check` on
-> `customers.email` would refuse a valid internal workflow for an irrelevant reason (and many seed
-> customers carry no email).
->
-> **Recommended re-aim:** convert Gate 2 from a hard send-gate to a **visual-integrity flag**
-> (`job_customer_no_email` — surfaced on the Health Check dashboard + the costing/job rows), consistent
-> with the sprint theme (surface, don't block) — OR drop it if customer email isn't a tracked concern
-> yet. Awaiting BA decision.
+> The §1 premise assumed the Pre-Job Card is *delivered to the customer*. In code the only pre-job email
+> (`prejob_cards.build_email`, via `GET /api/prejob-cards/{id}/email`) is an **internal sign-off
+> notification** — body literally *"Sent from ICB MES (internal document — not for the customer)"*, blank
+> recipients, sales-rep/planner sign-off links. There is **no customer-delivery action to gate**; gating
+> `submit_for_check` on `customers.email` would refuse a valid internal workflow for an irrelevant reason,
+> and a `job_customer_no_email` flag would dilute the Health Check signal with no Phase 1 consumer
+> (WhatsApp feedback uses phone, no customer-facing email comms yet). Right time to add: **Phase 2+** when
+> customer-facing comms make the data load-bearing. (§1 flag catalog: **13 → 12 flags**.)
 
 ## Audit-log note
 Gate refusals are stateless (no row written) — they raise before any mutation, so there is nothing to
