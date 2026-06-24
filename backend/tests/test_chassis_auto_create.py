@@ -118,6 +118,26 @@ def test_make_model_null_vin_creates_expected_row(api, staged):   # BA case 3
     assert ch["body_gap_mm"] == 100                              # §0.8 gap carried from the card
 
 
+def test_submit_stamps_customer_on_stub(api, staged):            # WO v4.36b (Inv 1) — costing customer → stub
+    """At Pre-Job submit the auto-created 'expected' stub now carries the costing's customer (was NULL —
+    the empty-Customer screenshot): _auto_create_chassis resolves calc.customer_id -> Customer.name and
+    passes it to create_expected_chassis. Skips when the staged calc has no customer on this DB."""
+    client, admin = api
+    from app.database import CalculationRecord, Customer, SessionLocal
+    from app.models.mes import ChassisRecord
+    with SessionLocal() as db:
+        calc = db.get(CalculationRecord, staged["calc_id"])
+        cust = db.get(Customer, calc.customer_id) if calc.customer_id else None
+        expected = cust.name if cust else None
+    if not expected:
+        pytest.skip("staged calc has no customer on this DB")
+    cid = _create_card(client, admin, staged, make_model="P434A Cust Stamp")
+    assert client.post(f"/api/prejob-cards/{cid}/submit-for-check", json={}).status_code == 200
+    crid, _ = _chassis_of(cid)
+    with SessionLocal() as db:
+        assert db.get(ChassisRecord, crid).customer_name == expected   # costing customer stamped on the stub
+
+
 def test_empty_make_model_creates_expected_stub(api, staged):     # BA case 2 — REVERSED in v4.36a.4
     """Reverses §3.2 case 2 (v4.34) deliberately. With v4.36a chassis_integrity
     + v4.36b visual integrity + v4.36.5 single-editor direction, silent deferral

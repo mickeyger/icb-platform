@@ -9,6 +9,7 @@ import io
 import shutil
 import types
 
+import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -107,6 +108,51 @@ def test_update_persists_fields():
             svc.update_chassis(db, rec.id, ChassisRecordUpdate(customer_name="Renamed", make="FAW"), _WHO)
             again = svc.get_detail(db, rec.id)
             assert again.customer_name == "Renamed" and again.make == "FAW"
+        finally:
+            _cleanup_chassis(db)
+
+
+# ── WO v4.36b — chassis-field unification: dealer + tail-lift on the edit chokepoint ──
+def _a_dealer_id(db):
+    """An existing is_dealer=true customer id (read-only — customers live in the costings/SAP DB);
+    skip when the DB carries no dealer (e.g. a minimal mock seed)."""
+    from app.database import Customer
+    return db.execute(
+        select(Customer.id).where(Customer.is_dealer.is_(True)).order_by(Customer.id)).scalars().first()
+
+
+def test_update_persists_dealer_and_tail_lift():
+    """update_chassis writes dealer_id (validated is_dealer) + tail_lift_code onto chassis_records —
+    the two columns the v4.36b shared form added so the Edit modal + Planning-ack share one truth."""
+    with SessionLocal() as db:
+        _cleanup_chassis(db)
+        try:
+            dealer_id = _a_dealer_id(db)
+            if dealer_id is None:
+                pytest.skip("no is_dealer customer on this DB")
+            rec = _create(db, "DLR")
+            out = svc.update_chassis(
+                db, rec.id, ChassisRecordUpdate(dealer_id=dealer_id, tail_lift_code="TL-500"), _WHO)
+            assert out.dealer_id == dealer_id and out.tail_lift_code == "TL-500"
+            with SessionLocal() as db2:                       # committed → visible to a fresh session
+                again = db2.get(ChassisRecord, rec.id)
+                assert again.dealer_id == dealer_id and again.tail_lift_code == "TL-500"
+        finally:
+            _cleanup_chassis(db)
+
+
+def test_update_rejects_non_dealer_422():
+    """dealer_id must reference a customer flagged is_dealer — an unknown/non-dealer id 422s
+    (chassis_integrity.validate_dealer), so the edit door can't smuggle a bad supplier link."""
+    with SessionLocal() as db:
+        _cleanup_chassis(db)
+        try:
+            rec = _create(db, "NDLR")
+            try:
+                svc.update_chassis(db, rec.id, ChassisRecordUpdate(dealer_id=999_999_999), _WHO)
+                raise AssertionError("expected 422 on a non-dealer dealer_id")
+            except ChassisIntegrityError as e:
+                assert e.status_code == 422
         finally:
             _cleanup_chassis(db)
 
