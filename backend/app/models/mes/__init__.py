@@ -789,6 +789,7 @@ class ChassisRecord(Base):
     # with is_dealer=true; plain Integer here, FK created in migration 0022 per ADR 0006, SET NULL).
     dealer_id = Column(Integer)
     vin_source = Column(String(32))                        # WO v4.34.1 §0.17 — VIN provenance: vcl | chassis_page_manual (Gap A) | …
+    tail_lift_code = Column(String(64))                    # WO v4.36b (0026) — chassis-field unification (was costing-blob only)
     # WO v4.36a §0.10 (migration 0025) — soft-delete on admin Merge Chassis: a merged "loser" gets
     # deleted_at set + merged_into_id pointing at the surviving chassis (the audit pointer). NULL = live.
     # Orthogonal to `status` (preserves the real lifecycle status). List/occupancy/orphan reads filter

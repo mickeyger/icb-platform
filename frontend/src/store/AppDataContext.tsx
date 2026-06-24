@@ -82,7 +82,17 @@ const AppDataContext = createContext<AppDataValue | null>(null)
 export function AppDataProvider({ children }: { children: ReactNode }) {
   const [acceptedJobs, setAcceptedJobs] = useState<AcceptedJob[]>([])
   const [reworkTickets, setReworkTickets] = useState<ReworkTicket[]>(data.rework_tickets)
-  const [tooltipsEnabled, setTooltipsEnabled] = useState(true)
+  // WO — persist the demo-tooltips toggle to localStorage so it survives menu navigation / provider
+  // remounts / reloads (was plain useState → reverted to the ON default whenever the user changed menus).
+  // Default ON when unset (icb_tooltips.json §hide_for_known_screens).
+  const [tooltipsEnabled, _setTooltipsEnabled] = useState<boolean>(() => {
+    try { const v = localStorage.getItem('icb_tooltips_enabled'); return v === null ? true : v === 'true' }
+    catch { return true }
+  })
+  const setTooltipsEnabled = useCallback((v: boolean) => {
+    _setTooltipsEnabled(v)
+    try { localStorage.setItem('icb_tooltips_enabled', String(v)) } catch { /* private mode / quota — non-fatal */ }
+  }, [])
   const [profile, setProfile] = useState<DemoUserProfile>(
     () =>
       costingsMock.demo_user_profiles.find((p) => p.id === costingsMock.logged_in_user.id) ??

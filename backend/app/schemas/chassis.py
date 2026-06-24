@@ -59,6 +59,7 @@ class ChassisRecordDetail(ChassisRecordOut):
     description: Optional[str] = None
     submit_status: Optional[str] = None
     notes: Optional[str] = None
+    tail_lift_code: Optional[str] = None        # WO v4.36b — chassis-field unification (Edit + ack round-trip)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     # WO v4.36a §3.5c — the AUTHORITATIVE job link (production_jobs.chassis_record_id back-reference), filled
@@ -94,6 +95,7 @@ class ChassisRecordCreate(BaseModel):
     model: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
+    tail_lift_code: Optional[str] = None         # WO v4.36b — chassis-field unification
 
 
 class ChassisRecordUpdate(BaseModel):
@@ -113,6 +115,10 @@ class ChassisRecordUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    # WO v4.36b — chassis-field unification: the Edit modal AND the Planning-ack panel now both write these
+    # onto chassis_records (single source of truth). dealer_id validated is_dealer=true; tail_lift_code plain col.
+    dealer_id: Optional[int] = None
+    tail_lift_code: Optional[str] = None
 
 
 class ChassisCreateResult(BaseModel):

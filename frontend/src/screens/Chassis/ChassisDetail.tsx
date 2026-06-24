@@ -12,8 +12,9 @@ import { Card } from '../../components/ui/primitives'
 import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
 import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisEvent, type ChassisRecordDetail } from './types'
 import { VclDclForm, type ChecklistItem } from './VclDclForm'
-import { ChassisModelSelect } from './ChassisModelSelect'
-import { type UnlinkedJob, type ChassisPrefill, VIN_PROVENANCE, FilledBadge } from './chassisShared'
+import { ChassisFieldsForm, type ChassisFieldValues } from './ChassisFieldsForm'
+import { data as mockData } from '../../data/mockData'
+import { type UnlinkedJob, type ChassisPrefill, VIN_PROVENANCE } from './chassisShared'
 
 function ProvenancePill({ via, source }: { via?: string | null; source: string }) {
   const p = via ? CHASSIS_PROVENANCE[via] : undefined
@@ -281,21 +282,27 @@ function EditChassisModal({ rec, onClose, onSaved }: {
 }) {
   const toast = useToast()
   const isLinked = rec.linked_job_id != null              // §3.5c — authoritative FK link
-  const [form, setForm] = useState({
+  // WO v4.36b — chassis-field unification: a single ChassisFieldValues-shaped form, fed into the shared
+  // ChassisFieldsForm (same component the Planning-ack panel uses). All fields land on chassis_records.
+  const [form, setForm] = useState<ChassisFieldValues>({
     customer_name: rec.customer_name ?? '',
+    make: rec.make ?? '',
+    dealer_id: rec.dealer_id ?? null,
+    dealer_name: rec.dealer_name ?? '',
+    chassis_eta: rec.chassis_eta ?? '',                   // §3.5e — the linked job's Delivery ETA
     contact_person: rec.contact_person ?? '',
     telephone: rec.telephone ?? '',
-    make: rec.make ?? '',
+    vin: rec.vin ?? '',                                   // read-only here (write-once; captured separately)
+    tail_lift_code: rec.tail_lift_code ?? '',
     description: rec.description ?? '',
     notes: rec.notes ?? '',
   })
   const [jobId, setJobId] = useState<number | null>(null)  // unlinked → the job to link on save
   const [jobs, setJobs] = useState<UnlinkedJob[]>([])
   const [customerPrefilled, setCustomerPrefilled] = useState(false)
-  const [eta, setEta] = useState(rec.chassis_eta ?? '')    // §3.5e — the linked job's Delivery ETA
   const [etaPrefilled, setEtaPrefilled] = useState(false)
   const [saving, setSaving] = useState(false)
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const onField = (patch: Partial<ChassisFieldValues>) => setForm((f) => ({ ...f, ...patch }))
 
   // §3.5c — an UNLINKED chassis can be linked here; load the unlinked-jobs dropdown (reused endpoint).
   useEffect(() => {
@@ -303,8 +310,7 @@ function EditChassisModal({ rec, onClose, onSaved }: {
     apiGet<UnlinkedJob[]>('/api/production-jobs/unlinked').then(setJobs).catch(() => setJobs([]))
   }, [isLinked])
 
-  // §3.5c — selecting a job auto-populates Customer (mirrors create §3.5b). VIN is NOT touched here (the
-  // edit modal never edits VIN — that's the separate write-once capture path).
+  // §3.5c — selecting a job auto-populates Customer + ETA (mirrors create §3.5b). VIN is NOT touched here.
   useEffect(() => {
     if (isLinked || jobId == null) { setCustomerPrefilled(false); return }
     let live = true
@@ -312,7 +318,7 @@ function EditChassisModal({ rec, onClose, onSaved }: {
       if (!live) return
       if (p.customer_name) { setForm((f) => ({ ...f, customer_name: p.customer_name! })); setCustomerPrefilled(true) }
       else setCustomerPrefilled(false)
-      if (p.chassis_eta) { setEta(p.chassis_eta); setEtaPrefilled(true) } else setEtaPrefilled(false)  // §3.5e
+      if (p.chassis_eta) { setForm((f) => ({ ...f, chassis_eta: p.chassis_eta! })); setEtaPrefilled(true) } else setEtaPrefilled(false)
     }).catch(() => {})
     return () => { live = false }
   }, [jobId, isLinked])
@@ -325,13 +331,15 @@ function EditChassisModal({ rec, onClose, onSaved }: {
         contact_person: form.contact_person.trim() || null,
         telephone: form.telephone.trim() || null,
         make: form.make.trim() || null,
+        dealer_id: form.dealer_id,                        // WO v4.36b — now editable here (validated is_dealer)
+        tail_lift_code: form.tail_lift_code.trim() || null,
         description: form.description.trim() || null,
         notes: form.notes.trim() || null,
       }
       // §3.5c — never send job_number/production_job_id for a LINKED chassis (FK is read-only — swap = Merge).
       // For an UNLINKED chassis, sending production_job_id atomically links it (backend stamps job_number).
       if (!isLinked && jobId != null) body.production_job_id = jobId
-      if (isLinked || jobId != null) body.chassis_eta = eta || null   // §3.5e — persists onto the linked job
+      if (isLinked || jobId != null) body.chassis_eta = form.chassis_eta || null   // §3.5e — persists onto the linked job
       await apiPatch(`/api/chassis-records/${rec.id}`, body)
       toast.push({ kind: 'ok', message: 'Chassis updated.' })
       onSaved()
@@ -382,8 +390,8 @@ function EditChassisModal({ rec, onClose, onSaved }: {
                         const v = e.target.value ? Number(e.target.value) : null
                         setJobId(v)
                         if (v == null) {                              // deselect → restore the originals
-                          if (customerPrefilled) { set('customer_name', rec.customer_name ?? ''); setCustomerPrefilled(false) }
-                          setEta(rec.chassis_eta ?? ''); setEtaPrefilled(false)
+                          if (customerPrefilled) { onField({ customer_name: rec.customer_name ?? '' }); setCustomerPrefilled(false) }
+                          onField({ chassis_eta: rec.chassis_eta ?? '' }); setEtaPrefilled(false)
                         }
                       }}
                       className="mt-1 w-full rounded-md border border-line bg-white px-2 py-1.5 text-sm text-body">
@@ -401,34 +409,15 @@ function EditChassisModal({ rec, onClose, onSaved }: {
               )}
             </label>
           )}
-          <label className="block text-xs"><span className="font-semibold text-muted">Customer{!isLinked && customerPrefilled && <FilledBadge />}</span>
-            <input data-testid="chassis-edit-customer" value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)}
-                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm${!isLinked && customerPrefilled ? ' bg-status-green/5' : ''}`} /></label>
-          {/* §3.5e — Delivery ETA (persists onto the linked job; enabled once a job is linked/selected) */}
-          <label className="block text-xs"><span className="font-semibold text-muted">Delivery ETA{etaPrefilled && <FilledBadge />}</span>
-            <input type="date" data-testid="chassis-edit-eta" value={eta} onChange={(e) => setEta(e.target.value)}
-                   disabled={!isLinked && jobId == null}
-                   className={`mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm disabled:bg-surface-alt${etaPrefilled ? ' bg-status-green/5' : ''}`} />
-            {!isLinked && jobId == null && (
-              <span className="mt-1 block text-[10px] text-muted">Links to the job’s ETA — link a job to capture it.</span>
-            )}
-          </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-xs"><span className="font-semibold text-muted">Contact</span>
-              <input value={form.contact_person} onChange={(e) => set('contact_person', e.target.value)}
-                     className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" /></label>
-            <label className="block text-xs"><span className="font-semibold text-muted">Telephone</span>
-              <input value={form.telephone} onChange={(e) => set('telephone', e.target.value)}
-                     className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" /></label>
-          </div>
-          <label className="block text-xs"><span className="font-semibold text-muted">Chassis type</span>
-            <ChassisModelSelect testid="chassis-edit-make" value={form.make} onChange={(v) => set('make', v)} /></label>
-          <label className="block text-xs"><span className="font-semibold text-muted">Description</span>
-            <input value={form.description} onChange={(e) => set('description', e.target.value)}
-                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" /></label>
-          <label className="block text-xs"><span className="font-semibold text-muted">Notes</span>
-            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2}
-                      className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm" /></label>
+          {/* WO v4.36b — the shared chassis-fields form (the SAME component the Planning-ack panel uses, so
+              both screens present these fields identically over chassis_records). VIN is hidden here: it shows
+              read-only in the note above + is captured via the separate write-once Capture-VIN button. */}
+          <ChassisFieldsForm
+            values={form} onChange={onField} tailLifts={mockData.tail_lifts} testidPrefix="chassis-edit"
+            hidden={['vin']}
+            locks={{ eta: !isLinked && jobId == null }}
+            etaHint={!isLinked && jobId == null ? 'Links to the job’s ETA — link a job to capture it.' : undefined}
+          />
         </div>
         <div className="mt-4 flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-md border border-line py-2.5 text-sm font-semibold">Cancel</button>
