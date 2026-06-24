@@ -255,8 +255,21 @@ export function PreJobCardModal({
     } catch (e) { handleApiError(e, toast.push) } finally { setBusy(false) }
   }
 
-  const openPdf = () => {
-    if (card) window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')
+  const openPdf = async () => {
+    if (!card) return
+    if (!editable) {                                  // submitted/confirmed — already persisted; open directly
+      window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')
+      return
+    }
+    // WO — persist the live editor state (fridge selection, section text, …) BEFORE rendering, so the PDF
+    // reflects what's on screen. Without this, Preview opened the last-SAVED card → blank FRIDGE + a raw
+    // {{fridge_make}} token. Open the tab synchronously in the click gesture (popup-blocker safe), then
+    // point it at the PDF once the save resolves.
+    const tab = window.open('', '_blank')
+    const saved = await saveDraft(true)
+    const url = `/api/prejob-cards/${(saved ?? card).id}/pdf`
+    if (tab) tab.location.href = url
+    else window.open(url, '_blank')
   }
 
   const openEmail = async () => {
