@@ -35,7 +35,7 @@ def _feedback_table(live_server):
         FeedbackSubmission.__table__.drop(engine, checkfirst=True)
 
 
-def test_submit_feedback_lands_in_admin_inbox(page):
+def test_feedback_submit_to_admin_triage_audit(page):
     admin_session(page)
 
     # 1. Open the global widget (it's mounted in Layout, so present on every /mes-app screen).
@@ -63,3 +63,14 @@ def test_submit_feedback_lands_in_admin_inbox(page):
     detail_text = page.locator("[data-testid='feedback-detail']").inner_text()
     assert "planning board did not refresh" in detail_text
     shot(page, "03-admin-inbox", JOURNEY)
+
+    # 4. The audit timeline shows the initial 'submitted' entry (WO v4.38 W2 lifecycle).
+    page.wait_for_selector("[data-testid='feedback-history']")
+    assert "Submitted" in page.locator("[data-testid='feedback-history']").inner_text()
+
+    # 5. An admin triaging the ticket (status -> in_progress) records the transition in the audit trail.
+    page.select_option("[data-testid='feedback-status-select']", "in_progress")
+    page.wait_for_selector(
+        "[data-testid='feedback-history']:has-text('In progress')", timeout=15_000
+    )
+    shot(page, "04-lifecycle-audit", JOURNEY)
