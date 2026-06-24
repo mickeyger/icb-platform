@@ -124,6 +124,39 @@ def _bay_ids(n=2):
 
 
 # ── service unit tests ──────────────────────────────────────────────────────
+def test_assign_refuses_chassis_without_vin(app_mod):   # WO v4.36b §3.4 NEW Gate 1 (VIN dimension)
+    """A booked-in chassis with no VIN can't be assigned to a bay — 409 (the incomplete-chassis gate).
+    Customer is set so ONLY the VIN dimension trips (the customer dimension is held pending re-ratification)."""
+    from datetime import date as _date
+    from app.database import SessionLocal
+    from app.models.mes import ChassisLifecycleEvent, ChassisRecord
+    from app.services import chassis as svc
+    with SessionLocal() as db:
+        rec = ChassisRecord(vin=None, source="manual", status="in_workshop", make="HINO",
+                            customer_name="Gate1 VIN Test", created_by="t", updated_by="t")
+        db.add(rec); db.flush()
+        db.add(ChassisLifecycleEvent(chassis_record_id=rec.id, cycle_number=1,
+                                     event_type="VCL", event_date=_date.today()))
+        db.commit()
+        rid = rec.id
+    try:
+        bay = _bay_ids(1)[0]
+        with SessionLocal() as db:
+            try:
+                svc.assign_assembly_bay(db, rid, bay, who="admin")
+                raise AssertionError("expected 409 — a VIN-less chassis can't be assigned to a bay")
+            except HTTPException as e:
+                assert e.status_code == 409
+    finally:
+        with SessionLocal() as db:
+            for e in db.query(ChassisLifecycleEvent).filter_by(chassis_record_id=rid).all():
+                db.delete(e)
+            r = db.get(ChassisRecord, rid)
+            if r:
+                db.delete(r)
+            db.commit()
+
+
 def test_assign_sets_current_bay_and_event(app_mod, fresh_chassis):
     from app.database import SessionLocal
     from app.models.mes import ChassisRecord

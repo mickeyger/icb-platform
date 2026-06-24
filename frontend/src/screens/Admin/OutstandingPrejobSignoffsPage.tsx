@@ -11,9 +11,12 @@ import { useToast } from '../../components/ui/toast'
 import { Card } from '../../components/ui/primitives'
 import { Skeleton, EmptyState } from '../../components/ui/feedback'
 import { dmy } from '../../lib/format'
+import { FlagBadges } from '../../components/Flag/FlagBadge'   // WO v4.36b §3.4 — job flags on the sign-off rows
+import { useFlaggedJobs } from '../../hooks/useFlags'
 
 interface Outstanding {
   id: number
+  production_job_id: number | null   // WO v4.36b §3.4 — flag-join key
   quote_number: string | null
   customer_name: string | null
   sent_for_check_at: string | null
@@ -46,6 +49,7 @@ export function OutstandingPrejobSignoffsPage() {
   const [rows, setRows] = useState<Outstanding[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>('all')
+  const { map: jobFlags } = useFlaggedJobs()   // WO v4.36b §3.4 — {job_id → Flag[]}, joined per row
 
   useEffect(() => {
     let live = true
@@ -114,7 +118,14 @@ export function OutstandingPrejobSignoffsPage() {
                   <tr key={r.id} data-testid="outstanding-row" data-id={r.id}
                     className={`border-b border-line ${i % 2 ? 'bg-surface-alt' : 'bg-white'}`}>
                     <td className="px-3 py-2 font-mono text-xs font-semibold">{r.quote_number ?? '—'}</td>
-                    <td className="px-3 py-2">{r.customer_name ?? '—'}</td>
+                    <td className="px-3 py-2">
+                      {r.customer_name ?? '—'}
+                      {r.production_job_id != null && (
+                        <div className="mt-1">
+                          <FlagBadges flags={jobFlags.get(r.production_job_id)} domain="jobs" entityId={r.production_job_id} />
+                        </div>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-xs text-muted">{r.sent_for_check_at ? dmy(r.sent_for_check_at) : '—'}</td>
                     <td className="px-3 py-2 text-xs"><SignStatus at={r.sales_rep_signoff_at} who={r.sales_rep_username} /></td>
                     <td className="px-3 py-2 text-xs"><SignStatus at={r.planner_signoff_at} who={r.planner_username} /></td>

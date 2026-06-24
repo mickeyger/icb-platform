@@ -536,6 +536,14 @@ def assign_assembly_bay(db: Session, record_id: int, bay_id: int, who: str,
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="chassis record not found")
+    # WO v4.36b §3.4 NEW Gate 1 (D3) — refuse an INCOMPLETE chassis onto a bay. VIN dimension shipped here
+    # (409, the existing bay-drop reject pattern). The customer dimension is HELD pending BA re-ratification:
+    # literal D3 (customer_name blank) refuses 8/9 booked-in chassis whose customer lives on the linked job,
+    # not the chassis row — see docs/visual_integrity_gates.md + the §3.4 surface.
+    if not (rec.vin or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="Chassis has no VIN — capture it on the Chassis page before assigning a bay")
     bay = db.get(AssemblyBay, bay_id)
     if bay is None or not bay.is_active:
         raise HTTPException(status_code=404, detail="assembly bay not found")
