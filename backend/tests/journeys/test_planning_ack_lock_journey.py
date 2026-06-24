@@ -94,13 +94,13 @@ def test_attested_make_and_vin_both_lock(page: Page, staged) -> None:
     admin_session(page)
     _open_ack(page, staged["full"])
     # §3.9 — make AND VIN attested at pre-job ⇒ both read-only, editable controls gone.
-    locked = page.get_by_test_id("planning-ack-chassis-locked")
+    locked = page.get_by_test_id("planning-ack-make-locked")
     expect(locked).to_be_visible(timeout=T)
     expect(locked).to_contain_text(CHASSIS)
     vinlock = page.get_by_test_id("planning-ack-vin-locked")
     expect(vinlock).to_be_visible(timeout=T)
     expect(vinlock).to_contain_text(ATTESTED_VIN)
-    expect(page.get_by_test_id("planning-ack-chassis-model")).to_have_count(0)
+    expect(page.get_by_test_id("planning-ack-make")).to_have_count(0)
     expect(page.get_by_test_id("planning-ack-vin")).to_have_count(0)
     shot(page, "01-both-locked", journey=JOURNEY)
 
@@ -109,7 +109,7 @@ def test_blank_vin_editable_despite_type_lock(page: Page, staged) -> None:
     admin_session(page)
     _open_ack(page, staged["vinopen"])
     # §3.9 refine — make attested (type locks) but NO VIN on the card ⇒ VIN stays editable for capture.
-    expect(page.get_by_test_id("planning-ack-chassis-locked")).to_be_visible(timeout=T)
+    expect(page.get_by_test_id("planning-ack-make-locked")).to_be_visible(timeout=T)
     expect(page.get_by_test_id("planning-ack-vin")).to_be_visible(timeout=T)
     expect(page.get_by_test_id("planning-ack-vin-locked")).to_have_count(0)
     shot(page, "02-vin-editable", journey=JOURNEY)

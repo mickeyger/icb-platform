@@ -10,6 +10,10 @@ export interface ChassisPrefill {
   customer_name: string | null; customer_id: number | null; chassis_type: string | null
   dealer_id: number | null; dealer_name: string | null; vin_number: string | null; vin_source: string | null
   chassis_eta: string | null   // §3.5e — the linked job's Delivery ETA (YYYY-MM-DD)
+  // WO v4.36b — chassis-field unification: the rest of the linked chassis fields, so the Planning-ack seed
+  // reads chassis_records (single source of truth), not the costing blob.
+  contact_person?: string | null; telephone?: string | null; description?: string | null
+  chassis_notes?: string | null; tail_lift_code?: string | null
 }
 
 // Human label for the VIN-captured provenance note.

@@ -163,10 +163,13 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
         return                                             # (real/foreign chassis: job wins, no sync — §3.2 review #3)
     calc = db.get(CalculationRecord, card.calculation_id)
     from app.services.chassis import create_expected_chassis
+    from app.database import Customer
+    cust = db.get(Customer, calc.customer_id) if (calc and calc.customer_id) else None
     chassis = create_expected_chassis(                     # §0.5 shared insert (identical at §3.3)
         db, make=make_model, vin=vin,                      # §0.4 — propagate the attested VIN (was vin=None)
         body_gap_mm=card.body_gap_mm, created_via="pre_job_card",
-        created_source_ref=_source_ref(calc, card), who=getattr(user, "username", None))
+        created_source_ref=_source_ref(calc, card), who=getattr(user, "username", None),
+        customer_name=(cust.name if cust else None))       # WO — stamp the costing customer onto the stub (Inv 1)
     card.chassis_record_id = chassis.id
     if job is not None and job.chassis_record_id is None:
         job.chassis_record_id = chassis.id                 # keep card↔job↔chassis consistent (blocks §3.3 dup)

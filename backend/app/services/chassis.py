@@ -296,7 +296,7 @@ def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
 
 
 def create_expected_chassis(db: Session, *, make, vin, body_gap_mm, created_via,
-                            created_source_ref, who, source=None) -> ChassisRecord:
+                            created_source_ref, who, source=None, customer_name=None) -> ChassisRecord:
     """WO v4.34 §0.3/§0.5 — the SINGLE creation point for a pipeline 'expected' chassis, shared by
     both touchpoints (Pre-Job submit §3.2 + Planning ack §3.3) so the rows are identical by
     construction. `vin` may be NULL (unknown until receive — NULLs don't collide on
@@ -312,6 +312,7 @@ def create_expected_chassis(db: Session, *, make, vin, body_gap_mm, created_via,
         created_via=created_via,
         created_source_ref=((created_source_ref or "")[:64] or None),
         make=((make or "").strip()[:64] or None),
+        customer_name=((customer_name or "").strip()[:128] or None),   # WO — stamp the costing/job customer at create
         body_gap_mm=body_gap_mm,
         created_by=who, updated_by=who,
     )
@@ -361,7 +362,9 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
     eta_job = linked_job if linked_job is not None else link_to
     if eta_sent and eta_job is not None:
         _stamp_job_eta(eta_job, eta_val, who)
-    for k, v in data.items():
+    if data.get("dealer_id") is not None:                # WO v4.36b — validate is_dealer=true (mirror create + ack)
+        data["dealer_id"] = ci.validate_dealer(db, data["dealer_id"])
+    for k, v in data.items():                            # tail_lift_code + the validated dealer_id flow through here
         setattr(rec, k, v)
     rec.updated_by = who
     if link_to is not None:
