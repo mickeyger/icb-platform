@@ -14,17 +14,18 @@ const STYLE = {
   red: 'bg-status-red/15 text-status-red',
 } as const
 
-export function AgeingPill({ days, green = 2, amber = 4, red = 5, label }: {
+export function AgeingPill({ days, green = 2, amber = 4, red = 5, label, testid = 'ageing-pill' }: {
   days: number
   green?: number
   amber?: number
   red?: number
   label?: string
+  testid?: string
 }) {
   const sev: keyof typeof STYLE = days >= red ? 'red' : days <= green ? 'green' : 'amber'
   return (
     <span
-      data-testid="ageing-pill"
+      data-testid={testid}
       aria-label={`${days} days (green<=${green}, amber<=${amber}, red>=${red})`}
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${STYLE[sev]}`}
     >

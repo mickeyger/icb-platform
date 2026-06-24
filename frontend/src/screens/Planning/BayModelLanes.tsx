@@ -19,6 +19,7 @@ import { useRefetchOnFocus } from '../../lib/useRefetchOnFocus'
 import { useBayModel } from './useBayModel'
 import type { Bay, BayState, ChassisRecord } from '../Chassis/types'
 import { FlagBadges } from '../../components/Flag/FlagBadge'   // WO v4.36b §3.2 — bay-tile flags
+import { AgeingPill } from '../../components/Flag/AgeingPill'   // WO v4.36b §3.7 — colour-coded day-counter
 import { useFlaggedBays } from '../../hooks/useFlags'
 
 // Compact per-state tile language for the lanes (same vocabulary/colours as the Production dashboard tiles).
@@ -461,8 +462,7 @@ export function BayModelLanes() {
                     <span>Bay {n}</span>
                     {card && (
                       <span className="flex items-center gap-1">
-                        <span data-testid="day-counter"
-                              className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted">Day {card.day}</span>
+                        <AgeingPill days={card.day} testid="day-counter" />{/* §3.7 — consistent colour-coded day-counter */}
                         <span data-testid="demo-pill"
                               className="rounded bg-status-amber px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">DEMO</span>
                       </span>
@@ -554,9 +554,10 @@ export function BayModelLanes() {
                   <span>{bay.code}</span>
                   <span className="flex items-center gap-1">
                     {/* WO v4.36a.5 — days on the bay since assembly_assigned (computed; MERGE occupant tiles only) */}
+                    {/* WO v4.36b §3.7 — AgeingPill colours the days-on-bay by the §0.6 default ramp
+                        (green<=2 / amber 3-4 / red>=5); keeps the day-counter testid. */}
                     {occ && dayCount(bay.since) !== null && (
-                      <span data-testid="day-counter"
-                            className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-muted">Day {dayCount(bay.since)}</span>
+                      <AgeingPill days={dayCount(bay.since)!} testid="day-counter" />
                     )}
                     {mismatch ? (
                       <span data-testid="bay-mismatch" title="The panels and the chassis in this bay are different jobs — they won’t merge."
