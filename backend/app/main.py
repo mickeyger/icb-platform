@@ -102,6 +102,7 @@ from .routers import suppliers as _r_suppliers
 # WO v4.16 — Planning Board + session/branch + per-role gating
 from .routers import session as _r_session
 from .routers import planning as _r_planning
+from .routers import visual_integrity as _r_visual_integrity  # WO v4.36b — flag derivation endpoints
 
 # ─── Logging setup ───────────────────────────────────────────────────────────
 _log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -194,6 +195,7 @@ app.include_router(_r_suppliers.router)
 app.include_router(_r_session.router)
 app.include_router(_r_planning.board_router)
 app.include_router(_r_planning.router)
+app.include_router(_r_visual_integrity.router)  # WO v4.36b — /api/visual-integrity/flags/*
 app.include_router(_r_bom_generate.router)  # WO v4.25 — /api/bom/generate (rules engine)
 # WO v4.26 — admin CRUD for the 4 master-data tables + OITM autocomplete
 app.include_router(_r_admin_rules.router)
