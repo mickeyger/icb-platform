@@ -53,10 +53,11 @@ def _seed(sid, token, admin):
         db.commit()
 
 
-def _client(app_mod, sid):
-    c = TestClient(app_mod.app)
-    c.cookies.set("session_id", sid, domain="testserver", path="/")
-    return c
+def _post(app_mod, sid, **kw):
+    """POST to the probe with the session_id cookie set via an explicit Cookie header. csrf_middleware
+    reads request.cookies.get('session_id') directly (main.py:250); a raw header is the reliable way to
+    land it under the TestClient — httpx's cookie jar won't match the dot-less 'testserver' host."""
+    return TestClient(app_mod.app).post(PROBE, headers={"Cookie": f"session_id={sid}"}, **kw)
 
 
 def _is_csrf_block(r):
@@ -73,27 +74,27 @@ PROBE = "/api/__zzcsrf_probe_v436b2__"
 def test_urlencoded_body_token_passes_csrf(app_mod, admin):
     """Classic <form> POST, token in an application/x-www-form-urlencoded body, no header → passes."""
     _seed("zzcsrf-ue-ok", "tok_ue_ok", admin)
-    r = _client(app_mod, "zzcsrf-ue-ok").post(PROBE, data={"csrf_token": "tok_ue_ok"})
+    r = _post(app_mod, "zzcsrf-ue-ok", data={"csrf_token": "tok_ue_ok"})
     assert not _is_csrf_block(r), f"urlencoded body token must pass CSRF, got {r.status_code} {r.text[:200]}"
 
 
 def test_urlencoded_wrong_body_token_rejected(app_mod, admin):
     """Wrong body token (no header) → 403 invalid (constant-time compare, main.py:305)."""
     _seed("zzcsrf-ue-bad", "tok_ue_real", admin)
-    r = _client(app_mod, "zzcsrf-ue-bad").post(PROBE, data={"csrf_token": "tok_ue_WRONG"})
+    r = _post(app_mod, "zzcsrf-ue-bad", data={"csrf_token": "tok_ue_WRONG"})
     assert r.status_code == 403 and r.json()["detail"] == "CSRF token invalid"
 
 
 def test_form_post_without_token_rejected(app_mod, admin):
     """Form POST with no csrf_token field and no header → 403 missing (main.py:301)."""
     _seed("zzcsrf-ue-missing", "tok_ue_present", admin)
-    r = _client(app_mod, "zzcsrf-ue-missing").post(PROBE, data={"nope": "x"})
+    r = _post(app_mod, "zzcsrf-ue-missing", data={"nope": "x"})
     assert r.status_code == 403 and r.json()["detail"] == "CSRF token missing"
 
 
 def test_multipart_body_token_passes_csrf(app_mod, admin):
     """Token in a multipart/form-data body → passes (size-guarded form() branch, main.py:293-297)."""
     _seed("zzcsrf-mp-ok", "tok_mp_ok", admin)
-    r = _client(app_mod, "zzcsrf-mp-ok").post(
-        PROBE, data={"csrf_token": "tok_mp_ok"}, files={"f": ("a.txt", b"x")})   # files= → multipart
+    r = _post(app_mod, "zzcsrf-mp-ok",
+              data={"csrf_token": "tok_mp_ok"}, files={"f": ("a.txt", b"x")})   # files= → multipart
     assert not _is_csrf_block(r), f"multipart body token must pass CSRF, got {r.status_code} {r.text[:200]}"
