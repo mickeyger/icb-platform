@@ -85,6 +85,7 @@ from .routers import pdf_templates as _r_pdf_templates
 from .routers import exports as _r_exports
 from .routers import bom_snapshots as _r_bom_snapshots
 from .routers import help as _r_help
+from .routers import feedback as _r_feedback  # WO v4.38 — Feedback Portal
 from .routers import pre_job_card as _r_pre_job_card
 from .routers import chassis_catalogue as _r_chassis_catalogue
 from .routers import mes_views as _r_mes_views  # WO v4.7 — MES skin fork at /mes/*
@@ -171,6 +172,8 @@ app.include_router(_r_pdf_templates.router)
 app.include_router(_r_exports.router)
 app.include_router(_r_bom_snapshots.router)
 app.include_router(_r_help.router)
+app.include_router(_r_feedback.router)  # WO v4.38 — POST /api/feedback + clarify
+app.include_router(_r_feedback.admin_router)  # WO v4.38 — /api/admin/feedback inbox
 app.include_router(_r_pre_job_card.router)
 app.include_router(_r_pre_job_card.demo_router)
 app.include_router(_r_chassis_catalogue.router)

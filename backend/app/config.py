@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # ── AI Help assistant (optional; floating Help button hidden if unset) ──
     ANTHROPIC_API_KEY: str = ""
 
+    # ── Feedback Portal (WO v4.38; all optional — empty = that channel is skipped) ──
+    ANTHROPIC_FEEDBACK_MODEL: str = ""   # optional classify-model override; falls back to Haiku
+    FEEDBACK_NOTIFY_EMAIL: str = ""      # ticket emails land here (the BA); empty = no email sent
+    FEEDBACK_NOTIFY_WHATSAPP: str = ""   # WhatsApp ping target e.g. whatsapp:+27…; empty = no ping
+    FEEDBACK_SCREENSHOT_DIR: str = ""    # blob dir for screenshots; empty = <FILE_STORE>/feedback
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""       # Twilio WhatsApp sender e.g. whatsapp:+1415…
+
     # ── CORS (accepts a JSON array or a comma-separated string in .env) ──
     ALLOWED_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:8000",
