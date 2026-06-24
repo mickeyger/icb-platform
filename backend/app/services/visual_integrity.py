@@ -100,6 +100,34 @@ FLAG_SPECS: dict[str, FlagSpec] = {
         "Drag to Awaiting QA", ((3, "amber"), (5, "red"))),
 }
 
+# WO v4.36b §3.5 — role-based flag visibility (§0.11). Implemented as a service-layer FILTER over the flag
+# GROUP, NOT as flag.read.* permission keys: this codebase has no `.read` permission keys (the §3.1
+# require_user deviation, BA-ratified on §3.1 review), and a new permissions migration would collide with
+# CA4's held 0027. This matrix is a CODE CONSTANT BY DESIGN until Phase 2+ asks for an admin-editable matrix
+# (which would then add a flag_permissions table). admin/planner/production see everything; workshop + sales
+# are scoped. An unknown/blank role falls through to ALL (flags are advisory; require_user already gates).
+_GROUP_ORDER = ("Chassis", "Jobs", "Bays", "Sign-offs", "Stale Reviews")
+_ALL_GROUPS = set(_GROUP_ORDER)
+_ROLE_GROUPS: dict[str, set] = {
+    "admin": _ALL_GROUPS,
+    "planner": _ALL_GROUPS,
+    "production": _ALL_GROUPS,
+    "workshop": {"Jobs", "Bays"},
+    "sales": {"Chassis", "Sign-offs", "Stale Reviews"},   # pre-job chassis + sign-off/review
+}
+
+
+def _visible_groups(role: Optional[str]) -> set:
+    """The flag GROUPS `role` may see (§0.11). Unknown/None → all (advisory flags; require_user gates access)."""
+    return _ROLE_GROUPS.get((role or "").strip().lower(), _ALL_GROUPS)
+
+
+def flag_catalog(role: Optional[str] = None) -> dict:
+    """The flag-registry metadata, filtered to the groups `role` may see (§3.5) — drives the Health Check
+    dashboard so a restricted role's hidden group cards don't render at all."""
+    visible = _visible_groups(role)
+    return {k: s for k, s in FLAG_SPECS.items() if s.group in visible}
+
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────────────────
 def _now() -> datetime:
@@ -310,26 +338,31 @@ def compute_bay_flags(db, bay_id: int, *, now: Optional[datetime] = None) -> lis
 
 
 # ── aggregate + drill-through (§0.3 / §0.4) ──────────────────────────────────────────────────────────
-def compute_planning_board_flags(db, *, now: Optional[datetime] = None) -> dict:
-    """Aggregate counts for the Health Check dashboard + the nav badge (§0.4 summary). ONE batched
-    computation across chassis/jobs/bays. Counts are flag INSTANCES (an entity with two flags counts
-    twice); `entities` counts distinct flagged entities for the nav 'N attention items' badge."""
+def compute_planning_board_flags(db, *, role: Optional[str] = None, now: Optional[datetime] = None) -> dict:
+    """Aggregate counts for the Health Check dashboard + the nav badge (§0.4 summary), filtered to the
+    groups `role` may see (§3.5/§0.11). ONE batched computation across chassis/jobs/bays. Counts are flag
+    INSTANCES (an entity with two visible flags counts twice); `entities` counts distinct entities with
+    >=1 VISIBLE flag (the nav 'N attention items' badge)."""
     now = now or _now()
+    visible = _visible_groups(role)
     ch = _all_chassis_flags(db, now=now)
     jb = _all_job_flags(db, now=now)
     by = _all_bay_flags(db, now=now)
 
     by_flag: dict[str, int] = {}
-    by_group: dict[str, int] = {"Chassis": 0, "Jobs": 0, "Bays": 0, "Sign-offs": 0, "Stale Reviews": 0}
+    by_group: dict[str, int] = {g: 0 for g in _GROUP_ORDER if g in visible}
     by_severity = {"red": 0, "amber": 0, "sky": 0}
+    entities = 0
     for bucket in (ch, jb, by):
         for hits in bucket.values():
-            for h in hits:
+            vis = [h for h in hits if h["group"] in visible]
+            if vis:
+                entities += 1
+            for h in vis:
                 by_flag[h["flag"]] = by_flag.get(h["flag"], 0) + 1
                 by_group[h["group"]] = by_group.get(h["group"], 0) + 1
                 by_severity[h["severity"]] = by_severity.get(h["severity"], 0) + 1
     total = sum(by_flag.values())
-    entities = len(ch) + len(jb) + len(by)
     return {
         "total": total,
         "entities": entities,
@@ -339,11 +372,16 @@ def compute_planning_board_flags(db, *, now: Optional[datetime] = None) -> dict:
     }
 
 
-def list_flagged_chassis(db, flag: Optional[str] = None, *, now: Optional[datetime] = None) -> list[dict]:
-    """Chassis carrying >=1 flag (or the given `flag`), with identity fields for the drill-through list."""
+def list_flagged_chassis(db, flag: Optional[str] = None, *, role: Optional[str] = None,
+                         now: Optional[datetime] = None) -> list[dict]:
+    """Chassis carrying >=1 flag visible to `role` (or the given `flag`), with identity fields for the
+    drill-through list."""
+    visible = _visible_groups(role)
     flags = _all_chassis_flags(db, now=now)
-    ids = [cid for cid, hits in flags.items()
-           if flag is None or any(h["flag"] == flag for h in hits)]
+
+    def _vis(hits):
+        return [h for h in hits if (flag is None or h["flag"] == flag) and h["group"] in visible]
+    ids = [cid for cid, hits in flags.items() if _vis(hits)]
     if not ids:
         return []
     rows = {c.id: c for c in db.execute(
@@ -353,16 +391,19 @@ def list_flagged_chassis(db, flag: Optional[str] = None, *, now: Optional[dateti
         c = rows.get(cid)
         if c is None:
             continue
-        hits = [h for h in flags[cid] if flag is None or h["flag"] == flag]
         out.append({"chassis_id": cid, "vin": c.vin, "make": c.make, "model": c.model,
-                    "customer_name": c.customer_name, "status": c.status, "flags": hits})
+                    "customer_name": c.customer_name, "status": c.status, "flags": _vis(flags[cid])})
     return out
 
 
-def list_flagged_jobs(db, flag: Optional[str] = None, *, now: Optional[datetime] = None) -> list[dict]:
+def list_flagged_jobs(db, flag: Optional[str] = None, *, role: Optional[str] = None,
+                      now: Optional[datetime] = None) -> list[dict]:
+    visible = _visible_groups(role)
     flags = _all_job_flags(db, now=now)
-    ids = [jid for jid, hits in flags.items()
-           if flag is None or any(h["flag"] == flag for h in hits)]
+
+    def _vis(hits):
+        return [h for h in hits if (flag is None or h["flag"] == flag) and h["group"] in visible]
+    ids = [jid for jid, hits in flags.items() if _vis(hits)]
     if not ids:
         return []
     rows = {j.id: j for j in db.execute(
@@ -372,18 +413,21 @@ def list_flagged_jobs(db, flag: Optional[str] = None, *, now: Optional[datetime]
         j = rows.get(jid)
         if j is None:
             continue
-        hits = [h for h in flags[jid] if flag is None or h["flag"] == flag]
         out.append({"job_id": jid, "job_number": j.job_number, "customer_name": j.customer_name,
                     "status": j.status,
                     "chassis_eta": j.chassis_eta.date().isoformat() if j.chassis_eta else None,
-                    "flags": hits})
+                    "flags": _vis(flags[jid])})
     return out
 
 
-def list_flagged_bays(db, flag: Optional[str] = None, *, now: Optional[datetime] = None) -> list[dict]:
+def list_flagged_bays(db, flag: Optional[str] = None, *, role: Optional[str] = None,
+                      now: Optional[datetime] = None) -> list[dict]:
+    visible = _visible_groups(role)
     flags = _all_bay_flags(db, now=now)
-    ids = [bid for bid, hits in flags.items()
-           if flag is None or any(h["flag"] == flag for h in hits)]
+
+    def _vis(hits):
+        return [h for h in hits if (flag is None or h["flag"] == flag) and h["group"] in visible]
+    ids = [bid for bid, hits in flags.items() if _vis(hits)]
     if not ids:
         return []
     rows = {b.id: b for b in db.execute(
@@ -393,6 +437,5 @@ def list_flagged_bays(db, flag: Optional[str] = None, *, now: Optional[datetime]
         b = rows.get(bid)
         if b is None:
             continue
-        hits = [h for h in flags[bid] if flag is None or h["flag"] == flag]
-        out.append({"bay_id": bid, "code": b.code, "label": b.label, "flags": hits})
+        out.append({"bay_id": bid, "code": b.code, "label": b.label, "flags": _vis(flags[bid])})
     return out

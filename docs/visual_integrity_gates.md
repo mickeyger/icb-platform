@@ -58,3 +58,25 @@
 Gate refusals are stateless (no row written) — they raise before any mutation, so there is nothing to
 audit. (Contrast the v4.36a.2 `return_chassis_to_parking`, which DOES write a `ProductionJobAudit` row
 because it performs a state change.)
+
+## §3.5 — role-based flag visibility (permission note)
+
+**§0.4 deviation note (BA-ratified):** *"§0.4 literal text deviated from at §3.1 per codebase convention;
+ratified by BA on §3.1 review; flag.read.* matrix landed at §3.5 as role-based filtering (no migration —
+CA4 owns 0027)."*
+
+The §0.11 matrix is a **service-layer filter** (`visual_integrity._ROLE_GROUPS`) — a code constant **by
+design** until Phase 2+ asks for an admin-editable matrix (which would then add a `flag_permissions`
+table). The endpoints pass the session role through; the frontend hides automatically (the backend
+returns only the role's flags + a role-filtered `/flags/catalog`, so a restricted role's group cards
+don't render).
+
+| Role | Visible flag groups |
+|---|---|
+| admin / planner / production | all (Chassis · Jobs · Bays · Sign-offs · Stale Reviews) |
+| workshop | Jobs · Bays |
+| sales | Chassis · Sign-offs · Stale Reviews |
+| _(unknown / none)_ | all — flags are advisory; `require_user` already gates access |
+
+Verified read-only against live icb data: admin/planner/production → **11** items (Chassis 10 + Bays 1);
+**workshop → 1** (Bays); **sales → 10** (Chassis). Demo (Burt/owner = admin) unchanged.

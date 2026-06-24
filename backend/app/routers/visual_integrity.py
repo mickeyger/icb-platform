@@ -22,40 +22,43 @@ router = APIRouter(prefix="/api/visual-integrity", tags=["visual-integrity"])
 
 @router.get("/flags/summary")
 def flags_summary(db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """Aggregate flag counts for the Health Check dashboard + the nav 'N attention items' badge."""
-    return svc.compute_planning_board_flags(db)
+    """Aggregate flag counts for the Health Check dashboard + the nav 'N attention items' badge,
+    filtered to the caller's role (§3.5/§0.11)."""
+    return svc.compute_planning_board_flags(db, role=getattr(user, "role", None))
 
 
 @router.get("/flags/chassis")
 def flags_chassis(flag: Optional[str] = Query(None, description="Filter to one flag enum"),
                   db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """Drill-through: chassis carrying >=1 flag (or the given `flag`)."""
-    return svc.list_flagged_chassis(db, flag)
+    """Drill-through: chassis carrying >=1 flag (or the given `flag`), filtered to the caller's role."""
+    return svc.list_flagged_chassis(db, flag, role=getattr(user, "role", None))
 
 
 @router.get("/flags/jobs")
 def flags_jobs(flag: Optional[str] = Query(None, description="Filter to one flag enum"),
                db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """Drill-through: production jobs carrying >=1 flag (incl. card-derived sign-off/stale flags)."""
-    return svc.list_flagged_jobs(db, flag)
+    """Drill-through: production jobs carrying >=1 flag (incl. card-derived sign-off/stale flags),
+    filtered to the caller's role."""
+    return svc.list_flagged_jobs(db, flag, role=getattr(user, "role", None))
 
 
 @router.get("/flags/bays")
 def flags_bays(flag: Optional[str] = Query(None, description="Filter to one flag enum"),
                db: Session = Depends(get_db), user: User = Depends(require_user)):
-    """Drill-through: assembly bays carrying >=1 flag."""
-    return svc.list_flagged_bays(db, flag)
+    """Drill-through: assembly bays carrying >=1 flag, filtered to the caller's role."""
+    return svc.list_flagged_bays(db, flag, role=getattr(user, "role", None))
 
 
 @router.get("/flags/catalog")
 def flags_catalog(user: User = Depends(require_user)):
-    """The flag registry metadata (label, group, domain, remediation, age bands, pulse) so the frontend
-    AgeingPill (§0.6) + tooltips render per-flag thresholds without hard-coding them. Static; no DB read."""
+    """The flag registry metadata (label, group, domain, remediation, age bands, pulse) — filtered to the
+    groups the caller's role may see (§3.5), so the Health Check dashboard hides a restricted role's group
+    cards. Drives the AgeingPill (§0.6) thresholds + tooltips. Static; no DB read."""
     return {
         key: {
             "flag": s.flag, "domain": s.domain, "group": s.group, "label": s.label,
             "remediation": s.remediation, "pulse": s.pulse,
             "bands": [{"gt_days": gt, "severity": sev} for gt, sev in s.bands],
         }
-        for key, s in svc.FLAG_SPECS.items()
+        for key, s in svc.flag_catalog(getattr(user, "role", None)).items()
     }

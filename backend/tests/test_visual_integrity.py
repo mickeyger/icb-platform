@@ -155,3 +155,37 @@ def test_summary_aggregates_seeded_flags(db):
     assert after["by_flag"].get("chassis_no_make_model", 0) >= 1
     assert after["total"] > before["total"]
     assert after["by_severity"]["red"] >= 2
+
+
+# ── §3.5 role-based filtering ────────────────────────────────────────────────
+def test_visible_groups_matrix():
+    assert vi._visible_groups("workshop") == {"Jobs", "Bays"}
+    assert vi._visible_groups("sales") == {"Chassis", "Sign-offs", "Stale Reviews"}
+    assert vi._visible_groups("admin") == vi._ALL_GROUPS
+    assert vi._visible_groups("planner") == vi._ALL_GROUPS
+    assert vi._visible_groups("production") == vi._ALL_GROUPS
+    assert vi._visible_groups(None) == vi._ALL_GROUPS          # unknown/None → all (advisory)
+    assert vi._visible_groups("WORKSHOP") == {"Jobs", "Bays"}  # case-insensitive
+
+
+def test_role_filter_scopes_summary(db):
+    _chassis(db, vin=None, make="X")                           # chassis_no_vin → Chassis group
+    _job(db, chassis_id=None, status="planning",
+         chassis_eta=datetime(2026, 1, 5, tzinfo=UTC))         # job_eta_overdue → Jobs group
+    workshop = vi.compute_planning_board_flags(db, role="workshop", now=REF)
+    sales = vi.compute_planning_board_flags(db, role="sales", now=REF)
+    admin = vi.compute_planning_board_flags(db, role="admin", now=REF)
+    # workshop sees Jobs, never Chassis-group flags
+    assert "job_eta_overdue" in workshop["by_flag"] and "chassis_no_vin" not in workshop["by_flag"]
+    assert "Chassis" not in workshop["by_group"]
+    # sales sees Chassis, never Jobs-group flags
+    assert "chassis_no_vin" in sales["by_flag"] and "job_eta_overdue" not in sales["by_flag"]
+    # admin sees both
+    assert "chassis_no_vin" in admin["by_flag"] and "job_eta_overdue" in admin["by_flag"]
+
+
+def test_role_filter_scopes_drillthrough(db):
+    _chassis(db, vin=None, make="X")                           # chassis_no_vin (Chassis)
+    # workshop can't see the Chassis group → its chassis drill-through is empty even though the row is flagged
+    assert vi.list_flagged_chassis(db, role="workshop", now=REF) == []
+    assert any(r for r in vi.list_flagged_chassis(db, role="admin", now=REF))
