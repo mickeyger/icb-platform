@@ -132,10 +132,21 @@ def _notify_answers(row: FeedbackSubmission) -> None:
         logger.warning("feedback answer-notify failed", exc_info=True)
 
 
+def _looks_like_image(head: bytes) -> bool:
+    """True if the leading bytes are a PNG, JPEG, or WEBP signature — content-based
+    gate so the filename extension alone can't smuggle a non-image (e.g. an HTML/SVG
+    polyglot) past the allow-list."""
+    return (head.startswith(b"\x89PNG\r\n\x1a\n")
+            or head[:3] == b"\xff\xd8\xff"
+            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP"))
+
+
 async def _save_screenshot(screenshot: UploadFile) -> str | None:
     """Stream the upload to the screenshot dir under a uuid name. Returns the
     absolute path, or None if absent/rejected. Best-effort — a bad screenshot
-    must not sink the whole report."""
+    must not sink the whole report. Rejects: wrong extension, non-image content,
+    empty file, or oversize. (Unlink happens AFTER the handle closes — Windows
+    won't delete an open file.)"""
     if screenshot is None or not screenshot.filename:
         return None
     suffix = Path(screenshot.filename).suffix.lower()
@@ -144,21 +155,29 @@ async def _save_screenshot(screenshot: UploadFile) -> str | None:
         return None
     dest = _screenshot_dir() / f"{uuid.uuid4().hex}{suffix}"
     total = 0
+    reject = False
     try:
         with dest.open("wb") as fh:
             while True:
                 chunk = await screenshot.read(1024 * 1024)
                 if not chunk:
                     break
+                if total == 0 and not _looks_like_image(chunk):
+                    logger.info("feedback screenshot rejected (not an image)")
+                    reject = True
+                    break
                 total += len(chunk)
                 if total > _MAX_SHOT_BYTES:
-                    fh.close()
-                    dest.unlink(missing_ok=True)
                     logger.info("feedback screenshot too large — dropped")
-                    return None
+                    reject = True
+                    break
                 fh.write(chunk)
+        if reject or total == 0:
+            dest.unlink(missing_ok=True)
+            return None
     except Exception as e:  # noqa: BLE001
         logger.warning("feedback screenshot save failed: %s", str(e)[:200])
+        dest.unlink(missing_ok=True)
         return None
     finally:
         await screenshot.close()
@@ -184,7 +203,7 @@ def _notify_ticket(r: FeedbackSubmission, request: Request) -> None:
             f"Report:\n{r.user_text or ''}\n\n"
             f"AI summary:        {summary}\n"
             f"AI probable cause: {r.probable_cause or '(none)'}\n"
-            + (f"AI asked the user: {', '.join(cq)}\n" if cq else "")
+            + (f"AI asked the user: {', '.join(str(q) for q in cq)}\n" if cq else "")
             + f"\nOpen the ticket: {link}\n"
         )
         _notify.send_email(subject, body)
@@ -228,7 +247,7 @@ async def submit_feedback(
 
     row = FeedbackSubmission(
         user_id=user.id,
-        submitter_name=user.username,
+        submitter_name=(user.username or "")[:120],
         page_url=(page_url or "").strip()[:500] or None,
         user_text=text,
         screenshot_path=shot_path,
@@ -261,6 +280,7 @@ async def submit_feedback(
         "summary": row.ai_summary,
         "clarifying_questions": row.clarifying_questions or [],
         "classified": bool(classification),
+        "has_screenshot": bool(row.screenshot_path),
     }
 
 
@@ -278,18 +298,22 @@ async def answer_feedback(
     except ValueError:
         raise HTTPException(status_code=400, detail="Body must be JSON.")
     answers = body.get("answers")
-    if answers is None:
-        raise HTTPException(status_code=400, detail="Missing 'answers'.")
+    if not isinstance(answers, list):
+        raise HTTPException(status_code=400, detail="'answers' must be a list.")
+    # Normalise + bound: at most a handful of Q&A pairs, clamped; drop non-dict junk.
+    clean = [{"q": str(qa.get("q", ""))[:300], "a": str(qa.get("a", ""))[:2000]}
+             for qa in answers[:10] if isinstance(qa, dict)]
 
     row = db.query(FeedbackSubmission).filter_by(id=ticket_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Ticket not found.")
-    # Only the original submitter (or an admin) may answer.
-    if row.user_id and row.user_id != user.id and user.role != "admin":
+    # Only the original submitter (or an admin) may answer. A NULL user_id (orphaned
+    # ticket) must NOT bypass the guard on the falsy short-circuit → admins only.
+    if user.role != "admin" and row.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your ticket.")
 
     old_status = row.status
-    row.user_answers = answers
+    row.user_answers = clean
     if row.status == "submitted":
         row.status = "triaged"
     _append_history(row, user.username, row.status, from_status=old_status,
@@ -346,7 +370,7 @@ async def update_feedback(ticket_id: int, request: Request,
             raise HTTPException(status_code=400, detail=f"Invalid status (allowed: {', '.join(_STATUSES)}).")
         row.status = new
     if "assigned_to" in body:
-        new_assignee = (str(body["assigned_to"]).strip() or None)
+        new_assignee = (str(body["assigned_to"]).strip()[:120] or None)
         if new_assignee != row.assigned_to:
             changes.append(f"assigned to {new_assignee}" if new_assignee else "unassigned")
             row.assigned_to = new_assignee
@@ -355,10 +379,11 @@ async def update_feedback(ticket_id: int, request: Request,
         if rn != row.resolution_notes:
             changes.append("resolution notes updated")
             row.resolution_notes = rn
+    # Only audit + bump updated_at on a REAL change (a same-status PATCH no-ops).
     if row.status != old_status or changes:
         _append_history(row, _admin.username, row.status, from_status=old_status,
                         note="; ".join(changes) or None)
-    row.updated_at = datetime.now(timezone.utc)
+        row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
     return _detail_dict(row)

@@ -62,13 +62,17 @@ export function FeedbackInbox() {
   const [filter, setFilter] = useState<Status | 'all'>('all')
   const [detail, setDetail] = useState<Detail | null>(null)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(false)
     try {
       const q = filter === 'all' ? '' : `?status=${filter}`
       setRows(await apiGet<Summary[]>(`/api/admin/feedback${q}`))
     } catch {
+      setError(true)
       setRows([])
     } finally {
       setLoading(false)
@@ -83,12 +87,16 @@ export function FeedbackInbox() {
 
   const patch = useCallback(async (id: number, body: Record<string, unknown>) => {
     setSaving(true)
+    setSaveError(null)
     try {
       const d = await apiPatch<Detail>(`/api/admin/feedback/${id}`, body)
       setDetail(d)
       void load()
     } catch {
-      /* surfaced by global handler in real flows; inbox stays usable */
+      // Don't swallow — tell the admin and re-sync the panel to the server's state so the
+      // status dropdown doesn't show an applied-but-unsaved value.
+      setSaveError('Could not save that change — please retry.')
+      try { setDetail(await apiGet<Detail>(`/api/admin/feedback/${id}`)) } catch { /* keep current */ }
     } finally {
       setSaving(false)
     }
@@ -134,7 +142,16 @@ export function FeedbackInbox() {
           </thead>
           <tbody>
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-muted">No feedback yet.</td></tr>
+              <tr>
+                <td colSpan={7} className="px-3 py-8 text-center">
+                  {error ? (
+                    <span className="text-status-red" data-testid="feedback-load-error">
+                      Couldn't load feedback.{' '}
+                      <button onClick={() => void load()} className="underline">Retry</button>
+                    </span>
+                  ) : <span className="text-muted">No feedback yet.</span>}
+                </td>
+              </tr>
             )}
             {rows.map((r) => (
               <tr
@@ -175,6 +192,12 @@ export function FeedbackInbox() {
               {detail.issue_type && <span className="rounded-full bg-surface-alt px-2 py-0.5 text-xs text-muted">{detail.issue_type}</span>}
               {detail.ai_model && <span className="text-xs text-muted">via {detail.ai_model}</span>}
             </div>
+
+            {saveError && (
+              <div className="rounded-lg bg-status-red/10 px-3 py-2 text-xs text-status-red" data-testid="feedback-save-error">
+                {saveError}
+              </div>
+            )}
 
             <Field label="Report">
               <p className="whitespace-pre-wrap text-sm text-body">{detail.user_text}</p>

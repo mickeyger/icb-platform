@@ -10,6 +10,7 @@
 // UX adapted from the in-repo Jinja help widget (app/static/js/help_chat.js):
 // floating launcher + panel + a "thinking" state while the model works.
 import { useCallback, useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { CheckCircle2, Loader2, MessageSquarePlus, X } from 'lucide-react'
 import { ApiError, apiPost, apiUpload } from '../../lib/api'
 
@@ -42,6 +43,8 @@ export function FeedbackWidget() {
   const [result, setResult] = useState<SubmitResult | null>(null)
   const [answers, setAnswers] = useState<string[]>([])
   const [errMsg, setErrMsg] = useState('')
+  const [answersError, setAnswersError] = useState(false)
+  const location = useLocation()
 
   const resetShot = useCallback(() => {
     setShotUrl((url) => {
@@ -118,14 +121,20 @@ export function FeedbackWidget() {
   const sendAnswers = useCallback(async () => {
     if (!result) return
     setPhase('submitting')
+    setAnswersError(false)
     try {
       const payload = (result.clarifying_questions || []).map((q, i) => ({ q, a: answers[i] || '' }))
       await apiPost(`/api/feedback/${result.ticket_id}/answer`, { answers: payload })
     } catch {
-      /* answers are a bonus — never block the thank-you */
+      // Non-blocking, but be truthful that the extra answers didn't save (report itself is logged).
+      setAnswersError(true)
     }
     setPhase('done')
   }, [result, answers])
+
+  // Hide the launcher on wall-mounted kiosk screens (KanbanTV / shop-floor tablet) — no one is
+  // there to fill it in and it would overlay the board.
+  if (location.pathname.startsWith('/kanban') || location.pathname.startsWith('/tablet')) return null
 
   return (
     <>
@@ -145,6 +154,9 @@ export function FeedbackWidget() {
           <div className="absolute inset-0 bg-black/40" onClick={close} />
           <div
             data-testid="feedback-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Report an issue"
             className="relative w-full max-w-md rounded-xl bg-white p-6 shadow-2xl"
           >
             <button
@@ -253,6 +265,11 @@ export function FeedbackWidget() {
                   <span className={`rounded-full px-3 py-1 text-xs font-medium ${SEV_CLS[result.severity] || 'bg-surface-alt text-muted'}`}>
                     {result.severity} · {result.issue_type}
                   </span>
+                )}
+                {answersError && (result?.clarifying_questions?.length ?? 0) > 0 && (
+                  <p className="text-xs text-status-amber" data-testid="feedback-answers-error">
+                    We couldn't save your extra answers, but your report is logged.
+                  </p>
                 )}
                 <button onClick={close} className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90">
                   Close

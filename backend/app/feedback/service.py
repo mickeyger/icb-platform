@@ -68,4 +68,10 @@ async def classify(user_text: str, page_url: str | None) -> dict[str, Any] | Non
     if not isinstance(cq, list):
         cq = []
     payload["clarifying_questions"] = [str(q)[:300] for q in cq[:3] if str(q).strip()]
+    # Hard-validate the enum fields — a forced tool *should* honour the schema, but
+    # don't trust it; an out-of-enum value would mis-style the inbox/widget pills.
+    if payload.get("issue_type") not in ("bug", "question", "feature", "data"):
+        payload["issue_type"] = None
+    if payload.get("severity") not in ("blocker", "major", "minor", "nice"):
+        payload["severity"] = None
     return payload
