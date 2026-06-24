@@ -22,6 +22,8 @@ import { Card } from '../../components/ui/primitives'
 import { STATUS_STYLES, StatusPillCosting, statusFilterTooltipKey } from './statusPalette'
 import { CostingsKpiStrip } from './CostingsKpiStrip'
 import { PreJobCardModal } from './PreJobCardModal'
+import { FlagBadges } from '../../components/Flag/FlagBadge'   // WO v4.36b §3.2 — job flags (ETA / sign-off / stale)
+import { useFlaggedJobs } from '../../hooks/useFlags'
 import { RepairPhasePanel } from './RepairPhasePanel'
 import { AcceptModal } from './AcceptModal'
 import { BottleneckIndicator } from './BottleneckIndicator'
@@ -55,6 +57,7 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
   const canViewAll = hasPermission('costings.view_all')
   const canCreate = hasPermission('costings.create')
   const canPreJob = hasPermission('costings.pre_job_card')
+  const { map: jobFlags } = useFlaggedJobs()   // WO v4.36b §3.2 — {job_id → Flag[]}; row keyed by production_job_id
   const canAccept = hasPermission('costings.accept')
 
   const filtered = useMemo(() => {
@@ -283,6 +286,11 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                       status={c.status}
                       pulsing={c.status === 'Planning' && !c.planning_acknowledged_at}
                     />
+                    {c.production_job_id != null && (jobFlags.get(c.production_job_id)?.length ?? 0) > 0 && (
+                      <div className="mt-1">
+                        <FlagBadges flags={jobFlags.get(c.production_job_id)} domain="jobs" entityId={c.production_job_id} />
+                      </div>
+                    )}
                     {mode === 'live' && c.status === 'Accepted' && !c.production_job_id && (
                       <span
                         title="Accepted in the orderbook, but the production job hasn't been created yet."

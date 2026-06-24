@@ -15,6 +15,8 @@ import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisRecord } from './
 import { ChassisModelSelect } from './ChassisModelSelect'
 import { DealerSelect } from './DealerSelect'
 import { type UnlinkedJob, type ChassisPrefill, VIN_PROVENANCE, VIN_RE, FilledBadge } from './chassisShared'
+import { FlagBadges } from '../../components/Flag/FlagBadge'   // WO v4.36b §3.2 — chassis row flags
+import { useFlaggedChassis } from '../../hooks/useFlags'
 
 interface ChassisCreateResult {
   chassis: { id: number; vin: string | null; customer_name: string | null; make: string | null }
@@ -54,6 +56,7 @@ export function ChassisList() {
   const nav = useNavigate()
   const toast = useToast()
   const { hasPermission, isAdmin } = useAppData()
+  const { map: flagMap } = useFlaggedChassis()   // WO v4.36b §3.2 — {chassis_id → Flag[]}, joined per row
   const [rows, setRows] = useState<ChassisRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
@@ -184,7 +187,12 @@ export function ChassisList() {
                     <td className="px-3 py-2"><ProvenancePill via={r.created_via} source={r.source} /></td>
                     <td className="px-3 py-2 text-center tabular-nums">{r.event_count}</td>
                     <td className="px-3 py-2 text-xs text-muted">{r.latest_event_date || '—'}</td>
-                    <td className="px-3 py-2"><StatusPill status={r.status} /></td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col items-start gap-1">
+                        <StatusPill status={r.status} />
+                        <FlagBadges flags={flagMap.get(r.id)} domain="chassis" entityId={r.id} />
+                      </div>
+                    </td>
                   </tr>
                   )
                 })}

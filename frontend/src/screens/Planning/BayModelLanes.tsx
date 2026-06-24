@@ -18,6 +18,8 @@ import { ApiError, handleApiError } from '../../lib/api'
 import { useRefetchOnFocus } from '../../lib/useRefetchOnFocus'
 import { useBayModel } from './useBayModel'
 import type { Bay, BayState, ChassisRecord } from '../Chassis/types'
+import { FlagBadges } from '../../components/Flag/FlagBadge'   // WO v4.36b §3.2 — bay-tile flags
+import { useFlaggedBays } from '../../hooks/useFlags'
 
 // Compact per-state tile language for the lanes (same vocabulary/colours as the Production dashboard tiles).
 const BAY_TILE: Record<BayState, { border: string; badge?: string; badgeClass?: string }> = {
@@ -84,6 +86,7 @@ const DEMO_PREASSEMBLY_CARDS: Record<number, PreAssemblyDemoCard> = {
 
 export function BayModelLanes() {
   const toast = useToast()
+  const { map: bayFlags } = useFlaggedBays()   // WO v4.36b §3.2 — {bay_id → Flag[]} for the assembly tiles
   const { hasPermission, isAdmin } = useAppData()
   const canAssign = isAdmin || hasPermission('chassis.assembly_assign')
   const { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
@@ -581,6 +584,9 @@ export function BayModelLanes() {
                       'empty'
                     )}
                   </div>
+                )}
+                {(bayFlags.get(bay.id)?.length ?? 0) > 0 && (
+                  <div className="mt-1"><FlagBadges flags={bayFlags.get(bay.id)} domain="bays" entityId={bay.id} /></div>
                 )}
                 {mismatch && (
                   <div className="mt-0.5 truncate text-[10px] text-status-red">

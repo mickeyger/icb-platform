@@ -41,12 +41,20 @@ export default {
           '70%':  { boxShadow: '0 0 0 12px rgba(6, 182, 212, 0)' },
           '100%': { boxShadow: '0 0 0 0px rgba(6, 182, 212, 0)' },
         },
+        // WO v4.36b D4 — sky variant of pulseRing for newly-flagged visual-integrity items (§0.7).
+        // Cyan pulseRing above is preserved for its existing consumers; this is sky-500 (#0EA5E9).
+        pulseRingSky: {
+          '0%':   { boxShadow: '0 0 0 0px rgba(14, 165, 233, 0.55)' },
+          '70%':  { boxShadow: '0 0 0 10px rgba(14, 165, 233, 0)' },
+          '100%': { boxShadow: '0 0 0 0px rgba(14, 165, 233, 0)' },
+        },
       },
       animation: {
         pulseRed: 'pulseRed 2s ease-in-out infinite',
         slideIn: 'slideIn 0.25s ease-out',
         fadeIn: 'fadeIn 200ms ease-out',
         pulseRing: 'pulseRing 2s ease-out infinite',
+        pulseRingSky: 'pulseRingSky 2s ease-out infinite',
       },
     },
   },
