@@ -138,5 +138,12 @@ def test_admin_completes_and_submits(page: Page, role_users, staged) -> None:
     with page.expect_response(lambda r: "submit-for-check" in r.url, timeout=T) as ri:
         page.get_by_test_id("prejob-submit-check").click()
     assert ri.value.status == 200, f"submit failed HTTP {ri.value.status}: {ri.value.text()[:300]}"
-    expect(page.get_by_test_id("prejob-status-banner")).to_be_visible(timeout=T)
+    # WO v4.36b.3 — CI flake stabilization. The submit-for-check 200 above is the AUTHORITATIVE success
+    # signal. The in-modal `prejob-status-banner` is TRANSIENT and must NOT be asserted: submit() does
+    # setCard(sent) (banner renders) then `await onConfirm()`, which runs `await refresh(); setPreJobTarget
+    # (null)` → the modal UNMOUNTS, taking the banner with it. The banner is therefore only on screen for
+    # the refresh() window, so to_be_visible() races it (flaked on BOTH runners across §3.1/§3.2/§3.6 — a
+    # sturdier WAIT can't fix a transient element). Assert the DURABLE end-state instead — the modal closes
+    # (element+state, auto-retried, no timer): proves the submit flow ran to completion.
+    expect(page.get_by_test_id("prejob-card-modal")).to_have_count(0, timeout=T)
     shot(page, "02-admin-submitted", journey=JOURNEY)
