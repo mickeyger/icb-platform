@@ -1046,6 +1046,43 @@ class ChassisModel(Base):
     updated_by = Column(String(128))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Feedback Portal — feedback_submissions (WO v4.38). In-app issue reports + Haiku triage.
+#   user_id is cross-schema (plain Integer here; FK SET NULL -> icb_costings.users added in
+#   migration 0027, mirroring ProductionJobAudit). The row IS the ticket (not best-effort
+#   telemetry like help_request_log) so the table is created by an explicit migration.
+# ─────────────────────────────────────────────────────────────────────────────
+class FeedbackSubmission(Base):
+    __tablename__ = "feedback_submissions"
+    __table_args__ = (
+        Index("ix_feedback_submissions_created_at", "created_at"),
+        Index("ix_feedback_submissions_status", "status"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), onupdate=_utcnow)
+    user_id = Column(Integer)                  # cross-schema -> icb_costings.users.id (FK SET NULL in 0027)
+    submitter_name = Column(String(120))       # snapshot so the ticket survives a user rename/delete
+    page_url = Column(String(500))             # window.location at report time (/mes-app/* only)
+    user_text = Column(Text, nullable=False)   # the description (required)
+    screenshot_path = Column(String(500))      # on-disk blob path (feedback screenshot dir)
+    # ── Claude-Haiku classification (filled on submit; NULL when AI unconfigured/failed) ──
+    issue_type = Column(String(20))            # bug | question | feature | data
+    severity = Column(String(20))              # blocker | major | minor | nice
+    ai_summary = Column(String(255))           # one-line title for inbox + WhatsApp
+    probable_cause = Column(Text)              # plain-language hint (no code disclosure)
+    clarifying_questions = Column(JSONB)       # list[str] the AI asked
+    user_answers = Column(JSONB)               # the submitter's answers
+    ai_classification = Column(JSONB)          # full structured triage blob
+    ai_model = Column(String(64))              # which model classified (telemetry)
+    # ── Triage lifecycle ──
+    status = Column(String(20), nullable=False, default="submitted")  # submitted|triaged|in_progress|resolved|closed
+    assigned_to = Column(String(120))
+    resolution_notes = Column(Text)
+    status_history = Column(JSONB)             # WO v4.38 W2 — append-only audit: [{at,by,from,to,note}]
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "ProductionJobAudit", "ProductionJobBayEvent",
@@ -1057,5 +1094,6 @@ __all__ = [
     "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
     "ParkingBay", "AssemblyBay",
     "PrejobTemplate", "PrejobCard", "FridgeUnit", "ChassisModel",
+    "FeedbackSubmission",
     "CROSS_SCHEMA_FKS",
 ]

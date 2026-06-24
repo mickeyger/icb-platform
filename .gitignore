@@ -28,6 +28,8 @@ dist/
 backend/.db_snapshots/
 # WO v4.28 — chassis photo store (local FS; off-repo, §5.3 swap to file-store later)
 backend/uploads/
+# WO v4.38 — Feedback Portal screenshot store (real ICB screen content / potential PII; off-repo)
+local_files/
 
 # ---- Local operational source workbooks (off-repo; the ETL reads these by path,
 #      same policy as v4.20's fajecoza_grp_costings.sql — large binaries + real ICB data) ----
@@ -51,6 +53,8 @@ perf.jsonl
 Thumbs.db
 .idea/
 .vscode/
+# Local Claude Code session tooling (launch.json carries machine-specific paths; not shared)
+.claude/
 
 # ---- Build artifacts ----
 build/
