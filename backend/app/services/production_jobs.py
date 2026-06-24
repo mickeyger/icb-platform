@@ -261,12 +261,16 @@ def _auto_create_chassis_at_ack(db: Session, job: ProductionJob,
     the job-FK guard a true idempotency key under concurrent acks on the same job."""
     if job.chassis_record_id is not None:
         return                                            # already linked (§3.2 or a prior ack) — idempotent
+    # WO v4.36b.1 — symmetric with v4.36a.4 (§3.2 case 2): do NOT silently no-op when no chassis model was
+    # entered. An UNLINKED job reaching Planning ack now anchors an 'expected' stub UNCONDITIONALLY (make
+    # may be NULL — create_expected_chassis accepts it), so the pipeline always has a chassis record;
+    # v4.36b RED-flags an incomplete stub (chassis_no_make_model) rather than the ack silently anchoring
+    # nothing. The silent-deferral posture is now symmetric across both auto-create touchpoints (ADR 0027).
+    # Do NOT restore the `if not make: return` early-return.
     make = (((chassis_data or {}).get("chassis_model")) or "").strip()
-    if not make:
-        return                                            # no chassis model entered — graceful no-op
     from app.services.chassis import create_expected_chassis
     chassis = create_expected_chassis(
-        db, make=make, vin=None,                          # VIN unknown until VCL receive (mirrors §3.2)
+        db, make=make, vin=None,                          # make="" → NULL-make stub; VIN NULL until VCL (mirrors §3.2)
         body_gap_mm=None, created_via="planning_job_create", source="planning_ack",  # source is VARCHAR(16)
         created_source_ref=_planning_ref(job), who=who)
     job.chassis_record_id = chassis.id

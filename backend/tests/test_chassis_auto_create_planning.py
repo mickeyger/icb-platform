@@ -90,10 +90,15 @@ def test_ack_creates_expected_chassis_when_unlinked(staged_job):
     assert ch["created_source_ref"] == "Planning · Job P434B01"
 
 
-def test_ack_no_chassis_info_no_op(staged_job):
+def test_ack_no_chassis_info_anchors_stub(staged_job):    # WO v4.36b.1 — REVERSED (was no-op)
+    """Symmetric with v4.36a.4 (§3.2 case 2): a bare ack on an UNLINKED job no longer silently no-ops —
+    it anchors a NULL-make 'expected' stub (RED-flagged chassis_no_make_model in v4.36b) so the pipeline
+    always has a chassis. Silent deferral on a workflow-critical path was the defect."""
     _ack(staged_job, {"chassis_model": None, "chassis_vin": None})
     crid, ch = _job_chassis(staged_job)
-    assert crid is None and ch is None                    # nothing entered → graceful no-op
+    assert crid is not None and ch is not None            # stub anchored (was: graceful no-op)
+    assert ch["make"] is None and ch["vin"] is None       # NULL-make / NULL-vin — a true stub
+    assert ch["status"] == "expected" and ch["created_via"] == "planning_job_create"
 
 
 def test_ack_vin_lands_on_chassis_row(staged_job):
@@ -112,12 +117,15 @@ def test_ack_vin_lands_on_chassis_row(staged_job):
     assert cd.get("chassis_vin") == "P434BVN0000000001"        # still preserved in the job's data
 
 
-def test_ack_vin_only_no_op(staged_job):
-    """Only a VIN, no model → no-op: the chassis identity anchor is the model; the VIN alone is
-    kept in chassis_data_json. Guard keys on chassis_model."""
-    _ack(staged_job, {"chassis_vin": "P434BVINONLY1"})
+def test_ack_vin_only_anchors_stub_and_stamps_vin(staged_job):   # WO v4.36b.1 — REVERSED (was no-op)
+    """A VIN-only ack (no model) on an unlinked job now anchors a NULL-make stub (symmetric with
+    v4.36a.4); record_planning_ack's propagation then stamps the conformant VIN onto it. (Was: no-op,
+    VIN dropped.) Uses a conformant VIN so the VIN-format gate passes."""
+    _ack(staged_job, {"chassis_vin": "P434BVN0000000002"})
     crid, ch = _job_chassis(staged_job)
-    assert crid is None and ch is None
+    assert crid is not None
+    assert ch["make"] is None and ch["vin"] == "P434BVN0000000002"   # NULL-make stub + VIN stamped
+    assert ch["status"] == "expected"
 
 
 def test_ack_skips_when_already_linked(staged_job):       # idempotency vs §3.2 cross-link
