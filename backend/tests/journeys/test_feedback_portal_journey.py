@@ -19,12 +19,20 @@ REPORT = "Journey test — the planning board did not refresh after I merged a j
 
 @pytest.fixture(scope="module", autouse=True)
 def _feedback_table(live_server):
-    """Create the held-migration table so the journey can run end-to-end. checkfirst makes
-    it a no-op once migration 0027 has actually been applied (CI/icb_test)."""
+    """Create the held-migration table so the journey can run end-to-end, then drop it IFF we
+    created it. The conditional teardown keeps isolation clean while 0027 is held — no residue to
+    skew the icb_mes table-count smoke test (test_smoke.py) regardless of CI step order — AND is a
+    no-op once 0027 is applied (the migration owns the table then; we must not drop it).
+    See WO v4.38 §3.0 + ci-test-isolation-teardown."""
+    from sqlalchemy import inspect as sa_inspect
     from app.database import engine
     from app.models.mes import FeedbackSubmission
-    FeedbackSubmission.__table__.create(engine, checkfirst=True)
+    created_here = "feedback_submissions" not in sa_inspect(engine).get_table_names(schema="icb_mes")
+    if created_here:
+        FeedbackSubmission.__table__.create(engine, checkfirst=True)
     yield
+    if created_here:
+        FeedbackSubmission.__table__.drop(engine, checkfirst=True)
 
 
 def test_submit_feedback_lands_in_admin_inbox(page):
