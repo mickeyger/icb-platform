@@ -80,14 +80,16 @@ Service-layer role filter as a **code constant** (`services/visual_integrity.py:
 
 ---
 
-## 7. Open decisions for BA (gate §3.1 + the `0028` shape)
+## 7. Decisions (BA, 2026-06-25) — RESOLVED → §3.1 unblocked
 
-1. **Production-edit ownership** — no ownership column exists. (Q1)
-2. **Planning-Ack** — keep inline-write-through vs hard-redirect. (Q2)
-3. **Audit trail** — ship the dedicated table now, or defer. (Q3)
-4. **Scope trim** — confirm QC/Active-Jobs/Pre-Job-card-fields drop out. (Q4)
+1. **Production edit (Q1) → admin/planner edit; production READ-ONLY.** No ownership column; `0028` skips the assignee FK. Production keeps its existing bay/lifecycle status events; no attribute edit, no IDOR surface.
+2. **Planning-Ack (Q2) → keep INLINE** (write through the central chassis service + lock attested fields). NOT a hard redirect — preserves the planner intake loop (ETA gates Acknowledge).
+3. **Audit (Q3) → ship the dedicated `chassis_records_audit` table now** (clone of ProductionJobAudit/0023). Smoke 36→37 in the model-introduction commit (§0.16).
+4. **Scope trim (Q4) → CONFIRMED.** QC + Active Jobs drop out (no chassis edits); Pre-Job *card* fields stay (card attrs, not chassis). Budget → the chokepoint gate, Planning-Ack, Admin Merge/Find-Orphan exceptions, and the centralized `ChassisFieldsForm` affordance.
 
-`0028` columns are a function of Q1 (ownership FK?) + Q3 (audit table?) + the optimistic-lock `version`. I'll finalize the migration shape once these land.
+**Locked `0028` shape** (`down_revision="0027"`): (a) NEW `chassis_records_audit` table — `chassis_id` FK (CASCADE), `field_name`, `old_value`, `new_value`, `edited_by_user_id` (cross-schema SET-NULL FK like ProductionJobAudit), `edited_by_name` (snapshot), `created_at`; indexes `(chassis_id)` + `(created_at)`. (b) ALTER `chassis_records` ADD `version Integer NOT NULL DEFAULT 0` (optimistic lock). **Smoke 36→37** (the new table). No ownership/permissions column.
+
+**§3.1 plan:** migration `0028` (above) + a shared `_apply_chassis_fields(rec, data, actor, source)` chokepoint in `services/chassis.py` — `source="chassis_page"` role-gated (admin/planner `edit_any`; production blocked → 409 + redirect payload); `source="planning_ack"`/`"system_autocreate"` allowed + field-restricted. Route `record_planning_ack`'s 11 direct writes through it; emit an audit row per changed field. Optimistic-lock compare in `update_chassis` (stale `version` → 409 reload). Keep `status` off the generic PATCH. Frontend (§3.3): extend `ApiError` to retain the 409 JSON body + allowlist `/^\/chassis\/\d+$/`; add the "Edit on Chassis page" affordance to `ChassisFieldsForm`'s `Locked` renderer (one change, all surfaces).
 
 ### Click-to-verify
 - Branch — `git -C C:/Users/micge/Documents/icb-platform-v4.36.5 status` → `feat/v4.36.5-chassis-lifecycle` @ `fd0b94e`
