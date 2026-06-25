@@ -18,13 +18,14 @@ The refactor's intent is sound; it's not implementable as written until #1 and #
 
 ---
 
-## 1. Alembic chain pre-check (§0.17) — **0028 confirmed**
+## 1. Alembic chain pre-check (§0.17) — **0029 (SWAPPED from 0028, BA 2026-06-25, ship-order)**
 
-- **Current head = `0027`** (`backend/alembic/versions/0027_feedback_submissions.py`, `revision="0027"`, `down_revision="0026"`). Clean linear chain `0001→…→0027`, single head, nothing chains off 0027 yet.
-- **My migration `0028` declares** `revision="0028"`, `down_revision="0027"` (bare zero-padded revision-id strings, not filenames).
-- **`icb_mes` table count = 36** (`backend/tests/test_smoke.py:96` `assert n == 36`). If `0028` adds `chassis_records_audit`, **bump 36→37 in the model-introduction commit** (§0.16). Ownership/lock columns are ALTERs → no table-count change.
-- ⚠ **WO doc inconsistency:** §0.2/§0.17 say `0028` (correct, matches the chain); §1/§2/§3/§4/§5/§6/§7 + the appendix still say `0029` (stale draft). **0028 is authoritative** — please standardize the WO. (No `0029` can exist yet; head is 0027.)
-- No chain contention: CA1 v4.36c (`0029` off my `0028`, kickoff Mon 29 Jun) confirms head before committing; CA5 v4.37 needs no migration.
+⚠ **SEQUENCING SWAP (FINAL — ship-order rule):** v4.36c (CA1, ships **4 Jul**) takes **`0028`** (off `0027`); **v4.36.5 (me, ships ~1 Aug) takes `0029`** (off `0028`); v4.37 (CA5) no migration. The earlier start-order assignment (which gave me 0028) was corrected — the lane that *ships first* holds the lower number so v4.36c applies cleanly on its 4 Jul launch.
+
+- **Current head = `0027`** (`backend/alembic/versions/0027_feedback_submissions.py`). My §3.1 migration declares `revision="0029"`, **`down_revision="0028"`** (CA1's v4.36c migration).
+- **⚠ Timing:** CA1's `0028` may not be on main when my §3.1 builds. If not → **hold the migration commit until v4.36c lands**, OR commit with `down_revision="0027"` placeholder + rebase to `"0028"` when it lands (same dance as the v4.38 `0026→0027` threading). I'll surface the timing at the §3.1 checkpoint.
+- **`icb_mes` count = 36** → **+1 (37) when `0029` adds `chassis_records_audit`** (smoke-bump in the model-introduction commit, §0.16). The `version` column is an ALTER (no count change). v4.36c's `0028` may also change the count — confirm the exact smoke target at build time once `0028` is on main.
+- ⚠ **WO numbering superseded:** the WO body still carries pre-swap numbers — it needs a pass to the ship-order assignment (**CA1 = 0028, CA4 = 0029**).
 
 ---
 
@@ -87,9 +88,9 @@ Service-layer role filter as a **code constant** (`services/visual_integrity.py:
 3. **Audit (Q3) → ship the dedicated `chassis_records_audit` table now** (clone of ProductionJobAudit/0023). Smoke 36→37 in the model-introduction commit (§0.16).
 4. **Scope trim (Q4) → CONFIRMED.** QC + Active Jobs drop out (no chassis edits); Pre-Job *card* fields stay (card attrs, not chassis). Budget → the chokepoint gate, Planning-Ack, Admin Merge/Find-Orphan exceptions, and the centralized `ChassisFieldsForm` affordance.
 
-**Locked `0028` shape** (`down_revision="0027"`): (a) NEW `chassis_records_audit` table — `chassis_id` FK (CASCADE), `field_name`, `old_value`, `new_value`, `edited_by_user_id` (cross-schema SET-NULL FK like ProductionJobAudit), `edited_by_name` (snapshot), `created_at`; indexes `(chassis_id)` + `(created_at)`. (b) ALTER `chassis_records` ADD `version Integer NOT NULL DEFAULT 0` (optimistic lock). **Smoke 36→37** (the new table). No ownership/permissions column.
+**Locked `0029` shape** (`down_revision="0028"` — CA1's v4.36c migration; see §1 swap + timing): (a) NEW `chassis_records_audit` table — `chassis_id` FK (CASCADE), `field_name`, `old_value`, `new_value`, `edited_by_user_id` (cross-schema SET-NULL FK like ProductionJobAudit), `edited_by_name` (snapshot), `created_at`; indexes `(chassis_id)` + `(created_at)`. (b) ALTER `chassis_records` ADD `version Integer NOT NULL DEFAULT 0` (optimistic lock). **Smoke 36→37** (the new table). No ownership/permissions column.
 
-**§3.1 plan:** migration `0028` (above) + a shared `_apply_chassis_fields(rec, data, actor, source)` chokepoint in `services/chassis.py` — `source="chassis_page"` role-gated (admin/planner `edit_any`; production blocked → 409 + redirect payload); `source="planning_ack"`/`"system_autocreate"` allowed + field-restricted. Route `record_planning_ack`'s 11 direct writes through it; emit an audit row per changed field. Optimistic-lock compare in `update_chassis` (stale `version` → 409 reload). Keep `status` off the generic PATCH. Frontend (§3.3): extend `ApiError` to retain the 409 JSON body + allowlist `/^\/chassis\/\d+$/`; add the "Edit on Chassis page" affordance to `ChassisFieldsForm`'s `Locked` renderer (one change, all surfaces).
+**§3.1 plan:** migration `0029` (above) + a shared `_apply_chassis_fields(rec, data, actor, source)` chokepoint in `services/chassis.py` — `source="chassis_page"` role-gated (admin/planner `edit_any`; production blocked → 409 + redirect payload); `source="planning_ack"`/`"system_autocreate"` allowed + field-restricted. Route `record_planning_ack`'s 11 direct writes through it; emit an audit row per changed field. Optimistic-lock compare in `update_chassis` (stale `version` → 409 reload). Keep `status` off the generic PATCH. Frontend (§3.3): extend `ApiError` to retain the 409 JSON body + allowlist `/^\/chassis\/\d+$/`; add the "Edit on Chassis page" affordance to `ChassisFieldsForm`'s `Locked` renderer (one change, all surfaces).
 
 ### Click-to-verify
 - Branch — `git -C C:/Users/micge/Documents/icb-platform-v4.36.5 status` → `feat/v4.36.5-chassis-lifecycle` @ `fd0b94e`
