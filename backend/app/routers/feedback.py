@@ -188,7 +188,7 @@ def _notify_ticket(r: FeedbackSubmission, request: Request) -> None:
     """Best-effort email + WhatsApp. Never raises."""
     try:
         base = str(request.base_url).rstrip("/")
-        link = f"{base}/mes-app/admin/feedback/{r.id}"
+        link = f"{base}/mes-app/admin/feedback?ticket={r.id}"
         sev = (r.severity or "unclassified").upper()
         summary = r.ai_summary or (r.user_text or "")[:80]
         subject = f"[MES feedback #{r.id}] {sev} · {summary}"

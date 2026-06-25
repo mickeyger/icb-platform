@@ -74,3 +74,11 @@ def test_feedback_submit_to_admin_triage_audit(page):
         "[data-testid='feedback-history']:has-text('In progress')", timeout=15_000
     )
     shot(page, "04-lifecycle-audit", JOURNEY)
+
+    # 6. WO v4.38.1 deep-link: ?ticket=N (the WhatsApp/email ping target) auto-opens that ticket.
+    row_tid = page.locator("[data-testid^='feedback-row-']").first.get_attribute("data-testid")
+    ticket_id = row_tid.split("-")[-1]
+    page.goto(f"/mes-app/admin/feedback?ticket={ticket_id}")
+    page.wait_for_selector("[data-testid='feedback-detail']", timeout=15_000)
+    assert "planning board did not refresh" in page.locator("[data-testid='feedback-detail']").inner_text()
+    shot(page, "05-deeplink-open", JOURNEY)
