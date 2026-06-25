@@ -3,6 +3,7 @@
 // an admin reads the report + AI triage + screenshot and moves the ticket through
 // its lifecycle. Admin-gated by the backend (/api/admin/feedback require_admin).
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 import { apiGet, apiPatch } from '../../lib/api'
 import { SidePanel } from '../../components/ui/overlays'
@@ -64,6 +65,7 @@ export function FeedbackInbox() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -84,6 +86,12 @@ export function FeedbackInbox() {
   const openDetail = useCallback(async (id: number) => {
     try { setDetail(await apiGet<Detail>(`/api/admin/feedback/${id}`)) } catch { /* gone */ }
   }, [])
+
+  // Deep-link from a WhatsApp/email ping: ?ticket=N auto-opens that ticket on mount (WO v4.38.1).
+  useEffect(() => {
+    const t = searchParams.get('ticket')
+    if (t && /^\d+$/.test(t)) void openDetail(Number(t))
+  }, [searchParams, openDetail])
 
   const patch = useCallback(async (id: number, body: Record<string, unknown>) => {
     setSaving(true)
