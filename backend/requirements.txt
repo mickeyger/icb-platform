@@ -51,5 +51,11 @@ pillow==12.2.0
 # --- AI Help assistant ---
 anthropic==0.104.1
 
+# --- Feedback Portal WhatsApp notifications (WO v4.38) ---
+# Lazy-imported by app/services/notifications.py::send_whatsapp. The feature silently no-ops without it
+# (logs "twilio SDK not installed — WhatsApp ping skipped" and returns), so it shipped UNDECLARED and
+# outbound WhatsApp never left the app even with TWILIO_* + FEEDBACK_NOTIFY_WHATSAPP set in .env.
+twilio==9.10.9
+
 # --- Utilities ---
 python-dotenv==1.2.2
