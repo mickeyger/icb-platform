@@ -7,7 +7,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db, CalculationRecord, TrailerType
-from ..deps import get_current_user, user_can
+from ..deps import get_current_user, user_can, active_branch, assert_calc_access
 from ..services import resolve_report_template, strip_excluded_items
 
 router = APIRouter()
@@ -19,6 +19,7 @@ async def export_excel(
     request: Request,
     db: Session = Depends(get_db),
     highlight: int = 0,
+    branch=Depends(active_branch),
 ):
     """Export costing to Excel. highlight=1 → colour-code price changes."""
     user = get_current_user(request, db)
@@ -30,6 +31,7 @@ async def export_excel(
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404)
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
 
     dims = json.loads(rec.dimensions_json)
     result = json.loads(rec.result_json)
@@ -431,7 +433,7 @@ async def export_excel(
 
 
 @router.get("/results/{record_id}/export/pdf")
-async def export_pdf(record_id: int, request: Request, db: Session = Depends(get_db)):
+async def export_pdf(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=401)
@@ -441,6 +443,7 @@ async def export_pdf(record_id: int, request: Request, db: Session = Depends(get
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404)
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
 
     dims = json.loads(rec.dimensions_json)
     result = json.loads(rec.result_json)
@@ -514,7 +517,7 @@ async def export_pdf(record_id: int, request: Request, db: Session = Depends(get
 
 
 @router.get("/results/{record_id}/report")
-async def report_for_record(record_id: int, request: Request, db: Session = Depends(get_db)):
+async def report_for_record(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     """Render the report PDF using the trailer's resolved ReportTemplate."""
     user = get_current_user(request, db)
     if not user:
@@ -525,6 +528,7 @@ async def report_for_record(record_id: int, request: Request, db: Session = Depe
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Costing record not found")
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
 
     tt = db.query(TrailerType).filter_by(id=rec.trailer_type_id).first()
     tmpl = resolve_report_template(tt)
@@ -576,5 +580,5 @@ async def report_for_record(record_id: int, request: Request, db: Session = Depe
 
 
 @router.get("/results/{record_id}/report/explosive-quote")
-async def report_explosive_quote_compat(record_id: int, request: Request, db: Session = Depends(get_db)):
-    return await report_for_record(record_id=record_id, request=request, db=db)
+async def report_explosive_quote_compat(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
+    return await report_for_record(record_id=record_id, request=request, db=db, branch=branch)
