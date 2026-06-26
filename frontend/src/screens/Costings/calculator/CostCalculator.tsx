@@ -6,10 +6,12 @@
 // increment; insulation copy-on-switch + optional-extras + per-row overrides are
 // follow-ups (the engine already gates server-side from body_option_selections).
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Calculator, Loader2, RadioTower, AlertCircle } from 'lucide-react'
-import { useTrailers, useTrailerBom, useLiveCalc } from './useCalculator'
+import { useToast } from '../../../components/ui/toast'
+import { useTrailers, useTrailerBom, useLiveCalc, loadCalculation } from './useCalculator'
 import { SaveBar } from './SaveBar'
-import type { BomRow, CalcItem, Dimensions, BodyOptionSelections, CalcRequest } from './types'
+import type { BomRow, CalcItem, Dimensions, BodyOptionSelections, CalcRequest, LoadedCalculation } from './types'
 
 const DEFAULT_DIMS: Dimensions = {
   length: 13.6, width: 2.5, height: 2.7,
@@ -66,15 +68,64 @@ export function CostCalculator() {
   const [optionalEnabled, setOptionalEnabled] = useState<Set<number>>(new Set())  // enabled optional bom_section_ids
   const [insThickness, setInsThickness] = useState<Record<string, number>>({})  // bom_id → insulation thickness override (m)
   const { result, calculating, error: calcError, calculate } = useLiveCalc()
+  // WO v4.37 §3.2 addendum — edit-reopen state.
+  const [searchParams] = useSearchParams()
+  const toast = useToast()
+  const [editRecordId, setEditRecordId] = useState<number | null>(null)
+  const [baseEtag, setBaseEtag] = useState<string | null>(null)
+  const [loadedVersion, setLoadedVersion] = useState<number | null>(null)
+  const [editCustomerId, setEditCustomerId] = useState<number | null>(null)
+  const [pendingEdit, setPendingEdit] = useState<LoadedCalculation | null>(null)
 
-  // Default to the first body type once the list loads.
+  // Edit-reopen: ?edit=<id> loads the saved costing; the seed effect re-hydrates
+  // the form once that trailer's BOM arrives.
   useEffect(() => {
-    if (trailerId == null && trailers.length) setTrailerId(trailers[0].id)
-  }, [trailers, trailerId])
+    const editId = searchParams.get('edit')
+    if (!editId) return
+    let alive = true
+    loadCalculation(Number(editId))
+      .then((data) => {
+        if (!alive) return
+        setEditRecordId(data.id)
+        setBaseEtag(data.etag ?? null)
+        setLoadedVersion(data.version ?? null)
+        setEditCustomerId(data.customer_id ?? null)
+        setPendingEdit(data)
+        setTrailerId(data.trailer_type_id)
+      })
+      .catch(() => { if (alive) toast.push({ kind: 'error', message: 'Could not load that costing to edit.' }) })
+    return () => { alive = false }
+  }, [searchParams, toast])
 
-  // Seed dimensions + body-option defaults when a trailer's BOM loads.
+  // Default to the first body type once the list loads (skipped in edit-mode —
+  // the edit-load picks the saved trailer).
+  useEffect(() => {
+    if (searchParams.get('edit')) return
+    if (trailerId == null && trailers.length) setTrailerId(trailers[0].id)
+  }, [trailers, trailerId, searchParams])
+
+  // Seed defaults when a trailer's BOM loads — OR re-hydrate from a saved costing
+  // when reopening for edit (WO v4.37 §3.2 addendum).
   useEffect(() => {
     if (!bom.length) return
+    if (pendingEdit && pendingEdit.trailer_type_id === trailerId) {
+      const e = pendingEdit
+      if (e.dimensions) setDims((d) => ({ ...d, ...e.dimensions }))
+      setSel(e.body_option_selections ?? {})
+      setMargin(e.profit_margin ?? 0)
+      setRatio(e.ratio_value != null ? String(e.ratio_value) : '')
+      setDiscKind((e.discount_kind ?? '') as 'percent' | 'amount' | '')
+      setDiscInput(e.discount_input ?? 0)
+      setOverrides(e.overrides ?? {})
+      setOptionalEnabled(new Set(e.optional_sections_enabled ?? []))
+      // saved body_variable_overrides are keyed by material name → map back to bom_id
+      const bv = e.body_variable_overrides ?? {}
+      const ins: Record<string, number> = {}
+      for (const row of bom) if (row.material_name in bv) ins[String(row.id)] = bv[row.material_name]
+      setInsThickness(ins)
+      setPendingEdit(null)  // one-shot re-hydration
+      return
+    }
     const tr = trailers.find((t) => t.id === trailerId)
     setDims((d) => ({
       ...d,
@@ -88,7 +139,7 @@ export function CostCalculator() {
     setOverrides({})  // a new body template clears any prior quote-only price overrides
     setOptionalEnabled(new Set())  // optional sections default OFF
     setInsThickness({})  // thickness overrides reset to the template defaults
-  }, [bom, trailerId, trailers])
+  }, [bom, trailerId, trailers, pendingEdit])
 
   // Insulation thickness → body_variable_overrides (keyed by material name; the
   // backend resolves them in _build_body_variables). Per-quote, NOT a template
@@ -345,7 +396,11 @@ export function CostCalculator() {
               <AlertCircle size={14} /> An insulation pair has no thickness on either side — set EPS or PU before saving.
             </div>
           )}
-          <SaveBar req={req} disabled={insBlock} />
+          <SaveBar
+            req={req}
+            disabled={insBlock}
+            edit={editRecordId != null ? { recordId: editRecordId, baseEtag, version: loadedVersion, customerId: editCustomerId } : null}
+          />
 
           {/* BOM table */}
           <div className="rounded-lg border border-line bg-white">

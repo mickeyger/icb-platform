@@ -144,6 +144,27 @@ export interface DuplicateCheck {
   records?: DuplicateRecord[]
 }
 
+/** Shape from GET /api/calculations/{id} used to re-hydrate the form on edit-reopen. */
+export interface LoadedCalculation {
+  id: number
+  etag?: string
+  trailer_type_id: number
+  customer_id?: number | null
+  dimensions?: Partial<Dimensions>
+  profit_margin?: number
+  version?: number | null
+  quote_number?: string | null
+  is_repair?: boolean
+  overrides?: Record<string, number>
+  body_option_selections?: BodyOptionSelections
+  optional_sections_enabled?: number[]
+  body_variable_overrides?: Record<string, number>
+  ratio_value?: number | null
+  ratio_label?: string | null
+  discount_kind?: 'percent' | 'amount' | null
+  discount_input?: number | null
+}
+
 export interface ApproveExtras {
   customer_id: number | null
   version_action: 'replace' | 'new_version' | 'overwrite' | null

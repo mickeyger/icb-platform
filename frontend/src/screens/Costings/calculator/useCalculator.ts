@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost, mesAutoLogin } from '../../../lib/api'
 import type {
   TrailerType, BomRow, CalcRequest, CalcResult,
-  CustomerLite, DuplicateCheck, ApproveExtras,
+  CustomerLite, DuplicateCheck, ApproveExtras, LoadedCalculation,
 } from './types'
 
 /** Trailer-type list for the body-type dropdown (fetched once on mount). */
@@ -93,6 +93,6 @@ export async function approveCalc(req: CalcRequest, extras: ApproveExtras): Prom
 }
 
 /** Load an existing costing for editing (carries the optimistic-lock etag). */
-export async function loadCalculation(recordId: number): Promise<Record<string, unknown>> {
-  return apiGet<Record<string, unknown>>(`/api/calculations/${recordId}`)
+export async function loadCalculation(recordId: number): Promise<LoadedCalculation> {
+  return apiGet<LoadedCalculation>(`/api/calculations/${recordId}`)
 }

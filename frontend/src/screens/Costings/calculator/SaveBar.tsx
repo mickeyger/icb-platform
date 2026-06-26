@@ -10,10 +10,11 @@ import { searchCustomers, checkDuplicate, approveCalc } from './useCalculator'
 import type { CalcRequest, CustomerLite, DuplicateCheck } from './types'
 import { revisionLabel } from './types'
 
-export function SaveBar({ req, disabled, isRepair = false }: {
+export function SaveBar({ req, disabled, isRepair = false, edit = null }: {
   req: CalcRequest | null
   disabled?: boolean
   isRepair?: boolean
+  edit?: { recordId: number; baseEtag: string | null; version: number | null; customerId: number | null } | null
 }) {
   const toast = useToast()
   const [customer, setCustomer] = useState<CustomerLite | null>(null)
@@ -73,6 +74,62 @@ export function SaveBar({ req, disabled, isRepair = false }: {
       } catch { /* fall through to a plain save */ }
     }
     void save(null)
+  }
+
+  // ── Edit-reopen mode (WO v4.37 §3.2 addendum) ──────────────────────────────
+  async function editSave(action: 'overwrite' | 'new_version') {
+    if (!req || !edit) return
+    setSaving(true)
+    try {
+      const res = await approveCalc(req, {
+        customer_id: edit.customerId,
+        version_action: action,
+        edit_record_id: edit.recordId,
+        base_etag: action === 'overwrite' ? (edit.baseEtag ?? undefined) : undefined,
+        next_version: action === 'new_version' ? (edit.version ?? 1) + 1 : undefined,
+        reuse_quote_number: action === 'new_version',
+        is_repair: isRepair,
+      })
+      setSaved({ quote: res.quote_number ?? null, version: res.version ?? null })
+      toast.push({
+        kind: 'ok',
+        message: action === 'overwrite'
+          ? `Overwrote ${res.quote_number ?? 'costing'}`
+          : `Saved ${revisionLabel(res.version ?? null) || 'revision'}`,
+      })
+    } catch (e) {
+      // 412 = the costing changed since the editor loaded it (optimistic lock, §3.1 D-4).
+      if (e instanceof ApiError && e.status === 412) {
+        toast.push({ kind: 'warn', message: e.detail || 'This costing was changed by someone else since you opened it — reload it and re-apply your changes.' })
+      } else handleApiError(e, toast.push)
+    } finally { setSaving(false) }
+  }
+
+  if (edit) {
+    return (
+      <div className="mt-4 rounded-lg border border-line bg-white p-4">
+        <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-muted">
+          Editing costing
+          {revisionLabel(edit.version) && <span className="rounded bg-surface-alt px-1.5 py-0.5 text-[10px] normal-case">{revisionLabel(edit.version)}</span>}
+        </div>
+        {saved && (
+          <div className="mb-2 flex items-center gap-1 text-sm text-status-green">
+            <Check size={13} /> {saved.quote ?? 'Saved'}
+            {revisionLabel(saved.version) && <span className="ml-1 rounded bg-status-green/15 px-1.5 py-0.5 text-[10px] font-bold uppercase">{revisionLabel(saved.version)}</span>}
+          </div>
+        )}
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={() => editSave('new_version')} disabled={disabled || saving || !req}
+            className="rounded-md border border-line px-3 py-1.5 text-sm font-semibold text-body hover:bg-surface-alt disabled:opacity-50">
+            Save as new {revisionLabel((edit.version ?? 1) + 1) || 'revision'}
+          </button>
+          <button onClick={() => editSave('overwrite')} disabled={disabled || saving || !req}
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Overwrite
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (

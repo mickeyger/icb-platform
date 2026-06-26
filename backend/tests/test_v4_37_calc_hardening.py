@@ -291,3 +291,47 @@ def test_d5_non_admin_still_blocked_from_structural_fields(make_user, session_cl
     c = session_client(make_user("user"))
     # A structural field (formula_expression) breaks the strict-subset gate → require_admin → 403.
     assert c.put(f"/api/bom/{bid}", json={"formula_expression": "2"}).status_code == 403
+
+
+# ── §3.2 addendum — edit-reopen optimistic lock (D-4 etag) ─────────────────────
+def test_d4_overwrite_412_on_stale_etag(make_user, session_client):
+    """WO v4.37 §3.2 addendum — reopening a costing to edit and overwriting it is
+    refused 412 when it changed since the editor loaded it (mock concurrent edit),
+    and accepted once the editor re-loads the fresh etag."""
+    import json
+    from app.database import SessionLocal, CalculationRecord, TrailerType
+    with SessionLocal() as db:
+        tt = db.query(TrailerType).first()
+        if tt is None:
+            pytest.skip("no trailer type seeded")
+        ttid = tt.id
+        rec = CalculationRecord(trailer_type_id=ttid, status="pending",
+                                dimensions_json=json.dumps({}),
+                                result_json=json.dumps({"version": 1, "grand_total": 100}))
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+        rid = rec.id
+    try:
+        c = session_client(make_user("user"))
+        loaded = c.get(f"/api/calculations/{rid}")
+        assert loaded.status_code == 200
+        stale_etag = loaded.json().get("etag")
+        assert stale_etag
+        # Concurrent edit by someone else → the record's etag moves.
+        with SessionLocal() as db:
+            r = db.get(CalculationRecord, rid)
+            r.result_json = json.dumps({"version": 1, "grand_total": 999})
+            db.commit()
+        body = {"trailer_type_id": ttid, "dimensions": {}, "version_action": "overwrite",
+                "edit_record_id": rid, "base_etag": stale_etag}
+        assert c.post("/api/approve", json=body).status_code == 412     # stale → refused
+        fresh_etag = c.get(f"/api/calculations/{rid}").json().get("etag")
+        body["base_etag"] = fresh_etag
+        assert c.post("/api/approve", json=body).status_code == 200     # re-loaded → accepted
+    finally:
+        with SessionLocal() as db:
+            r = db.get(CalculationRecord, rid)
+            if r:
+                db.delete(r)
+                db.commit()

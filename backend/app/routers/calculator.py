@@ -804,6 +804,9 @@ async def api_approve(request: Request, db: Session = Depends(get_db), branch=De
         "is_repair":                 is_repair,
         "ratio_value":               body.get("ratio_value"),
         "ratio_label":               body.get("ratio_label"),
+        # WO v4.37 §3.2 — persist per-quote insulation thickness so an edit-reopen
+        # re-hydrates it (keyed by material name; additive, legacy calc sends none).
+        "body_variable_overrides":   body.get("body_variable_overrides"),
         "chassis":                   body.get("chassis"),
         # Complete client-side UI snapshot (body options, DRD/SRD, configurator
         # draft states, optional sections, full price overrides, chassis, body
@@ -1224,6 +1227,7 @@ async def api_get_calculation(record_id: int, request: Request, db: Session = De
         "flag_overrides":            input_state.get("flag_overrides") or {},
         "user_excluded_bom_ids":     input_state.get("user_excluded_bom_ids") or [],
         "optional_sections_enabled": input_state.get("optional_sections_enabled") or [],
+        "body_variable_overrides":   input_state.get("body_variable_overrides") or {},  # WO v4.37 §3.2 (edit re-hydrate)
         # Profit ratio lives at the top level of result_json on every record that
         # used one (set by _apply_chassis_and_margin) — read it there first so the
         # calculator restores the selling-price ratio on edit and the total doesn't
