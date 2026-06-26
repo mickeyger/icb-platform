@@ -30,6 +30,15 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
     fields: [],
     custom: true,
   },
+  // WO v4.36c §3.2 — Kenny's QC inspection inbox + form (custom screen; ?chassis= drives the form view).
+  'qc': {
+    key: 'qc',
+    title: 'QC inspection',
+    basePath: '/api/qc/awaiting',
+    columns: [],
+    fields: [],
+    custom: true,
+  },
   'spec-options': {
     key: 'spec-options',
     title: 'Spec options (DDM dropdowns)',
@@ -177,4 +186,4 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
   },
 }
 
-export const ADMIN_ORDER = ['health-check', 'spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']
+export const ADMIN_ORDER = ['health-check', 'qc', 'spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']
