@@ -39,6 +39,23 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
     fields: [],
     custom: true,
   },
+  // WO v4.36c §3.3 — QC defect-categories DDM (flat CRUD; admin-editable taxonomy, §0.5). Backend
+  // /api/admin/defect-categories shipped in §3.1; DELETE soft-deactivates (row persists is_active=false,
+  // re-editable to reactivate — preserves the immutable qc_inspections audit, §3.0 §3d).
+  'defect-categories': {
+    key: 'defect-categories',
+    title: 'QC defect categories',
+    basePath: '/api/admin/defect-categories',
+    columns: [
+      { key: 'name', label: 'Category' }, { key: 'sort_order', label: 'Order' },
+      { key: 'is_active', label: 'Active' },
+    ],
+    fields: [
+      { name: 'name', label: 'Category name', required: true },
+      { name: 'sort_order', label: 'Sort order', type: 'number', default: 100 },
+      { name: 'is_active', label: 'Active', type: 'bool', default: true },
+    ],
+  },
   'spec-options': {
     key: 'spec-options',
     title: 'Spec options (DDM dropdowns)',
@@ -186,4 +203,4 @@ export const ADMIN_RESOURCES: Record<string, ResourceConfig> = {
   },
 }
 
-export const ADMIN_ORDER = ['health-check', 'qc', 'spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']
+export const ADMIN_ORDER = ['health-check', 'qc', 'defect-categories', 'spec-options', 'rules', 'lookups', 'price-overrides', 'prejob-templates', 'fridge-units', 'prejob-signoffs', 'customers', 'orphan-chassis', 'merge-chassis']
