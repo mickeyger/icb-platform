@@ -16,6 +16,8 @@ export interface BayModel {
   parking: ChassisRecord[]                       // booked-in, not yet on a bay (status in_workshop)
   occupantByBay: Record<number, ChassisRecord>   // assembly bay id -> the chassis currently on it
   awaitingQa: AwaitingQaRow[]                     // WO v4.36a.1 — chassis moved off the bay to QA (status awaiting_qa)
+  dispatched: AwaitingQaRow[]                     // WO v4.36c §3.5 — QC-passed chassis (status dispatched)
+  errors: { bays: boolean; chassis: boolean; awaitingQa: boolean; dispatched: boolean }  // per-zone fetch failures (§3.5)
   refresh: () => Promise<Bay[]>                  // resolves with the freshly fetched bay rows
   /** parking -> assembly. Re-throws ApiError(409) (bay occupied) so the caller can flash an inline reject.
    *  Resolves with the post-assign bay rows so the caller can detect a completed merge (ready_to_merge). */
@@ -41,37 +43,51 @@ export function useBayModel(pushToast: PushToast): BayModel {
   const [parking, setParking] = useState<ChassisRecord[]>([])
   const [occupantByBay, setOccupantByBay] = useState<Record<number, ChassisRecord>>({})
   const [awaitingQa, setAwaitingQa] = useState<AwaitingQaRow[]>([])
+  const [dispatched, setDispatched] = useState<AwaitingQaRow[]>([])
+  const [errors, setErrors] = useState<BayModel['errors']>(
+    { bays: false, chassis: false, awaitingQa: false, dispatched: false })
 
   const refresh = useCallback(async (): Promise<Bay[]> => {
-    try {
-      const [bayRows, chassis, qaRows] = await Promise.all([
-        apiGet<Bay[]>('/api/chassis-records/bays/assembly'),
-        apiGet<ChassisRecord[]>('/api/chassis-records?limit=200'),
-        apiGet<AwaitingQaRow[]>('/api/chassis-records/awaiting-qa'),
-      ])
-      const occ: Record<number, ChassisRecord> = {}
-      const pool: ChassisRecord[] = []
-      for (const c of chassis) {
-        if (c.status === 'in_assembly' && c.current_assembly_bay_id != null) {
-          occ[c.current_assembly_bay_id] = c
-        } else if (c.status === 'in_workshop') {
-          pool.push(c)
-        }
+    // Promise.allSETTLED (not all): each zone loads independently, so a single failed fetch — e.g. the
+    // new /api/qc/dispatched feed — can NOT blank the other zones (the old Promise.all dropped ALL data
+    // to the offline 'mock' state on any rejection). We surface each failure per zone instead
+    // ([[feedback-silent-deferral-as-defect]]).
+    const [bayR, chassisR, qaR, dispR] = await Promise.allSettled([
+      apiGet<Bay[]>('/api/chassis-records/bays/assembly'),
+      apiGet<ChassisRecord[]>('/api/chassis-records?limit=200'),
+      apiGet<AwaitingQaRow[]>('/api/chassis-records/awaiting-qa'),
+      apiGet<AwaitingQaRow[]>('/api/qc/dispatched'),
+    ])
+    let bayRows: Bay[] = []
+    if (bayR.status === 'fulfilled') bayRows = bayR.value
+    else console.warn('bay-model: assembly-bays fetch failed', bayR.reason)
+    setBays(bayRows)
+
+    const occ: Record<number, ChassisRecord> = {}
+    const pool: ChassisRecord[] = []
+    if (chassisR.status === 'fulfilled') {
+      for (const c of chassisR.value) {
+        if (c.status === 'in_assembly' && c.current_assembly_bay_id != null) occ[c.current_assembly_bay_id] = c
+        else if (c.status === 'in_workshop') pool.push(c)
       }
-      setBays(bayRows)
-      setParking(pool)
-      setOccupantByBay(occ)
-      setAwaitingQa(qaRows)
-      setMode('live')
-      return bayRows
-    } catch {
-      setBays([])
-      setParking([])
-      setOccupantByBay({})
-      setAwaitingQa([])
-      setMode('mock')
-      return []
-    }
+    } else console.warn('bay-model: chassis fetch failed', chassisR.reason)
+    setParking(pool)
+    setOccupantByBay(occ)
+
+    if (qaR.status === 'fulfilled') setAwaitingQa(qaR.value)
+    else { console.warn('bay-model: awaiting-qa fetch failed', qaR.reason); setAwaitingQa([]) }
+
+    if (dispR.status === 'fulfilled') setDispatched(dispR.value)
+    else { console.warn('bay-model: dispatched fetch failed', dispR.reason); setDispatched([]) }
+
+    setErrors({
+      bays: bayR.status === 'rejected', chassis: chassisR.status === 'rejected',
+      awaitingQa: qaR.status === 'rejected', dispatched: dispR.status === 'rejected',
+    })
+    // 'mock' (offline-demo) ONLY when the whole floor is offline (both core fetches failed) — never on a
+    // single auxiliary zone's failure.
+    setMode((bayR.status === 'fulfilled' || chassisR.status === 'fulfilled') ? 'live' : 'mock')
+    return bayRows
   }, [])
 
   // WO — after a bay-model MUTATION, tell the Planning Board week-grid to refetch. A job that just gained or
@@ -162,6 +178,6 @@ export function useBayModel(pushToast: PushToast): BayModel {
     [refreshAndNotifyBoard],
   )
 
-  return { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
-           markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking }
+  return { mode, bays, parking, occupantByBay, awaitingQa, dispatched, errors, refresh, assign,
+           markPanelsArrived, markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking }
 }
