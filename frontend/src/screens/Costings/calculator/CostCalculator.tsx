@@ -231,7 +231,7 @@ export function CostCalculator() {
   const headline = result?.net_total ?? result?.selling_price ?? result?.grand_total ?? 0
 
   return (
-    <div className="flex h-[calc(100vh-96px)] flex-col">
+    <div className="flex h-[calc(100vh-96px)] flex-col" data-testid="cost-calculator">
       {/* header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface-alt px-4 py-2 text-sm">
         <div className="flex items-center gap-2">
@@ -259,7 +259,7 @@ export function CostCalculator() {
             ) : trError ? (
               <div className="text-sm text-status-red">{trError}</div>
             ) : (
-              <select className={fieldCls} value={trailerId ?? ''} onChange={(e) => setTrailerId(Number(e.target.value))}>
+              <select data-testid="calc-body-type" className={fieldCls} value={trailerId ?? ''} onChange={(e) => setTrailerId(Number(e.target.value))}>
                 {trailers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}
@@ -371,7 +371,7 @@ export function CostCalculator() {
           )}
 
           {/* summary */}
-          <div className="mb-4 rounded-lg border border-line bg-white p-4">
+          <div className="mb-4 rounded-lg border border-line bg-white p-4" data-testid="calc-cost-summary">
             <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted">
               <RadioTower size={13} className="text-primary" /> Cost summary
             </div>

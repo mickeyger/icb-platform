@@ -123,7 +123,7 @@ export function SaveBar({ req, disabled, isRepair = false, edit = null }: {
             className="rounded-md border border-line px-3 py-1.5 text-sm font-semibold text-body hover:bg-surface-alt disabled:opacity-50">
             Save as new {revisionLabel((edit.version ?? 1) + 1) || 'revision'}
           </button>
-          <button onClick={() => editSave('overwrite')} disabled={disabled || saving || !req}
+          <button data-testid="calc-overwrite" onClick={() => editSave('overwrite')} disabled={disabled || saving || !req}
             className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Overwrite
           </button>
@@ -180,7 +180,7 @@ export function SaveBar({ req, disabled, isRepair = false, edit = null }: {
             </span>
           ) : customer ? `Saving under ${customer.name}` : 'No customer (saves without one)'}
         </div>
-        <button onClick={onSave} disabled={disabled || saving || !req}
+        <button data-testid="calc-save" onClick={onSave} disabled={disabled || saving || !req}
           className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark disabled:opacity-50">
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
         </button>

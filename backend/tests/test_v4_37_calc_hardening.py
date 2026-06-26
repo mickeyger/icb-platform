@@ -335,3 +335,66 @@ def test_d4_overwrite_412_on_stale_etag(make_user, session_client):
             if r:
                 db.delete(r)
                 db.commit()
+
+
+# ── §3.6 — full lifecycle through the REAL endpoints + perf smoke ──────────────
+def test_calc_lifecycle_create_reopen_overwrite(make_user, session_client):
+    """WO v4.37 §3.6 — calc lifecycle via the real endpoints: calculate → approve
+    (create) → reopen (GET carries the etag) → overwrite (412 stale / 200 fresh)."""
+    from app.database import SessionLocal, CalculationRecord, TrailerType
+    with SessionLocal() as db:
+        tt = db.query(TrailerType).first()
+        if tt is None:
+            pytest.skip("no trailer type seeded")
+        ttid = tt.id
+    c = session_client(make_user("user"))
+    created = []
+    try:
+        body = {"trailer_type_id": ttid, "dimensions": {"length": 6, "width": 2.5, "height": 2.6}}
+        calc = c.post("/api/calculate", json=body)
+        assert calc.status_code == 200 and "grand_total" in calc.json()
+        appr = c.post("/api/approve", json=body)              # fresh save (no customer → version 1)
+        assert appr.status_code == 200
+        rid = appr.json()["record_id"]
+        created.append(rid)
+        loaded = c.get(f"/api/calculations/{rid}")
+        assert loaded.status_code == 200
+        etag = loaded.json()["etag"]
+        ow = {**body, "version_action": "overwrite", "edit_record_id": rid, "base_etag": "stale-token"}
+        assert c.post("/api/approve", json=ow).status_code == 412     # stale → refused
+        ow["base_etag"] = etag
+        assert c.post("/api/approve", json=ow).status_code == 200     # fresh → accepted
+    finally:
+        with SessionLocal() as db:
+            for rid in created:
+                r = db.get(CalculationRecord, rid)
+                if r:
+                    db.delete(r)
+                    db.commit()
+
+
+def test_calc_perf_smoke_p95_under_500ms(make_user, session_client):
+    """WO v4.37 §0.19 — /api/calculate p95 ≤ 500ms on a typical BOM (a calculator
+    workload gate, not the 200ms list-view budget). In-process TestClient timing
+    measures handler + serialize cost; warm up the per-process caches, then sample."""
+    import time
+    from app.database import SessionLocal, TrailerType
+    with SessionLocal() as db:
+        tt = db.query(TrailerType).first()
+        if tt is None:
+            pytest.skip("no trailer type seeded")
+        ttid = tt.id
+    c = session_client(make_user("user"))
+    body = {"trailer_type_id": ttid, "dimensions": {"length": 13.6, "width": 2.5, "height": 2.7}}
+    for _ in range(3):                                        # warm section-snapshot / formula-lib / bom caches
+        assert c.post("/api/calculate", json=body).status_code == 200
+    samples = []
+    for _ in range(20):
+        t0 = time.perf_counter()
+        r = c.post("/api/calculate", json=body)
+        samples.append((time.perf_counter() - t0) * 1000.0)
+        assert r.status_code == 200
+    samples.sort()
+    p95 = samples[int(len(samples) * 0.95) - 1]
+    assert p95 <= 500.0, f"/api/calculate p95 {p95:.1f}ms exceeds the 500ms gate; samples={[round(s, 1) for s in samples]}"
+
