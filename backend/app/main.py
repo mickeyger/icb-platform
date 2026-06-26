@@ -89,7 +89,6 @@ from .routers import help as _r_help
 from .routers import feedback as _r_feedback  # WO v4.38 — Feedback Portal
 from .routers import pre_job_card as _r_pre_job_card
 from .routers import chassis_catalogue as _r_chassis_catalogue
-from .routers import mes_views as _r_mes_views  # WO v4.7 — MES skin fork at /mes/*
 from .routers import production_jobs as _r_production_jobs  # WO v4.14 — /api/production-jobs/*
 from .routers import production as _r_production  # WO v4.32 — /api/production/* aggregations
 from .routers import prejob_cards as _r_prejob_cards  # WO v4.33 — Pre-Job Card workflow
@@ -182,7 +181,6 @@ app.include_router(_r_pre_job_card.demo_router)
 app.include_router(_r_chassis_catalogue.router)
 app.include_router(_r_chassis_register.router)  # WO v4.22 — chassis register API
 app.include_router(_r_chassis_records.router)  # WO v4.28 — chassis lifecycle API
-app.include_router(_r_mes_views.router)  # WO v4.7 — /mes/dashboard + /mes/calculator
 app.include_router(_r_production_jobs.router)  # WO v4.14 — production-jobs API
 app.include_router(_r_production.router)  # WO v4.32 — team-worksheet aggregation
 app.include_router(_r_prejob_cards.router)  # WO v4.33 — Pre-Job Card workflow API
@@ -502,13 +500,10 @@ async def load_active_theme(request: Request, call_next):
     request.state.theme      = _theme_cache["theme"]
     request.state.nav_groups = dict(_theme_cache["nav_groups"])
 
-    # WO v4.7 — MES skin trigger REMOVED. The skin was previously toggled here
-    # via a query param / cookie / referer check, and base.html loaded the
-    # overlay stylesheet conditionally. That trigger leaked into direct browser
-    # visits whenever the sticky cookie was set. The MES mockup now uses the
-    # forked /mes/dashboard and /mes/calculator routes whose templates load
-    # theme-mes.css unconditionally, so no middleware-level toggle is needed.
-    # Set the flag to False so any templates still referencing it stay dormant.
+    # WO v4.7 — MES skin trigger REMOVED (live /calculator + / stay pristine).
+    # WO v4.37 §3.3 — the /mes/dashboard + /mes/calculator skin-fork routes that
+    # loaded theme-mes.css are retired with the iframe. The flag stays False so any
+    # live template still referencing request.state.mes_skin renders dormant.
     request.state.mes_skin = False
     return await call_next(request)
 

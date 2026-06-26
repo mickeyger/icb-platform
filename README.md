@@ -66,8 +66,7 @@ Then visit:
 |-----|------|
 | http://localhost:8000/calculator | Jinja Cost Calculator (parity with faje.co.za) |
 | http://localhost:8000/ | Jinja dashboard |
-| http://localhost:8000/mes/dashboard | Jinja MES skin (existing) |
-| http://localhost:8000/mes-app/ | React MES app (new) |
+| http://localhost:8000/mes-app/ | React MES app (new) — incl. the native Cost Calculator at /mes-app/costings/new |
 | http://localhost:8000/docs | Interactive API docs (Swagger UI) |
 
 ## MES API — production jobs (Phase 2B-1, WO v4.14)
