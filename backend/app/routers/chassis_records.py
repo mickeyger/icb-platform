@@ -94,7 +94,9 @@ def create_record(payload: ChassisRecordCreate, db: Session = Depends(get_db),
 @router.patch("/{record_id}", response_model=ChassisRecordDetail)
 def update_record(record_id: int, payload: ChassisRecordUpdate, db: Session = Depends(get_db),
                   user: User = Depends(require_permission("chassis.update"))):
-    svc.update_chassis(db, record_id, payload, who=user.username)
+    # WO v4.36.5 §3.1 — sole-editor gate: production is read-only on attributes (admin/planner edit),
+    # optimistic-locked on version, and the change is trailed in chassis_records_audit.
+    svc.update_chassis(db, record_id, payload, who=user.username, actor_role=user.role, actor_id=user.id)
     return svc.get_detail(db, record_id)
 
 

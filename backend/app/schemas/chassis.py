@@ -119,6 +119,9 @@ class ChassisRecordUpdate(BaseModel):
     # onto chassis_records (single source of truth). dealer_id validated is_dealer=true; tail_lift_code plain col.
     dealer_id: Optional[int] = None
     tail_lift_code: Optional[str] = None
+    # WO v4.36.5 — optimistic lock: the Chassis-page Edit modal echoes the version it loaded; a stale value
+    # (someone else saved in between) → 409 "reload". Optional/back-compat: omitted → no concurrency check.
+    version: Optional[int] = None
 
 
 class ChassisCreateResult(BaseModel):
