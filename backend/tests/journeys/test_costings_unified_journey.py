@@ -2,7 +2,7 @@
 
 Per Testing Strategy v1.1: admin + the primary affected role (sales lives in the dashboard).
 Asserts the §0.6/§0.13 contract per role: the SAME component renders full on /costings and
-compressed (embedded) below the calculator iframe on /costings/new, with the §3.4 KPI strip
+compressed (embedded) below the native calculator on /costings/new, with the §3.4 KPI strip
 (5 metric tiles) present in BOTH contexts. Read-path only — no mutations.
 """
 from __future__ import annotations
@@ -28,9 +28,10 @@ def _assert_both_contexts(page: Page, prefix: str) -> None:
     expect(page.get_by_test_id("costings-table")).to_be_visible(timeout=T)
     shot(page, f"{prefix}-costings-full", journey=JOURNEY)
 
-    # Context 2 — /costings/new: calculator iframe on top + the SAME component embedded below.
+    # Context 2 — /costings/new: the NATIVE calculator on top + the SAME component embedded below
+    # (WO v4.37 §3.2 replaced the former /mes/calculator iframe with the native React calc).
     page.goto("/mes-app/costings/new")
-    expect(page.locator("iframe[title='Calculator (live costing app)']")).to_be_visible(timeout=T)
+    expect(page.get_by_test_id("cost-calculator")).to_be_visible(timeout=T)
     embedded = page.get_by_test_id("costings-dashboard-embedded")
     expect(embedded).to_be_visible(timeout=T)
     expect(embedded.get_by_test_id("costings-kpis")).to_be_visible(timeout=T)     # tiles inherited
