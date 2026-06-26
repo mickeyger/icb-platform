@@ -5,10 +5,11 @@
 // and renders the result. Save / version / customer flow lands in the §3.2 save
 // increment; insulation copy-on-switch + optional-extras + per-row overrides are
 // follow-ups (the engine already gates server-side from body_option_selections).
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Calculator, Loader2, RadioTower, AlertCircle } from 'lucide-react'
 import { useTrailers, useTrailerBom, useLiveCalc } from './useCalculator'
-import type { BomRow, Dimensions, BodyOptionSelections, CalcRequest } from './types'
+import { SaveBar } from './SaveBar'
+import type { BomRow, CalcItem, Dimensions, BodyOptionSelections, CalcRequest } from './types'
 
 const DEFAULT_DIMS: Dimensions = {
   length: 13.6, width: 2.5, height: 2.7,
@@ -61,6 +62,9 @@ export function CostCalculator() {
   const [ratio, setRatio] = useState('')
   const [discKind, setDiscKind] = useState<'percent' | 'amount' | ''>('')
   const [discInput, setDiscInput] = useState(0)
+  const [overrides, setOverrides] = useState<Record<string, number>>({})  // bom_id → quote-only unit price
+  const [optionalEnabled, setOptionalEnabled] = useState<Set<number>>(new Set())  // enabled optional bom_section_ids
+  const [insThickness, setInsThickness] = useState<Record<string, number>>({})  // bom_id → insulation thickness override (m)
   const { result, calculating, error: calcError, calculate } = useLiveCalc()
 
   // Default to the first body type once the list loads.
@@ -81,7 +85,22 @@ export function CostCalculator() {
     const defaults: BodyOptionSelections = {}
     for (const row of bom) if (row.is_body_option) defaults[String(row.id)] = !!row.body_option_default
     setSel(defaults)
+    setOverrides({})  // a new body template clears any prior quote-only price overrides
+    setOptionalEnabled(new Set())  // optional sections default OFF
+    setInsThickness({})  // thickness overrides reset to the template defaults
   }, [bom, trailerId, trailers])
+
+  // Insulation thickness → body_variable_overrides (keyed by material name; the
+  // backend resolves them in _build_body_variables). Per-quote, NOT a template
+  // PUT — avoids mutating the shared body template for every other estimator.
+  const bodyVarOverrides = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const row of bom) {
+      const t = insThickness[String(row.id)]
+      if (t !== undefined && row.material_name) out[row.material_name] = t
+    }
+    return out
+  }, [bom, insThickness])
 
   const req = useMemo<CalcRequest | null>(() => {
     if (trailerId == null) return null
@@ -89,14 +108,17 @@ export function CostCalculator() {
       trailer_type_id: trailerId,
       dimensions: dims,
       profit_margin: margin,
+      overrides,
       body_option_selections: sel,
+      body_variable_overrides: bodyVarOverrides,
+      optional_sections_enabled: [...optionalEnabled],
       chassis: { enabled: false },
       ratio_value: ratio ? Number(ratio) : null,
       ratio_label: ratio ? `${Math.round(Number(ratio) * 100)}%` : null,
       discount_kind: discKind || null,
       discount_input: discKind ? discInput : null,
     }
-  }, [trailerId, dims, margin, sel, ratio, discKind, discInput])
+  }, [trailerId, dims, margin, sel, ratio, discKind, discInput, overrides, optionalEnabled, bodyVarOverrides])
 
   // Debounced live recalc on any input change.
   useEffect(() => { if (req) calculate(req) }, [req, calculate])
@@ -104,12 +126,56 @@ export function CostCalculator() {
   const optGroups = useMemo(() => groupBodyOptions(bom), [bom])
   const dimsValid = dims.length > 0 && dims.width > 0 && dims.height > 0
 
+  // BOM grouped by category for the table; optional categories carry an "include"
+  // toggle (→ optional_sections_enabled). sectionId is the category's bom_section_id.
+  const bomGroups = useMemo(() => {
+    const order: string[] = []
+    const map = new Map<string, CalcItem[]>()
+    for (const it of result?.items ?? []) {
+      if (!map.has(it.category)) { map.set(it.category, []); order.push(it.category) }
+      map.get(it.category)!.push(it)
+    }
+    return order.map((cat) => {
+      const items = map.get(cat)!
+      return {
+        cat, items,
+        optional: items.some((i) => i.section_is_optional),
+        sectionId: items.find((i) => i.bom_section_id != null)?.bom_section_id ?? null,
+      }
+    })
+  }, [result])
+  const toggleOptional = (sectionId: number) =>
+    setOptionalEnabled((s) => { const n = new Set(s); n.has(sectionId) ? n.delete(sectionId) : n.add(sectionId); return n })
+
+  // Both-zero guard (BA §3.2): block save when an insulation pair has no thickness
+  // on either side — the silent operator error worth a hard stop.
+  const insBlock = useMemo(() => {
+    const eff = (row: BomRow) => insThickness[String(row.id)] ?? (row.variable_value ?? 0)
+    for (const g of optGroups) for (const sg of g.subgroups) {
+      if (sg.rows.length === 2 && sg.rows.some((r) => /EPS/i.test(r.material_name)) && sg.rows.some((r) => /PU/i.test(r.material_name))
+          && sg.rows.every((r) => eff(r) <= 0)) return true
+    }
+    return false
+  }, [optGroups, insThickness])
+
   const setSelExclusive = (rows: BomRow[], picked: number) =>
     setSel((s) => {
       const next = { ...s }
       for (const r of rows) next[String(r.id)] = r.id === picked
       return next
     })
+
+  const effThick = (row: BomRow) => insThickness[String(row.id)] ?? (row.variable_value ?? 0)
+  const isInsulationPair = (rows: BomRow[]) =>
+    rows.length === 2 && rows.some((r) => /EPS/i.test(r.material_name)) && rows.some((r) => /PU/i.test(r.material_name))
+  // Copy-on-switch: picking the other insulation type carries the sibling's
+  // thickness onto the picked row and zeroes the sibling (EPS↔PU parity).
+  const copyOnSwitch = (rows: BomRow[], pickedId: number) => {
+    const sibling = rows.find((r) => r.id !== pickedId)
+    if (!sibling) return
+    const sibT = effThick(sibling)
+    setInsThickness((t) => ({ ...t, [String(pickedId)]: sibT, [String(sibling.id)]: 0 }))
+  }
 
   const headline = result?.net_total ?? result?.selling_price ?? result?.grand_total ?? 0
 
@@ -173,30 +239,45 @@ export function CostCalculator() {
             optGroups.map((g) => (
               <div key={g.group} className="mb-4">
                 <div className="mb-1.5 text-xs font-bold uppercase tracking-wide text-body">{g.group}</div>
-                {g.subgroups.map((sg) => (
-                  <div key={sg.subgroup || g.group} className="mb-2 rounded-md border border-line p-2">
-                    {sg.subgroup && <div className="mb-1 text-[10px] font-semibold uppercase text-muted">{sg.subgroup}</div>}
-                    <div className="flex flex-col gap-1">
-                      {sg.rows.map((row) => {
-                        const on = !!sel[String(row.id)]
-                        return (
-                          <label key={row.id} className="flex cursor-pointer items-center gap-2 text-sm text-body">
-                            <input
-                              type={sg.radio ? 'radio' : 'checkbox'}
-                              name={sg.radio ? `${g.group}-${sg.subgroup}` : undefined}
-                              checked={on}
-                              onChange={() => sg.radio ? setSelExclusive(sg.rows, row.id) : setSel((s) => ({ ...s, [String(row.id)]: !on }))}
-                            />
-                            <span>{row.material_name}</span>
-                            {row.variable_value != null && row.variable_value > 0 && (
-                              <span className="text-[11px] text-muted">({row.variable_value} m)</span>
-                            )}
-                          </label>
-                        )
-                      })}
+                {g.subgroups.map((sg) => {
+                  const isIns = isInsulationPair(sg.rows)
+                  const bothZero = isIns && sg.rows.every((r) => effThick(r) <= 0)
+                  return (
+                    <div key={sg.subgroup || g.group} className={`mb-2 rounded-md border p-2 ${bothZero ? 'border-status-red bg-status-red/5' : 'border-line'}`}>
+                      {sg.subgroup && <div className="mb-1 text-[10px] font-semibold uppercase text-muted">{sg.subgroup}</div>}
+                      <div className="flex flex-col gap-1">
+                        {sg.rows.map((row) => {
+                          const on = !!sel[String(row.id)]
+                          return (
+                            <label key={row.id} className="flex cursor-pointer items-center gap-2 text-sm text-body">
+                              <input
+                                type={sg.radio ? 'radio' : 'checkbox'}
+                                name={sg.radio ? `${g.group}-${sg.subgroup}` : undefined}
+                                checked={on}
+                                onChange={() => {
+                                  if (sg.radio) { setSelExclusive(sg.rows, row.id); if (isIns) copyOnSwitch(sg.rows, row.id) }
+                                  else setSel((s) => ({ ...s, [String(row.id)]: !on }))
+                                }}
+                              />
+                              <span className="flex-1">{row.material_name}</span>
+                              {isIns ? (
+                                <input
+                                  type="number" step="0.001" min="0" title="Insulation thickness (m)"
+                                  className="w-16 rounded border border-line px-1 py-0.5 text-right text-xs tabular-nums focus:border-primary focus:outline-none"
+                                  value={effThick(row)}
+                                  onChange={(e) => setInsThickness((t) => ({ ...t, [String(row.id)]: Number(e.target.value) }))}
+                                />
+                              ) : (row.variable_value != null && row.variable_value > 0 ? (
+                                <span className="text-[11px] text-muted">({row.variable_value} m)</span>
+                              ) : null)}
+                            </label>
+                          )
+                        })}
+                      </div>
+                      {bothZero && <div className="mt-1 text-[11px] font-semibold text-status-red">⚠ Set a thickness on EPS or PU — both are zero.</div>}
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ))
           )}
@@ -259,6 +340,13 @@ export function CostCalculator() {
             )}
           </div>
 
+          {insBlock && (
+            <div className="mt-4 flex items-center gap-1.5 rounded-md bg-status-red/10 px-3 py-2 text-sm font-semibold text-status-red">
+              <AlertCircle size={14} /> An insulation pair has no thickness on either side — set EPS or PU before saving.
+            </div>
+          )}
+          <SaveBar req={req} disabled={insBlock} />
+
           {/* BOM table */}
           <div className="rounded-lg border border-line bg-white">
             <div className="border-b border-line px-3 py-2 text-xs font-bold uppercase tracking-wide text-muted">
@@ -278,17 +366,40 @@ export function CostCalculator() {
                   </tr>
                 </thead>
                 <tbody>
-                  {result.items.map((it, i) => (
-                    <tr
-                      key={`${it.bom_id}-${i}`}
-                      className={`border-b border-line/60 ${it.excluded ? 'text-muted line-through' : 'text-body'} ${it.section_is_optional ? 'bg-status-amber/5' : ''}`}
-                    >
-                      <td className="px-3 py-1">{it.material}</td>
-                      <td className="px-3 py-1 text-right tabular-nums">{(it.quantity ?? 0).toFixed(2)}</td>
-                      <td className="px-3 py-1 text-muted">{it.unit}</td>
-                      <td className="px-3 py-1 text-right tabular-nums">{(it.unit_price ?? 0).toFixed(2)}</td>
-                      <td className="px-3 py-1 text-right tabular-nums">{(it.line_cost ?? 0).toFixed(2)}</td>
-                    </tr>
+                  {bomGroups.map((g) => (
+                    <Fragment key={g.cat}>
+                      <tr className="bg-surface-alt/70">
+                        <td colSpan={5} className="px-3 py-1">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[11px] font-bold uppercase tracking-wide ${g.optional ? 'text-status-amber' : 'text-body'}`}>{g.cat}</span>
+                            {g.optional && g.sectionId != null && (
+                              <label className="flex cursor-pointer items-center gap-1 text-[10px] font-semibold uppercase text-muted">
+                                <input type="checkbox" checked={optionalEnabled.has(g.sectionId)} onChange={() => toggleOptional(g.sectionId!)} /> include
+                              </label>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      {g.items.map((it, i) => (
+                        <tr
+                          key={`${it.bom_id}-${i}`}
+                          className={`border-b border-line/60 ${it.excluded ? 'text-muted line-through' : 'text-body'}`}
+                        >
+                          <td className="px-3 py-1 pl-5">{it.material}</td>
+                          <td className="px-3 py-1 text-right tabular-nums">{(it.quantity ?? 0).toFixed(2)}</td>
+                          <td className="px-3 py-1 text-muted">{it.unit}</td>
+                          <td className="px-3 py-1 text-right">
+                            <input
+                              type="number" step="0.01" title="Quote-only unit-price override"
+                              className="w-20 rounded border border-transparent bg-transparent px-1 py-0.5 text-right tabular-nums hover:border-line focus:border-primary focus:outline-none"
+                              value={overrides[String(it.bom_id)] ?? Number((it.unit_price ?? 0).toFixed(2))}
+                              onChange={(e) => setOverrides((o) => ({ ...o, [String(it.bom_id)]: Number(e.target.value) }))}
+                            />
+                          </td>
+                          <td className="px-3 py-1 text-right tabular-nums">{(it.line_cost ?? 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

@@ -62,6 +62,7 @@ export interface CalcRequest {
   override_reasons?: Record<string, string>
   chassis?: { enabled: boolean }
   body_option_selections?: BodyOptionSelections
+  body_variable_overrides?: Record<string, number>   // material_name → insulation thickness (m)
   excluded_categories?: string[]
   user_excluded_bom_ids?: number[]
   optional_sections_enabled?: number[]
