@@ -181,6 +181,16 @@ def get_detail(db: Session, record_id: int) -> ChassisRecordDetail:
     return detail
 
 
+def list_chassis_audit(db: Session, chassis_id: int, limit: int = 50, offset: int = 0):
+    """WO v4.36.5 §3.4 — the chassis_records_audit trail for one chassis, most-recent-first. edited_by_name is
+    a write-time SNAPSHOT (survives a user delete/rename), so no users-join is needed — the viewer reads the
+    row as-is. Bounded by limit (router caps at 200) so a long-lived chassis can't unbounded-render."""
+    return db.execute(
+        select(ChassisRecordAudit).where(ChassisRecordAudit.chassis_id == chassis_id)
+        .order_by(ChassisRecordAudit.created_at.desc(), ChassisRecordAudit.id.desc())
+        .limit(limit).offset(offset)).scalars().all()
+
+
 def _job_customer_name(db: Session, job) -> "str | None":
     """Best-effort customer name for a production job (job → calc → customer), for §0.9 consistency."""
     if job is None or not getattr(job, "calculation_record_id", None):

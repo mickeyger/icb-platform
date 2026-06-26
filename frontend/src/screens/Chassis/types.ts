@@ -84,6 +84,17 @@ export interface ChassisRecordDetail extends ChassisRecord {
   events: ChassisEvent[]
 }
 
+// WO v4.36.5 §3.4 — one chassis_records_audit entry (mirrors backend schemas/chassis.py ChassisAuditRow).
+export interface ChassisAuditRow {
+  id: number
+  field_name: string
+  old_value?: string | null
+  new_value?: string | null
+  source?: string | null
+  edited_by_name?: string | null   // write-time snapshot
+  created_at?: string | null
+}
+
 export const CHASSIS_STATUS_STYLE: Record<string, string> = {
   expected: 'bg-primary-light/60 text-primary',          // WO v4.34 §0.3 — pipeline placeholder (no VIN yet)
   expected_orphaned: 'bg-status-red/15 text-status-red',  // §0.6 — auto-created then released (reject)

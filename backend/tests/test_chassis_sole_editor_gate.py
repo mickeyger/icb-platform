@@ -129,3 +129,18 @@ def test_merge_is_audited():
         rows = db.query(ChassisRecordAudit).filter_by(chassis_id=loser, source="merge").all()
         assert len(rows) == 1
         assert rows[0].field_name == "merged_into_id" and rows[0].new_value == str(winner)
+
+
+def test_list_chassis_audit_returns_trail_recent_first():
+    """WO §3.4 — list_chassis_audit returns the chassis's audit rows, most-recent-first (created_at/id desc)."""
+    from app.database import SessionLocal
+    from app.services.chassis import update_chassis, list_chassis_audit
+    from app.schemas.chassis import ChassisRecordUpdate
+    rid = _make_chassis(make="Scania P")
+    with SessionLocal() as db:
+        update_chassis(db, rid, ChassisRecordUpdate(make="Scania R", notes="n1"), who=f"{_MARK}_a", actor_role="planner")
+    with SessionLocal() as db:
+        rows = list_chassis_audit(db, rid)
+        assert len(rows) >= 2 and all(r.chassis_id == rid for r in rows)
+        assert rows[0].id > rows[-1].id                          # most-recent-first (desc)
+        assert {r.field_name for r in rows} >= {"make", "notes"}
