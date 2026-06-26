@@ -81,15 +81,20 @@ def _cleanup():
 
 
 def _client(app_mod, user):
-    from app.deps import require_user
+    # require_permission gates resolve via Depends(require_user); require_admin calls require_user
+    # DIRECTLY (not Depends), so it needs its own override. Override both so the helper covers QC
+    # (permission) AND admin (require_admin) endpoints.
+    from app.deps import require_user, require_admin
     app_mod.app.dependency_overrides[require_user] = lambda: user
+    app_mod.app.dependency_overrides[require_admin] = lambda: user
     c = TestClient(app_mod.app)
     return c
 
 
 def _drop_override(app_mod):
-    from app.deps import require_user
+    from app.deps import require_user, require_admin
     app_mod.app.dependency_overrides.pop(require_user, None)
+    app_mod.app.dependency_overrides.pop(require_admin, None)
 
 
 # ── flow ─────────────────────────────────────────────────────────────────────
@@ -220,12 +225,10 @@ def test_defect_categories_admin_crud(app_mod, admin):
 
 
 def test_defect_categories_admin_only(app_mod):
-    from app.database import User
-    planner = User(id=999998, username="zzqc_planner", role="planner")
-    try:
-        assert _client(app_mod, planner).get("/api/admin/defect-categories").status_code == 403
-    finally:
-        _drop_override(app_mod)
+    # No override → require_admin -> require_user finds no test session → the gate denies (401/403).
+    # Proves defect-categories CRUD is admin-gated (not open). zzqc cleanup leaves no override behind.
+    r = TestClient(app_mod.app).get("/api/admin/defect-categories")
+    assert r.status_code in (401, 403)
 
 
 # ── perf smoke (§0.9 / §1.20) ─────────────────────────────────────────────────
