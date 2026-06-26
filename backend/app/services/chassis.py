@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.database import Customer            # WO v4.34.1 §3.4 — cross-schema dealer-name resolve
 from app.models.mes import (
-    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ParkingBay, PrejobCard, ProductionJob,
-    ProductionJobAudit,
+    AssemblyBay, ChassisLifecycleEvent, ChassisPhoto, ChassisRecord, ChassisRecordAudit, ParkingBay,
+    PrejobCard, ProductionJob, ProductionJobAudit,
 )
 from app.schemas.chassis import (
     ChassisEventOut, ChassisPhotoOut, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate,
@@ -321,7 +321,46 @@ def create_expected_chassis(db: Session, *, make, vin, body_gap_mm, created_via,
     return chassis
 
 
-def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRecord:
+# ── WO v4.36.5 §3.1 — chassis attribute-edit chokepoint ──────────────────────────────────────────
+# Attribute edits are admin/planner-only (production is read-only on attributes; their workflow is the
+# bay/lifecycle events). Service-layer role constant — NO permissions migration (would collide with 0029).
+_CHASSIS_EDIT_ROLES = {"admin", "planner"}
+
+# Chassis columns whose changes are trailed in chassis_records_audit (the meaningful attributes; excludes
+# created_*/updated_*/version meta + link internals not user-edited).
+_AUDITED_FIELDS = {
+    "vin", "vin_source", "job_number", "customer_name", "contact_person", "telephone", "make", "model",
+    "description", "status", "notes", "dealer_id", "tail_lift_code", "body_gap_mm",
+}
+
+
+def _apply_chassis_fields(db: Session, rec, data: dict, who: str, source: str,
+                          actor_id: "int | None" = None) -> list:
+    """WO v4.36.5 §3.1 — the SINGLE attribute-write point for chassis_records. Applies each CHANGED field
+    and appends a chassis_records_audit row for the audited ones (per-field old→new + editor). Used by the
+    Chassis-page edit (update_chassis, source='chassis_page') AND the Planning-ack propagation
+    (source='planning_ack') so every chassis attribute change lands in the trail. Returns the changed-field
+    list. Does NOT touch updated_by/version — the caller owns those."""
+    changed = []
+    for field, new in data.items():
+        old = getattr(rec, field, None)
+        if old == new:
+            continue
+        setattr(rec, field, new)
+        changed.append(field)
+        if field in _AUDITED_FIELDS:
+            db.add(ChassisRecordAudit(
+                chassis_id=rec.id, field_name=field,
+                old_value=(None if old is None else str(old)[:500]),
+                new_value=(None if new is None else str(new)[:500]),
+                source=source, edited_by_user_id=actor_id,
+                edited_by_name=(who or "")[:64] or None,
+            ))
+    return changed
+
+
+def update_chassis(db: Session, record_id: int, payload, who: str,
+                   actor_role: "str | None" = None, actor_id: "int | None" = None) -> ChassisRecord:
     """WO v4.36a §3.5c — link-aware edit chokepoint (the ADR-0024 guard on the EDIT door, symmetric with
     create_chassis so the edit modal can't be a MICKEYTEST-class bypass). The job↔chassis link is
     authoritative on production_jobs.chassis_record_id:
@@ -333,10 +372,17 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
                   rec.job_number from the real job (clearing any stale free-text — closes the §3.0 FK-drift).
       • UNLINKED, no job selected → legacy behaviour (free-text job_number passes through)."""
     from app.services import chassis_integrity as ci
+    if actor_role is not None and actor_role not in _CHASSIS_EDIT_ROLES:
+        raise HTTPException(status_code=403,
+                            detail="Chassis attributes are editable on the Chassis page by admin/planner only.")
     rec = db.get(ChassisRecord, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="chassis record not found")
     data = payload.model_dump(exclude_unset=True)
+    expected_version = data.pop("version", None)         # §3.1 optimistic lock (server-managed column)
+    if expected_version is not None and (rec.version or 0) != expected_version:
+        raise HTTPException(status_code=409,
+                            detail="This chassis was changed by someone else — reload and try again.")
     job_id = data.pop("production_job_id", None)         # never a ChassisRecord column
     eta_sent = "chassis_eta" in data                     # §3.5e — ETA lives on the linked job, not the chassis
     eta_val = data.pop("chassis_eta", None)
@@ -364,12 +410,14 @@ def update_chassis(db: Session, record_id: int, payload, who: str) -> ChassisRec
         _stamp_job_eta(eta_job, eta_val, who)
     if data.get("dealer_id") is not None:                # WO v4.36b — validate is_dealer=true (mirror create + ack)
         data["dealer_id"] = ci.validate_dealer(db, data["dealer_id"])
-    for k, v in data.items():                            # tail_lift_code + the validated dealer_id flow through here
-        setattr(rec, k, v)
+    # §3.1 — apply + audit each changed field through the single chokepoint (chassis_page source).
+    changed = _apply_chassis_fields(db, rec, data, who, source="chassis_page", actor_id=actor_id)
     rec.updated_by = who
     if link_to is not None:
         db.flush()                                       # rec.id stable, same txn — mirror create's atomic link
         link_to.chassis_record_id = rec.id
+    if changed or link_to is not None:                   # bump the optimistic-lock version on a real change
+        rec.version = (rec.version or 0) + 1
     db.commit()
     db.refresh(rec)
     return rec

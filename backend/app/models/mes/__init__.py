@@ -800,6 +800,30 @@ class ChassisRecord(Base):
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     created_by = Column(String(128))
     updated_by = Column(String(128))
+    version = Column(Integer, nullable=False, default=0, server_default="0")  # WO v4.36.5 — optimistic lock (sole-editor concurrency)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 25b. chassis_records_audit — per-field attribute-change trail (WO v4.36.5; clones ProductionJobAudit/0023).
+#      Append-only; the same-schema chassis_id FK (CASCADE) rides on create_all, the cross-schema editor
+#      FK (SET NULL) is created in migration 0029. BA is the consumer during parallel-run troubleshooting.
+# ─────────────────────────────────────────────────────────────────────────────
+class ChassisRecordAudit(Base):
+    __tablename__ = "chassis_records_audit"
+    __table_args__ = (
+        Index("ix_chassis_records_audit_chassis_id", "chassis_id"),
+        Index("ix_chassis_records_audit_created_at", "created_at"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    chassis_id = Column(Integer, ForeignKey("icb_mes.chassis_records.id", ondelete="CASCADE"), nullable=False)
+    field_name = Column(String(40), nullable=False)          # the chassis_records column that changed
+    old_value = Column(Text)                                 # stringified prior value (NULL when it was NULL)
+    new_value = Column(Text)                                 # stringified new value
+    source = Column(String(24))                              # chassis_page | planning_ack | system_autocreate | merge | retrofit_link
+    edited_by_user_id = Column(Integer)                      # cross-schema -> icb_costings.users.id (FK SET NULL in 0029)
+    edited_by_name = Column(String(64))                      # snapshot (survives a user rename/delete)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1160,7 +1184,7 @@ __all__ = [
     "LiveDailyCount", "ChassisRegister",
     "BomRule", "BomRuleLookup", "MaterialPriceOverride", "BomSpecOption",
     "GeneratedBom", "BomLine",
-    "ChassisRecord", "ChassisLifecycleEvent", "ChassisPhoto",
+    "ChassisRecord", "ChassisRecordAudit", "ChassisLifecycleEvent", "ChassisPhoto",
     "ParkingBay", "AssemblyBay",
     "PrejobTemplate", "PrejobCard", "FridgeUnit", "ChassisModel",
     "FeedbackSubmission",
