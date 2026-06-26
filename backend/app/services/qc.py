@@ -203,3 +203,21 @@ def signoff(db: Session, chassis_id: int, *, notes, user) -> dict:
     db.commit()
     return {"chassis_id": chassis_id, "cycle_number": cycle, "overall_verdict": overall,
             "new_status": rec.status, "pdf_available": overall == "pass"}
+
+
+def collection_note_pdf(db: Session, chassis_id: int) -> bytes:
+    """Regenerate the customer collection note for a QC-passed chassis from its latest PASS signoff
+    (no stored bytes — §3.0 §3e). 404 if the chassis is gone; 409 if it never passed QC."""
+    from app.services.customer_collection_pdf import render_collection_note
+    rec = db.get(ChassisRecord, chassis_id)
+    if rec is None or rec.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="chassis record not found")
+    signoff = db.execute(
+        select(QcSignoff).where(QcSignoff.chassis_record_id == chassis_id,
+                                QcSignoff.overall_verdict == "pass")
+        .order_by(QcSignoff.cycle_number.desc())).scalars().first()
+    if signoff is None:
+        raise HTTPException(status_code=409, detail="no collection note — this chassis has not passed QC")
+    return render_collection_note(
+        vin=rec.vin, customer_name=rec.customer_name, make=rec.make, model=rec.model,
+        description=rec.description, inspection_date=signoff.created_at, inspector_name=signoff.created_by)

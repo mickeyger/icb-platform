@@ -64,3 +64,13 @@ def qc_signoff(chassis_id: int, payload: Optional[SignoffIn] = None,
     awaiting_qa with an immutable fail signoff. Returns the new status + whether a collection PDF is
     available (pass)."""
     return _qc.signoff(db, chassis_id, notes=(payload.notes if payload else None), user=user)
+
+
+@router.get("/collection-note/{chassis_id}")
+def qc_collection_note(chassis_id: int, db: Session = Depends(get_db), user: User = Depends(require_user)):
+    """The customer collection note PDF for a QC-passed chassis (regenerated on demand from the
+    immutable signoff; §0.8 customer-facing — no defect detail). Any authenticated user may fetch it."""
+    from fastapi.responses import Response as RawResponse
+    data = _qc.collection_note_pdf(db, chassis_id)
+    return RawResponse(content=data, media_type="application/pdf",
+                       headers={"Content-Disposition": f'inline; filename="collection-note-{chassis_id}.pdf"'})

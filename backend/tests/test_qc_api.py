@@ -231,6 +231,30 @@ def test_defect_categories_admin_only(app_mod):
     assert r.status_code in (401, 403)
 
 
+# ── customer collection PDF (§3.4) ────────────────────────────────────────────
+
+def test_collection_note_pdf_after_pass(app_mod, inspector, chassis):
+    try:
+        c = _client(app_mod, inspector)
+        for cat in c.get(f"/api/qc/inspection/{chassis}").json()["categories"]:
+            c.post(f"/api/qc/inspection/{chassis}/category/{cat['category_id']}", json={"verdict": "pass"})
+        c.post(f"/api/qc/signoff/{chassis}", json={})
+        r = c.get(f"/api/qc/collection-note/{chassis}")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/pdf")
+        assert r.content[:5] == b"%PDF-"            # reportlab really rendered a PDF
+    finally:
+        _drop_override(app_mod)
+
+
+def test_collection_note_409_before_pass(app_mod, inspector, chassis):
+    try:
+        r = _client(app_mod, inspector).get(f"/api/qc/collection-note/{chassis}")  # fresh, no signoff
+        assert r.status_code == 409
+    finally:
+        _drop_override(app_mod)
+
+
 # ── perf smoke (§0.9 / §1.20) ─────────────────────────────────────────────────
 
 def test_awaiting_inbox_under_200ms_p95(app_mod, inspector, chassis):
