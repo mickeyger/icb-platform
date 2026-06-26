@@ -333,6 +333,7 @@ def chassis_prefill(db: Session, job_id: int) -> dict:
     dealer_id = chassis.dealer_id if chassis else None
     dealer_name = (db.get(Customer, dealer_id).name if dealer_id and db.get(Customer, dealer_id) else None)
     return {"customer_name": customer_name, "customer_id": customer_id, "chassis_type": chassis_type,
+            "chassis_id": (chassis.id if chassis else None),   # WO v4.36.5 §3.3 — the ack's "Edit on Chassis page" deep link
             "dealer_id": dealer_id, "dealer_name": dealer_name, "vin_number": vin_number,
             "vin_source": vin_source,
             # WO v4.36b — chassis-field unification: surface the rest of the linked chassis fields so the

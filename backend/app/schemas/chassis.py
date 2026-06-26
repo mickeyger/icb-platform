@@ -75,6 +75,9 @@ class ChassisRecordDetail(ChassisRecordOut):
     merged_into_id: Optional[int] = None
     merged_into_vin: Optional[str] = None
     chassis_eta: Optional[date] = None              # WO v4.36a §3.5e — the LINKED job's ETA (get_detail fills it)
+    # WO v4.36.5 §3.3 — optimistic-lock version (the etag): the Edit modal echoes this back on PATCH; a stale
+    # value → 409. server_default="0" on the column, so existing rows read 0.
+    version: int = 0
     events: List[ChassisEventOut] = []
 
 

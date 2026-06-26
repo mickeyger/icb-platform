@@ -85,3 +85,12 @@ def test_vin_capture_rejects_duplicate(api):
 def test_vin_capture_empty_422(api):
     rid = _expected_chassis("Fuso FA")
     assert api.post(f"/api/chassis-records/{rid}/vin", json={"vin": "  "}).status_code == 422
+
+
+def test_chassis_detail_serializes_version_for_etag(api):
+    """WO v4.36.5 §3.3 — the detail GET exposes `version` so the Edit modal can echo it back on PATCH
+    (the optimistic-lock etag). A fresh row reads 0 (the column's server_default). The stale-version → 409
+    behaviour itself is covered at the service level in test_chassis_sole_editor_gate.py."""
+    rid = _expected_chassis("Tata Prima")
+    body = api.get(f"/api/chassis-records/{rid}").json()
+    assert "version" in body and body["version"] == 0

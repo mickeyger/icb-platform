@@ -7,6 +7,7 @@ export interface UnlinkedJob {
 }
 
 export interface ChassisPrefill {
+  chassis_id?: number | null   // WO v4.36.5 §3.3 — the linked chassis id (for the ack's "Edit on Chassis page" link)
   customer_name: string | null; customer_id: number | null; chassis_type: string | null
   dealer_id: number | null; dealer_name: string | null; vin_number: string | null; vin_source: string | null
   chassis_eta: string | null   // §3.5e — the linked job's Delivery ETA (YYYY-MM-DD)

@@ -80,6 +80,7 @@ export interface ChassisRecordDetail extends ChassisRecord {
   merged_into_id?: number | null
   merged_into_vin?: string | null
   chassis_eta?: string | null   // §3.5e — the linked job's Delivery ETA (YYYY-MM-DD)
+  version?: number              // WO v4.36.5 §3.3 — optimistic-lock etag; echoed back on PATCH (stale → 409)
   events: ChassisEvent[]
 }
 

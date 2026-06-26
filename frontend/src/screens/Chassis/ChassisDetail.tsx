@@ -335,6 +335,7 @@ function EditChassisModal({ rec, onClose, onSaved }: {
         tail_lift_code: form.tail_lift_code.trim() || null,
         description: form.description.trim() || null,
         notes: form.notes.trim() || null,
+        version: rec.version,                             // WO v4.36.5 §3.3 — optimistic-lock etag echo (stale → 409 "reload")
       }
       // §3.5c — never send job_number/production_job_id for a LINKED chassis (FK is read-only — swap = Merge).
       // For an UNLINKED chassis, sending production_job_id atomically links it (backend stamps job_number).
