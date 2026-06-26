@@ -14,10 +14,10 @@ import { GripVertical, Plus } from 'lucide-react'
 import { Card } from '../../components/ui/primitives'
 import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
-import { ApiError, apiGet, handleApiError } from '../../lib/api'
+import { ApiError, handleApiError } from '../../lib/api'
 import { useRefetchOnFocus } from '../../lib/useRefetchOnFocus'
 import { useBayModel } from './useBayModel'
-import type { AwaitingQaRow, Bay, BayState, ChassisRecord } from '../Chassis/types'
+import type { Bay, BayState, ChassisRecord } from '../Chassis/types'
 import { FlagBadges } from '../../components/Flag/FlagBadge'   // WO v4.36b §3.2 — bay-tile flags
 import { AgeingPill } from '../../components/Flag/AgeingPill'   // WO v4.36b §3.7 — colour-coded day-counter
 import { useFlaggedBays } from '../../hooks/useFlags'
@@ -92,20 +92,6 @@ export function BayModelLanes() {
   const canAssign = isAdmin || hasPermission('chassis.assembly_assign')
   const { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
           markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking } = useBayModel(toast.push)
-
-  // WO v4.36c §3.5 — the Dispatch zone fetches INDEPENDENTLY of the core floor (useBayModel), so a
-  // dispatch-feed hiccup can never blank the parking/assembly/QA zones (CAUTION b — max isolation; the
-  // earlier allSettled-in-the-shared-refresh slowed the focus-refetched floor and destabilised the
-  // week-grid layout). Mount-only (no focus refetch → no shared-scroll reflow churn); refreshes on nav.
-  const [dispatched, setDispatched] = useState<AwaitingQaRow[]>([])
-  const [dispatchError, setDispatchError] = useState(false)
-  useEffect(() => {
-    let live = true
-    apiGet<AwaitingQaRow[]>('/api/qc/dispatched')
-      .then((rows) => { if (live) { setDispatched(rows); setDispatchError(false) } })
-      .catch(() => { if (live) { setDispatched([]); setDispatchError(true) } })   // isolated — never touches the floor
-    return () => { live = false }
-  }, [])
   const [drag, setDrag] = useState<ChassisRecord | null>(null)
   const [rejectBay, setRejectBay] = useState<number | null>(null)
   const [busyBay, setBusyBay] = useState<number | null>(null)
@@ -700,43 +686,6 @@ export function BayModelLanes() {
             {canAssign
               ? 'Drag a completed (body-attached) chassis here to free the bay.'
               : 'No chassis awaiting QA.'}
-          </div>
-        )}
-      </Card>
-
-      {/* WO v4.36c §3.5 — DISPATCH zone: full-width, below Awaiting QA (workflow PARKING → ASSEMBLY →
-          AWAITING QA → DISPATCH). QC-passed chassis released for customer collection. Read-only in MVP
-          (no drag-back — the rework loop is Phase 2+). Mirrors the Awaiting-QA zone's visual language. */}
-      <Card data-testid="dispatch-zone" className="col-span-2">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold uppercase tracking-wide text-muted">Dispatch</span>
-          <span className="text-[11px] text-muted">{dispatched.length} chassis</span>
-        </div>
-        {dispatchError ? (
-          <div data-testid="dispatch-zone-error"
-            className="rounded-md border border-dashed border-status-amber/50 bg-status-amber/5 p-4 text-center text-xs text-status-amber">
-            Couldn’t load the dispatch list — the other zones are unaffected; it retries on the next refresh.
-          </div>
-        ) : dispatched.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {dispatched.map((c) => (
-              <div key={c.chassis_id} data-testid="dispatch-chassis" data-id={c.chassis_id}
-                className="w-[184px] rounded-md border border-line border-l-4 border-l-status-green bg-status-green/5 p-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs font-semibold">{c.vin || '—'}</span>
-                  <span className="rounded px-1 text-[10px] font-medium bg-status-green/15 text-status-green">DISPATCH</span>
-                </div>
-                <div className="truncate text-xs text-body">{c.customer_name || '—'}</div>
-                <div className="truncate text-[11px] text-muted">
-                  {[c.make, c.model].filter(Boolean).join(' ') || '—'}
-                  {c.job_number ? ` · ${c.job_number}` : ''}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-md border border-dashed border-line p-4 text-center text-xs text-muted">
-            No chassis dispatched yet.
           </div>
         )}
       </Card>
