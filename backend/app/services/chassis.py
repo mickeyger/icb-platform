@@ -334,6 +334,19 @@ _AUDITED_FIELDS = {
 }
 
 
+def _audit_chassis(db: Session, chassis_id: int, field_name: str, old_value, new_value, source: str,
+                   who: str, actor_id: "int | None" = None) -> None:
+    """Append ONE chassis_records_audit row. Used by _apply_chassis_fields (attribute edits) AND by the
+    structural ops merge/soft_delete/restore (WO v4.36.5 §3.2) so the trail also answers 'who merged /
+    deleted / restored this?' — the BA is the consumer during parallel-run troubleshooting."""
+    db.add(ChassisRecordAudit(
+        chassis_id=chassis_id, field_name=field_name,
+        old_value=(None if old_value is None else str(old_value)[:500]),
+        new_value=(None if new_value is None else str(new_value)[:500]),
+        source=source, edited_by_user_id=actor_id, edited_by_name=(who or "")[:64] or None,
+    ))
+
+
 def _apply_chassis_fields(db: Session, rec, data: dict, who: str, source: str,
                           actor_id: "int | None" = None) -> list:
     """WO v4.36.5 §3.1 — the SINGLE attribute-write point for chassis_records. Applies each CHANGED field
@@ -349,13 +362,7 @@ def _apply_chassis_fields(db: Session, rec, data: dict, who: str, source: str,
         setattr(rec, field, new)
         changed.append(field)
         if field in _AUDITED_FIELDS:
-            db.add(ChassisRecordAudit(
-                chassis_id=rec.id, field_name=field,
-                old_value=(None if old is None else str(old)[:500]),
-                new_value=(None if new is None else str(new)[:500]),
-                source=source, edited_by_user_id=actor_id,
-                edited_by_name=(who or "")[:64] or None,
-            ))
+            _audit_chassis(db, rec.id, field, old, new, source, who, actor_id)
     return changed
 
 
@@ -478,6 +485,9 @@ def soft_delete_chassis(db: Session, chassis_id: int, who: str, reason: "str | N
     rec.updated_by = who
     if reason and reason.strip():
         rec.notes = ((rec.notes + "\n") if rec.notes else "") + f"[soft-deleted §3.6: {reason.strip()}]"
+    # WO v4.36.5 §3.2 — trail the structural delete (source='soft_delete') so "who deleted this?" is answerable.
+    _audit_chassis(db, chassis_id, "deleted_at", None, (reason.strip() if reason and reason.strip() else "soft-deleted"),
+                   "soft_delete", who)
     db.commit()
     db.refresh(rec)
     return rec

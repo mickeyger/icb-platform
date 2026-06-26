@@ -196,6 +196,9 @@ def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
         loser.merged_into_id = winner_id
         loser.updated_by = who
         winner.updated_by = who
+        # WO v4.36.5 §3.2 — trail the merge (source='merge') so "who merged this into what?" is answerable.
+        from app.services.chassis import _audit_chassis     # lazy — chassis_merge is imported by chassis-side flows
+        _audit_chassis(db, loser_id, "merged_into_id", None, winner_id, "merge", who)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -222,6 +225,9 @@ def restore_chassis(db: Session, chassis_id: int, who: str) -> ChassisRecord:
     rec.deleted_at = None
     rec.merged_into_id = None
     rec.updated_by = who
+    # WO v4.36.5 §3.2 — trail the restore (source='restore').
+    from app.services.chassis import _audit_chassis     # lazy
+    _audit_chassis(db, chassis_id, "deleted_at", "(deleted)", None, "restore", who)
     db.commit()
     db.refresh(rec)
     return rec

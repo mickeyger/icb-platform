@@ -98,3 +98,34 @@ def test_no_op_edit_does_not_bump_version_or_audit():
         rec = update_chassis(db, rid, ChassisRecordUpdate(make="Fuso FA"), who=f"{_MARK}_n", actor_role="admin")
         assert rec.version == 0
         assert db.query(ChassisRecordAudit).filter_by(chassis_id=rid).count() == 0
+
+
+def test_soft_delete_and_restore_are_audited():
+    """WO §3.2 — structural ops are trailed too (source='soft_delete'/'restore'): 'who deleted/restored this?'."""
+    from app.database import SessionLocal
+    from app.services.chassis import soft_delete_chassis
+    from app.services.chassis_merge import restore_chassis
+    from app.models.mes import ChassisRecordAudit
+    rid = _make_chassis(make="Tata LPT")
+    with SessionLocal() as db:
+        soft_delete_chassis(db, rid, who=f"{_MARK}_del", reason="junk dupe")
+        rows = db.query(ChassisRecordAudit).filter_by(chassis_id=rid, source="soft_delete").all()
+        assert len(rows) == 1
+        assert rows[0].new_value == "junk dupe" and rows[0].edited_by_name == f"{_MARK}_del"
+    with SessionLocal() as db:
+        restore_chassis(db, rid, who=f"{_MARK}_res")
+        assert db.query(ChassisRecordAudit).filter_by(chassis_id=rid, source="restore").count() == 1
+
+
+def test_merge_is_audited():
+    """WO §3.2 — a merge trails source='merge' on the loser, pointing at the winner."""
+    from app.database import SessionLocal
+    from app.services.chassis_merge import merge_chassis
+    from app.models.mes import ChassisRecordAudit
+    loser = _make_chassis(make="Loser FTR")
+    winner = _make_chassis(make="Winner FTR")
+    with SessionLocal() as db:
+        merge_chassis(db, loser_id=loser, winner_id=winner, who=f"{_MARK}_mrg")
+        rows = db.query(ChassisRecordAudit).filter_by(chassis_id=loser, source="merge").all()
+        assert len(rows) == 1
+        assert rows[0].field_name == "merged_into_id" and rows[0].new_value == str(winner)
