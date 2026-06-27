@@ -195,14 +195,32 @@ def test_double_signoff_blocked(app_mod, inspector, chassis):
         _drop_override(app_mod)
 
 
-# ── role gate ────────────────────────────────────────────────────────────────
+# ── role gate — the 0028 grant matrix, via dependency_overrides (§3.6) ─────────
 
-def test_non_inspector_role_forbidden(app_mod, chassis):
+_ROLE_IDS = {"qc_inspector": 990001, "planner": 990002, "production": 990003, "sales": 990004}
+
+
+@pytest.mark.parametrize("role,can_inspect,can_signoff", [
+    ("qc_inspector", True, True),
+    ("planner", True, False),
+    ("production", True, False),
+    ("sales", False, False),
+])
+def test_role_permission_matrix(app_mod, chassis, role, can_inspect, can_signoff):
+    """0028 grants: qc.inspect → qc_inspector/planner/production; qc.signoff → qc_inspector only. The gate
+    (require_permission) runs BEFORE the service, so a sign-off denial is a 403 regardless of completeness;
+    where the gate passes, an empty sign-off then 422s on completeness (≠ 403). user_can() resolves the
+    transient user's ROLE against the real 0028 RolePermission grants — so this exercises the actual chain."""
     from app.database import User
-    sales = User(id=999999, username="zzqc_sales", role="sales")  # no qc.* grant
+    user = User(id=_ROLE_IDS[role], username=f"zzqc_{role}", role=role)
     try:
-        r = _client(app_mod, sales).get("/api/qc/awaiting")
-        assert r.status_code == 403
+        c = _client(app_mod, user)
+        assert (c.get("/api/qc/awaiting").status_code == 200) is can_inspect
+        sign = c.post(f"/api/qc/signoff/{chassis}", json={})
+        if can_signoff:
+            assert sign.status_code != 403, sign.status_code      # gate passes → 422 incomplete (not 403)
+        else:
+            assert sign.status_code == 403, sign.status_code      # gate denies before the service runs
     finally:
         _drop_override(app_mod)
 
@@ -269,5 +287,22 @@ def test_awaiting_inbox_under_200ms_p95(app_mod, inspector, chassis):
         times.sort()
         p95 = times[int(len(times) * 0.95) - 1]
         assert p95 <= 200, f"/api/qc/awaiting p95={p95:.1f}ms exceeds 200ms"
+    finally:
+        _drop_override(app_mod)
+
+
+def test_dispatched_feed_under_200ms_p95(app_mod, inspector, chassis):
+    """§3.5 dispatch feed — same p95 budget (§0.9). require_user gate, so the inspector fixture passes."""
+    try:
+        c = _client(app_mod, inspector)
+        c.get("/api/qc/dispatched")                     # warm
+        times = []
+        for _ in range(20):
+            t = time.perf_counter()
+            assert c.get("/api/qc/dispatched").status_code == 200
+            times.append((time.perf_counter() - t) * 1000)
+        times.sort()
+        p95 = times[int(len(times) * 0.95) - 1]
+        assert p95 <= 200, f"/api/qc/dispatched p95={p95:.1f}ms exceeds 200ms"
     finally:
         _drop_override(app_mod)
