@@ -1,7 +1,7 @@
 """WO v4.36.5 §3.1 — chassis_records_audit + chassis_records.version (Migration 0029).
 
 Revision ID: 0029
-Revises: 0027  (PLACEHOLDER — see note)
+Revises: 0028  (re-pointed from the 0027 placeholder when v4.36c landed — ship-order swap)
 Create Date: 2026-06-25
 
 ⚠ down_revision is a PLACEHOLDER. Per the 2026-06-25 ship-order swap this chains off CA1's v4.36c
@@ -23,8 +23,8 @@ from alembic import op
 from sqlalchemy import inspect as sa_inspect
 
 revision: str = "0029"
-# ⚠ PLACEHOLDER — rebase to CA1's v4.36c "0028" when it lands on main (ship-order swap, 2026-06-25).
-down_revision: Union[str, Sequence[str], None] = "0027"
+# Re-pointed 0027 -> 0028 by CA1 when v4.36c §3.1 landed (the ship-order swap; was a 0027 placeholder).
+down_revision: Union[str, Sequence[str], None] = "0028"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

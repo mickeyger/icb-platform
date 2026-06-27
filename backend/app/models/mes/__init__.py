@@ -1107,6 +1107,75 @@ class FeedbackSubmission(Base):
     status_history = Column(JSONB)             # WO v4.38 W2 — append-only audit: [{at,by,from,to,note}]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 35. QC inspection + dispatch (WO v4.36c) — Kenny's QC + Dispatch MVP.
+#     defect_categories — admin-editable inspection taxonomy (5 seeded defaults; §0.5).
+#     qc_inspections    — one row per category per QC-inspection cycle (UPSERT-keyed).
+#     qc_signoffs       — one IMMUTABLE row per QC cycle; pass -> chassis 'dispatched'.
+#     The QC cycle_number is a QC-ATTEMPT counter (increments on re-inspection after a
+#     FAIL) — NOT the chassis lifecycle cycle (which tracks VCL/DCL visits and does not
+#     change on a QC fail). Derived = 1 + max(qc_signoffs.cycle_number for the chassis).
+#     inspector_user_id is cross-schema -> icb_costings.users.id (FK SET NULL in 0028,
+#     mirroring 0027's feedback user-FK — a signoff outlives a user delete).
+# ─────────────────────────────────────────────────────────────────────────────
+class DefectCategory(Base):
+    __tablename__ = "defect_categories"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_defect_categories_name"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    name = Column(String(80), nullable=False)
+    sort_order = Column(Integer, nullable=False, default=100, server_default="100")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    created_by = Column(String(128))
+    updated_by = Column(String(128))
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+
+
+class QcInspection(Base):
+    __tablename__ = "qc_inspections"
+    __table_args__ = (
+        # one row per category per QC cycle — the UPSERT idempotency key (§3.0 §3a/R2)
+        UniqueConstraint("chassis_record_id", "cycle_number", "category_id",
+                         name="uq_qc_inspections_chassis_cycle_category"),
+        Index("ix_qc_inspections_chassis_cycle", "chassis_record_id", "cycle_number"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    chassis_record_id = Column(
+        Integer, ForeignKey("icb_mes.chassis_records.id", ondelete="CASCADE"), nullable=False)
+    cycle_number = Column(Integer, nullable=False, default=1, server_default="1")
+    category_id = Column(
+        Integer, ForeignKey("icb_mes.defect_categories.id", ondelete="RESTRICT"), nullable=False)
+    category_name = Column(String(80))   # denormalized at record time — preserves audit if renamed (§3.0 §3c)
+    inspector_user_id = Column(Integer)  # cross-schema -> icb_costings.users.id (FK SET NULL in 0028)
+    verdict = Column(String(8), nullable=False)          # 'pass' | 'fail'
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    created_by = Column(String(128))
+
+
+class QcSignoff(Base):
+    __tablename__ = "qc_signoffs"
+    __table_args__ = (
+        # one immutable signoff per QC cycle — the double-signoff idempotency backstop (§3.0 S1/R1)
+        UniqueConstraint("chassis_record_id", "cycle_number", name="uq_qc_signoffs_chassis_cycle"),
+        Index("ix_qc_signoffs_chassis", "chassis_record_id"),
+        {"schema": "icb_mes"},
+    )
+    id = Column(Integer, primary_key=True)
+    chassis_record_id = Column(
+        Integer, ForeignKey("icb_mes.chassis_records.id", ondelete="CASCADE"), nullable=False)
+    cycle_number = Column(Integer, nullable=False, default=1, server_default="1")
+    inspector_user_id = Column(Integer)  # cross-schema -> icb_costings.users.id (FK SET NULL in 0028)
+    overall_verdict = Column(String(8), nullable=False)  # 'pass' | 'fail'
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    created_by = Column(String(128))
+
+
 __all__ = [
     "ProductionJob", "WorkOrder", "Task", "SignOff", "Photo", "ReworkTicket",
     "PlanningSlot", "PlanningAck", "ProductionJobAudit", "ProductionJobBayEvent",
@@ -1119,5 +1188,6 @@ __all__ = [
     "ParkingBay", "AssemblyBay",
     "PrejobTemplate", "PrejobCard", "FridgeUnit", "ChassisModel",
     "FeedbackSubmission",
+    "DefectCategory", "QcInspection", "QcSignoff",
     "CROSS_SCHEMA_FKS",
 ]

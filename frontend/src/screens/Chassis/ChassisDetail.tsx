@@ -3,7 +3,7 @@
  * permission-gated (admin sees both); the backend enforces chassis.vcl / chassis.dcl regardless. */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X, RotateCcw, AlertTriangle, History, ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X, RotateCcw, AlertTriangle, History, ChevronDown, ChevronRight, FileDown } from 'lucide-react'
 
 import { apiGet, apiPatch, apiPost, ApiError, handleApiError } from '../../lib/api'
 import { dmy, hhmm } from '../../lib/format'
@@ -278,6 +278,15 @@ export function ChassisDetail() {
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {/* §3.6 STEP 7 — no mutating actions on a tombstone (restore via the banner first) */}
+          {/* WO v4.36c §3.4 — customer collection note for a QC-passed (dispatched) chassis. Opens the
+              reportlab PDF inline (regenerated on demand from the signoff); §0.8 customer-facing. */}
+          {rec.status === 'dispatched' && (
+            <a data-testid="chassis-collection-note" href={`/api/qc/collection-note/${rec.id}`}
+               target="_blank" rel="noopener noreferrer"
+               className="flex items-center gap-1.5 rounded-md border border-status-green bg-status-green/10 px-4 py-2.5 text-sm font-semibold text-status-green hover:bg-status-green/20">
+              <FileDown size={16} /> Download collection note
+            </a>
+          )}
           {!rec.deleted_at && canEdit && (
             <button data-testid="chassis-edit" onClick={() => setEditing(true)}
                     className="flex items-center gap-1.5 rounded-md border border-line px-4 py-2.5 text-sm font-semibold text-body hover:bg-surface-alt">

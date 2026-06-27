@@ -72,6 +72,7 @@ from .routers.admin import (  # WO v4.26 — admin CRUD for the 4 master-data ta
 )
 from .routers.admin import prejob_templates as _r_admin_prejob_templates  # WO v4.33 §3.3
 from .routers.admin import fridge_units as _r_admin_fridge_units  # WO v4.33 — fridge DDM
+from .routers.admin import defect_categories as _r_admin_defect_categories  # WO v4.36c — QC taxonomy DDM
 from .routers.admin import chassis_admin as _r_admin_chassis  # WO v4.36a §3.6 — Merge / Find Orphan
 from .routers import auth as _r_auth, trailers as _r_trailers
 from .routers import skin_taping as _r_skin_taping, calculator as _r_calculator
@@ -103,6 +104,7 @@ from .routers import suppliers as _r_suppliers
 from .routers import session as _r_session
 from .routers import planning as _r_planning
 from .routers import visual_integrity as _r_visual_integrity  # WO v4.36b — flag derivation endpoints
+from .routers import qc as _r_qc  # WO v4.36c — Kenny QC inspection + dispatch
 
 # ─── Logging setup ───────────────────────────────────────────────────────────
 _log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
@@ -206,6 +208,8 @@ app.include_router(_r_admin_spec_options.search_router)
 app.include_router(_r_admin_prejob_templates.router)  # WO v4.33 §3.3 — template review/approve
 app.include_router(_r_admin_fridge_units.router)  # WO v4.33 — fridge DDM CRUD
 app.include_router(_r_admin_chassis.router)  # WO v4.36a §3.6 — admin Merge / Find Orphan chassis
+app.include_router(_r_admin_defect_categories.router)  # WO v4.36c — QC defect-categories DDM
+app.include_router(_r_qc.router)  # WO v4.36c — /api/qc/* inspection + dispatch
 
 # ─── Diagnostics: crash capture + request logging ───────────────────────────
 # Installed early so they wrap everything below. /debug/health is registered
