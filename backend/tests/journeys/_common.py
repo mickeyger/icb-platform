@@ -221,7 +221,8 @@ def admin_session(page: "Page") -> "Page":
 # optional `username` (demo-mode only, origin-guarded) so a single server boot can mint any role per
 # browser context — the prerequisite for per-role coverage (the v4.29 prevention shift).
 ROLE_USERS = {"sales": "journey_sales", "production": "journey_production", "planner": "journey_planner",
-              "workshop": "journey_workshop"}   # WO v4.31 §3.5 — bay-model/job-card per-role coverage
+              "workshop": "journey_workshop",   # WO v4.31 §3.5 — bay-model/job-card per-role coverage
+              "qc_inspector": "journey_qc_inspector"}   # WO v4.36c §3.6 — Kenny QC role (0028 grants)
 
 
 @pytest.fixture(scope="session")
