@@ -61,6 +61,9 @@ def _record_all(page: "Page", *, fail_first: bool = False) -> None:
     """Click a verdict on every category, gating each on its POST so the server holds the full set before
     sign-off (the form fires verdict POSTs fire-and-forget; sign-off reads server state, so an un-awaited
     click would race into a 422-incomplete)."""
+    # qc-form is ALSO the loading skeleton, so wait for a real category button (past the inspection fetch)
+    # before counting — otherwise we count 0 against the skeleton.
+    page.wait_for_selector('[data-testid^="qc-pass-"]', timeout=T)
     passes = page.locator('[data-testid^="qc-pass-"]')
     fails = page.locator('[data-testid^="qc-fail-"]')
     n = passes.count()
