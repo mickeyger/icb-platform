@@ -93,7 +93,8 @@ def _qc_overlay(db) -> dict:
                 chassis_record_id=ch.id, cycle_number=1, event_type=etype,
                 assembly_bay_id=(bay1 if etype == "assembly_assigned" else None),
                 event_date=_dt(days).date(), created_by="demo-seed", created_at=_dt(days)))
-        out["awaiting_qa_added"] += 1
+        db.flush()   # SessionLocal is autoflush=False — flush the job+events so Inv2's derive_calc_status
+        out["awaiting_qa_added"] += 1   # (a SELECT for the calc's job) sees them before the health gate
 
     # ── 3. Full PASS QC history on the EXISTING dispatched _vin(700) → collection-note PDF works. ──
     d = db.execute(select(ChassisRecord).where(ChassisRecord.vin == _vin(700))).scalars().first()
@@ -110,6 +111,7 @@ def _qc_overlay(db) -> dict:
                          created_by=_KENNY, created_at=_dt(1)))
         out["qc_signoffs"] += 1
 
+    db.flush()   # autoflush=False — flush the qc rows so the distribution counts in main() see them
     return out
 
 
