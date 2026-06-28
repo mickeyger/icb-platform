@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   CalendarRange,
   Tablet,
@@ -104,22 +104,27 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
         <span className="hidden sm:inline">ICB&nbsp;MES</span>
       </div>
       <nav className="flex flex-1 items-center gap-0.5 overflow-x-auto">
-        {visibleLinks.map(({ to, label, icon: Icon, k }) => (
-          <Tooltip key={to} k={k}>
-            <NavLink
-              to={to}
-              data-testid={`nav-${k.replace('nav.', '')}`}
-              className={({ isActive }) =>
-                `flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
-                  isActive ? 'bg-white/20' : 'hover:bg-white/10'
-                }`
-              }
-            >
-              <Icon size={16} />
-              {label}
-            </NavLink>
-          </Tooltip>
-        ))}
+        {visibleLinks.map((entry) =>
+          // Planning gets a dropdown (Board + Cockpit beta); every other entry is unchanged.
+          entry.to === '/planning' ? (
+            <PlanningNavDropdown key={entry.to} entry={entry} dark={dark} />
+          ) : (
+            <Tooltip key={entry.to} k={entry.k}>
+              <NavLink
+                to={entry.to}
+                data-testid={`nav-${entry.k.replace('nav.', '')}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
+                    isActive ? 'bg-white/20' : 'hover:bg-white/10'
+                  }`
+                }
+              >
+                <entry.icon size={16} />
+                {entry.label}
+              </NavLink>
+            </Tooltip>
+          ),
+        )}
       </nav>
       <div className="flex items-center gap-2 py-2 pl-4">
         {/* WO v4.36b §3.2 — aggregate "N attention items" badge → Health Check dashboard (§3.3). Hidden
@@ -162,6 +167,121 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
         />
       </div>
     </header>
+  )
+}
+
+// Planning nav dropdown — keeps the existing "Planning" entry but reveals Board (the current board)
+// + Cockpit (the additive Concept-6 layout) on click. Mirrors the UserSwitcher open/outside-click
+// pattern. The trigger highlights for any /planning* route so the section reads as active on both.
+function PlanningNavDropdown({ entry, dark }: { entry: NavEntry; dark: boolean }) {
+  const [open, setOpen] = useState(false)
+  // The parent <nav> uses overflow-x-auto, which clips an absolutely-positioned menu to the nav's
+  // height (the menu would show only a scrollbar). Render the menu position:fixed, anchored to the
+  // trigger's rect, so it escapes the overflow container — same approach as the bay context menu.
+  const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const { pathname } = useLocation()
+  const sectionActive = pathname === '/planning' || pathname.startsWith('/planning/')
+  const MENU_W = 240 // w-60
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setCoords({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - MENU_W - 8)) })
+  }
+  const toggle = () => {
+    if (!open) place()
+    setOpen((o) => !o)
+  }
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onReflow = () => place()
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('resize', onReflow)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('resize', onReflow)
+    }
+  }, [open])
+  const Icon = entry.icon
+  return (
+    <div ref={ref} className="relative">
+      <Tooltip k={entry.k}>
+        <button
+          ref={btnRef}
+          onClick={toggle}
+          data-testid={`nav-${entry.k.replace('nav.', '')}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
+            sectionActive ? 'bg-white/20' : 'hover:bg-white/10'
+          }`}
+        >
+          <Icon size={16} />
+          {entry.label}
+          <ChevronDown size={14} className="opacity-70" />
+        </button>
+      </Tooltip>
+      {open && (
+        <div
+          role="menu"
+          style={{ position: 'fixed', top: coords.top, left: coords.left }}
+          className={`z-50 w-60 overflow-hidden rounded-md border shadow-2xl ${
+            dark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-line bg-white text-body'
+          }`}
+        >
+          <PlanningMenuItem to="/planning" exact title="Board" sub="The current planning board" dark={dark} onPick={() => setOpen(false)} />
+          <PlanningMenuItem to="/planning/cockpit" title="Cockpit" badge="beta" sub="New timeline-first layout" dark={dark} onPick={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PlanningMenuItem({
+  to,
+  exact,
+  title,
+  sub,
+  badge,
+  dark,
+  onPick,
+}: {
+  to: string
+  exact?: boolean
+  title: string
+  sub: string
+  badge?: string
+  dark: boolean
+  onPick: () => void
+}) {
+  return (
+    <NavLink
+      to={to}
+      end={exact}
+      onClick={onPick}
+      className={({ isActive }) =>
+        `flex w-full items-start gap-1 px-3 py-2 text-left text-sm ${
+          isActive
+            ? dark
+              ? 'bg-slate-800'
+              : 'bg-primary-light text-primary'
+            : dark
+              ? 'hover:bg-slate-800'
+              : 'hover:bg-surface-alt'
+        }`
+      }
+    >
+      <div className="flex-1">
+        <div className="flex items-center gap-1.5 font-semibold">
+          {title}
+          {badge && <span className="rounded bg-primary/15 px-1 py-0.5 text-[9px] font-bold uppercase text-primary">{badge}</span>}
+        </div>
+        <div className={`text-xs ${dark ? 'text-slate-400' : 'text-muted'}`}>{sub}</div>
+      </div>
+    </NavLink>
   )
 }
 
