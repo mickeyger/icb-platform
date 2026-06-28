@@ -19,10 +19,20 @@ const DEFAULT_DIMS: Dimensions = {
   num_axles: 3, num_doors: 2,
 }
 
+// WO v4.37 — full 2.5%-step ratio list, byte-parity with the legacy calculator
+// (calculator.html:107-124). Restored from a 10%-step regression: an estimator
+// must be able to reproduce a 47.5% quote (parity-of-output). Value = the divisor
+// (selling = cost ÷ ratio); the backend accepts any ratio_value ∈ (0,1].
 const RATIO_OPTIONS: { label: string; value: string }[] = [
   { label: 'No ratio', value: '' },
-  { label: '30%', value: '0.3' }, { label: '40%', value: '0.4' },
-  { label: '50%', value: '0.5' }, { label: '60%', value: '0.6' },
+  { label: '30%', value: '0.3' }, { label: '32.5%', value: '0.325' },
+  { label: '35%', value: '0.35' }, { label: '37.5%', value: '0.375' },
+  { label: '40%', value: '0.4' }, { label: '42.5%', value: '0.425' },
+  { label: '45%', value: '0.45' }, { label: '47.5%', value: '0.475' },
+  { label: '50%', value: '0.5' }, { label: '52.5%', value: '0.525' },
+  { label: '55%', value: '0.55' }, { label: '57.5%', value: '0.575' },
+  { label: '60%', value: '0.6' }, { label: '62.5%', value: '0.625' },
+  { label: '65%', value: '0.65' }, { label: '67.5%', value: '0.675' },
   { label: '70%', value: '0.7' },
 ]
 
@@ -165,7 +175,9 @@ export function CostCalculator() {
       optional_sections_enabled: [...optionalEnabled],
       chassis: { enabled: false },
       ratio_value: ratio ? Number(ratio) : null,
-      ratio_label: ratio ? `${Math.round(Number(ratio) * 100)}%` : null,
+      // Use the option's exact label (e.g. "47.5%") — Math.round would mislabel
+      // 2.5%-step ratios (0.475 → "48%"). Backend echoes this ratio_label.
+      ratio_label: ratio ? (RATIO_OPTIONS.find((o) => o.value === ratio)?.label ?? null) : null,
       discount_kind: discKind || null,
       discount_input: discKind ? discInput : null,
     }
