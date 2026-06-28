@@ -855,10 +855,12 @@ async def export_pdf(record_id: int, request: Request, db: Session = Depends(get
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
+    except Exception:
+        # WO v4.36d §3.1 — log the full exception server-side; return a GENERIC client message. The prior
+        # detail=f"...: {exc}" leaked internal error text to the caller (Subagent B finding). 500 preserved.
+        import logging
+        logging.getLogger(__name__).exception("export_pdf failed (record %s)", record_id)
+        raise HTTPException(status_code=500, detail="PDF generation failed")
 
 
 @router.get("/results/{record_id}/report")

@@ -180,7 +180,7 @@ function PlanningNavDropdown({ entry, dark }: { entry: NavEntry; dark: boolean }
   // trigger's rect, so it escapes the overflow container — same approach as the bay context menu.
   const [coords, setCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const ref = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
+  const btnRef = useRef<HTMLDivElement>(null)   // anchors the menu to the whole split-button slot
   const { pathname } = useLocation()
   const sectionActive = pathname === '/planning' || pathname.startsWith('/planning/')
   const MENU_W = 240 // w-60
@@ -208,22 +208,38 @@ function PlanningNavDropdown({ entry, dark }: { entry: NavEntry; dark: boolean }
   const Icon = entry.icon
   return (
     <div ref={ref} className="relative">
-      <Tooltip k={entry.k}>
+      {/* WO v4.36d §3.1 — SPLIT-BUTTON: the LABEL half navigates to /planning (preserves the existing
+          nav-planning journey clicks + single-click-to-board); the CHEVRON half opens the Board/Cockpit
+          menu. Hover/active lift both halves coherently via the shared wrapper (which also anchors the
+          fixed-position menu). */}
+      <div
+        ref={btnRef}
+        className={`flex items-center rounded-md transition ${
+          sectionActive ? 'bg-white/20' : 'hover:bg-white/10'
+        }`}
+      >
+        <Tooltip k={entry.k}>
+          <NavLink
+            to={entry.to}
+            data-testid={`nav-${entry.k.replace('nav.', '')}`}
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-l-md py-2 pl-3 pr-2 text-sm font-medium"
+          >
+            <Icon size={16} />
+            {entry.label}
+          </NavLink>
+        </Tooltip>
+        <span className="h-5 w-px bg-white/20" aria-hidden />
         <button
-          ref={btnRef}
           onClick={toggle}
-          data-testid={`nav-${entry.k.replace('nav.', '')}`}
+          data-testid={`nav-${entry.k.replace('nav.', '')}-menu`}
           aria-haspopup="menu"
           aria-expanded={open}
-          className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${
-            sectionActive ? 'bg-white/20' : 'hover:bg-white/10'
-          }`}
+          aria-label={`${entry.label} views`}
+          className="flex items-center rounded-r-md py-2 pl-1.5 pr-2"
         >
-          <Icon size={16} />
-          {entry.label}
           <ChevronDown size={14} className="opacity-70" />
         </button>
-      </Tooltip>
+      </div>
       {open && (
         <div
           role="menu"
