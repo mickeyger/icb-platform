@@ -65,7 +65,10 @@ const NAV_LINKS: NavEntry[] = [
   // presenter can walk through it without flipping to Owner. In production
   // this would re-gate behind `management.view`.
   { to: '/management',       label: 'Management',   icon: BarChart3,     k: 'nav.management_dashboard' },
-  { to: '/qc',               label: 'QC',           icon: CheckSquare,   k: 'nav.qc',                   perm: 'qc.signoff' },
+  // WO v4.36c.1 — repointed from the retired /qc mock to the REAL QC inbox (/admin/qc). qc_inspector's
+  // only nav path there (the Admin nav below is adminOnly; the AdminModule→/admin/qc redirect can't fire
+  // without first reaching /admin/*). Gated on qc.signoff (Kenny + admin).
+  { to: '/admin/qc',         label: 'QC',           icon: CheckSquare,   k: 'nav.qc',                   perm: 'qc.signoff' },
   // WO v4.26 — master-data admin CRUD module; admin users only (live session role).
   { to: '/admin/spec-options', label: 'Admin',      icon: ShieldCheck,   k: 'nav.admin',                adminOnly: true },
 ]

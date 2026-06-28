@@ -6,7 +6,6 @@ import { VacuumTablet } from './screens/ShopFloorTablet/VacuumTablet'
 import { KanbanTV } from './screens/KanbanTV/KanbanTV'
 import { ProductionDashboard } from './screens/Production/ProductionDashboard'
 import { ManagementDashboard } from './screens/Management/ManagementDashboard'
-import { QcFinalCheck } from './screens/QC/QcFinalCheck'
 import { CostingsDashboard } from './screens/Costings/CostingsDashboard'
 import { CostingDetail } from './screens/Costings/CostingDetail'
 import { LiveCalculator } from './screens/Costings/LiveCalculator'
@@ -45,7 +44,6 @@ export default function App() {
       <Route path="/kanban/pre-assy" element={<Layout dark><KanbanTV /></Layout>} />
       <Route path="/production" element={<Layout><ProductionDashboard /></Layout>} />
       <Route path="/management" element={<Layout><ManagementDashboard /></Layout>} />
-      <Route path="/qc" element={<Layout><QcFinalCheck /></Layout>} />
       {/* WO v4.33 §3.5 — Pre-Job Card check sign-off pages (deep-linkable from the email) */}
       <Route path="/prejob/:id/signoff/:role" element={<Layout><PrejobSignoffPage /></Layout>} />
       {/* WO v4.25 read-only inspector → WO v4.26 full admin CRUD module (admin-gated) */}
