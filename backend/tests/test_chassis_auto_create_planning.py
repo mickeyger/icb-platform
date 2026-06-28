@@ -146,6 +146,43 @@ def test_ack_skips_when_already_linked(staged_job):       # idempotency vs §3.2
     assert _count_make("P434B Different Make") == 0
 
 
+def _a_dealer_id(db):
+    """An existing is_dealer=true customer id (read-only); skip when the DB has no dealer."""
+    from sqlalchemy import select
+    from app.database import Customer
+    return db.execute(
+        select(Customer.id).where(Customer.is_dealer.is_(True)).order_by(Customer.id)).scalars().first()
+
+
+def test_ack_persists_chassis_fields_to_record(staged_job):
+    """WO v4.36b — chassis-field unification: the Planning ack writes the unified chassis fields onto the
+    LINKED chassis_records row (single source of truth), not only the costing chassis_data blob. dealer_id
+    is validated (is_dealer); customer/contact/telephone/description/notes + tail_lift_code land on the row.
+    (Service-level chassis_data keys — the router maps PlanningAckRequest.chassis_notes -> 'notes'.)"""
+    from app.database import SessionLocal
+    from app.models.mes import ChassisRecord, ProductionJob
+    with SessionLocal() as db:
+        dealer_id = _a_dealer_id(db)
+    if dealer_id is None:
+        pytest.skip("no is_dealer customer on this DB")
+    _ack(staged_job, {
+        "chassis_model": "P434B Iveco Stralis", "dealer_id": dealer_id, "tail_lift_code": "TL-2000",
+        "customer_name": "P434B Ack Customer", "contact_person": "P434B Contact",
+        "telephone": "011-555-0100", "description": "P434B body desc", "notes": "P434B note"})
+    with SessionLocal() as db:
+        job = db.get(ProductionJob, staged_job)
+        ch = db.get(ChassisRecord, job.chassis_record_id)
+    assert ch is not None
+    assert ch.make == "P434B Iveco Stralis"               # auto-created from chassis_model
+    assert ch.dealer_id == dealer_id                      # validated dealer landed on the row
+    assert ch.tail_lift_code == "TL-2000"
+    assert ch.customer_name == "P434B Ack Customer"
+    assert ch.contact_person == "P434B Contact"
+    assert ch.telephone == "011-555-0100"
+    assert ch.description == "P434B body desc"
+    assert ch.notes == "P434B note"                       # chassis_data 'notes' -> chassis_records.notes
+
+
 def test_planning_ref_branches():                         # review §0.4 — both ref branches
     from app.services.production_jobs import _planning_ref
 
