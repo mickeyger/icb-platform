@@ -60,3 +60,6 @@ Thumbs.db
 build/
 dist-electron/
 *.tsbuildinfo
+
+# ---- Test artifacts (WO v4.36e §3.1 — Playwright traces; CI uploads them, never commit) ----
+test-results/
