@@ -16,7 +16,7 @@ def _purge():
     with SessionLocal() as db:
         # CASCADE handles audit rows when a chassis is deleted; the edited_by_name sweep is belt-and-braces.
         db.execute(text("DELETE FROM icb_mes.chassis_records_audit WHERE edited_by_name LIKE :m"), {"m": f"{_MARK}%"})
-        db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE created_by LIKE :m"), {"m": f"{_MARK}%"})       # §3.9 unlink test
+        db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE body_description LIKE :m"), {"m": f"{_MARK}%"})  # §3.9 unlink test
         db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE :m"), {"m": f"{_MARK}%"})    # §3.8 link-path tests
         db.execute(text("DELETE FROM icb_mes.chassis_records WHERE created_source_ref LIKE :m"), {"m": f"{_MARK}%"})
         db.execute(text("DELETE FROM icb_costings.calculations WHERE quote_number LIKE :m"), {"m": f"{_MARK}%"})
@@ -349,7 +349,7 @@ def test_unlink_card_orphan_audited():
                                  dimensions_json=json.dumps({}), result_json=json.dumps({}))
         db.add(calc)
         db.commit()
-        card = PrejobCard(calculation_id=calc.id, status="draft", created_by=f"{_MARK}_card")
+        card = PrejobCard(calculation_id=calc.id, status="draft", body_description=f"{_MARK} card")
         db.add(card)
         db.commit()
         ch = ChassisRecord(vin=None, status="expected", source="auto", created_via="pre_job_card",
