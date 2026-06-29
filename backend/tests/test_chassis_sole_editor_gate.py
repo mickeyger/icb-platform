@@ -349,7 +349,7 @@ def test_unlink_card_orphan_audited():
                                  dimensions_json=json.dumps({}), result_json=json.dumps({}))
         db.add(calc)
         db.commit()
-        card = PrejobCard(calculation_id=calc.id, status="draft", body_description=f"{_MARK} card")
+        card = PrejobCard(calculation_id=calc.id, status="draft", body_description=f"{_MARK} card", sections=[])
         db.add(card)
         db.commit()
         ch = ChassisRecord(vin=None, status="expected", source="auto", created_via="pre_job_card",
