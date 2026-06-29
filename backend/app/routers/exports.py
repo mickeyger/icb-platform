@@ -430,6 +430,350 @@ async def export_excel(
     )
 
 
+def _cost_breakdown_pdf_reportlab(ctx: dict) -> bytes:
+    """Pure-Python (ReportLab) fallback for the cost-breakdown PDF.
+
+    WeasyPrint is deliberately absent from this deployment (needs native
+    GTK/Pango/cairo; can't build on the HostAfrica cPanel/CageFS prod host —
+    see requirements.txt and ADR 0017). When WeasyPrint can't be imported,
+    the /export/pdf endpoint renders the *same* ``ctx`` data through ReportLab
+    instead. Layout mirrors templates/reports/cost_breakdown.html (A4 landscape)
+    but is faithful, not a pixel match.
+    """
+    from xml.sax.saxutils import escape
+
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    )
+
+    def _fmt2(v):
+        """Mirror the template's ``'{:,.2f}'.format(x) if x is number`` rule."""
+        try:
+            return "{:,.2f}".format(float(v))
+        except (TypeError, ValueError):
+            return "" if v in (None, "") else str(v)
+
+    page_w, page_h = landscape(A4)
+    left_margin = right_margin = 10 * mm
+    avail_w = page_w - left_margin - right_margin
+
+    optional_cats = set(ctx.get("optional_cats") or [])
+    BLUE = colors.HexColor("#58A6FF")
+    RED = colors.HexColor("#F85149")
+
+    body = ParagraphStyle("cell", fontName="Helvetica", fontSize=8, leading=9.5)
+    title_style = ParagraphStyle(
+        "title", fontName="Helvetica-Bold", fontSize=14, leading=18,
+        alignment=TA_CENTER, textColor=BLUE,
+    )
+    sub_style = ParagraphStyle(
+        "sub", fontName="Helvetica", fontSize=9.5, leading=12,
+        alignment=TA_CENTER, textColor=colors.HexColor("#C9D1D9"),
+    )
+    client_style = ParagraphStyle(
+        "client", fontName="Helvetica-Bold", fontSize=11, leading=14,
+        alignment=TA_CENTER, textColor=colors.HexColor("#0D1117"),
+    )
+
+    elements = []
+
+    # --- Title bar -------------------------------------------------------
+    title_txt = "TRAILER MANUFACTURING COST REPORT"
+    if ctx.get("is_repair"):
+        title_txt += '<font color="#E02424">  &mdash;  REPAIR QUOTE</font>'
+    title_tbl = Table([[Paragraph(title_txt, title_style)]], colWidths=[avail_w])
+    title_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#0D1117")),
+        ("TOPPADDING", (0, 0), (-1, -1), 6 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6 * mm),
+    ]))
+    elements.append(title_tbl)
+
+    sub_txt = "%s  |  Report #%s  |  %s" % (
+        escape(str(ctx.get("trailer_name") or "")),
+        escape(str(ctx.get("record_id") or "")),
+        escape(str(ctx.get("created_at_human") or "")),
+    )
+    sub_tbl = Table([[Paragraph(sub_txt, sub_style)]], colWidths=[avail_w])
+    sub_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#161B22")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+    ]))
+    elements.append(sub_tbl)
+    elements.append(Spacer(1, 4 * mm))
+
+    if ctx.get("customer_name"):
+        elements.append(Paragraph(
+            "Client: " + escape(str(ctx["customer_name"])), client_style))
+        elements.append(Spacer(1, 4 * mm))
+
+    # --- Dimensions ------------------------------------------------------
+    dims = ctx.get("dims") or {}
+
+    def _d(key):
+        v = dims.get(key)
+        return "" if v in (None, "") else str(v)
+
+    elements.append(Paragraph(
+        '<font color="#1F3A5F"><b>DIMENSIONS</b></font>',
+        ParagraphStyle("dh", fontSize=10, leading=12)))
+    elements.append(Spacer(1, 1 * mm))
+    dim_rows = [
+        ["Length (m)", _d("length"), "Width (m)", _d("width"),
+         "Height (m)", _d("height"), "Num Axles", _d("num_axles")],
+        ["Num Doors", _d("num_doors"), "Insulation Thk (m)",
+         _d("insulation_thickness"), "", "", "", ""],
+    ]
+    lbl_w = avail_w * 0.14
+    val_w = avail_w * 0.11
+    dim_tbl = Table(dim_rows, colWidths=[lbl_w, val_w] * 4)
+    dim_tbl.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#555555")),
+        ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#555555")),
+        ("TEXTCOLOR", (4, 0), (4, -1), colors.HexColor("#555555")),
+        ("TEXTCOLOR", (6, 0), (6, -1), colors.HexColor("#555555")),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+        ("FONTNAME", (3, 0), (3, -1), "Helvetica-Bold"),
+        ("FONTNAME", (5, 0), (5, -1), "Helvetica-Bold"),
+        ("FONTNAME", (7, 0), (7, -1), "Helvetica-Bold"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0.8 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0.8 * mm),
+    ]))
+    elements.append(dim_tbl)
+    elements.append(Spacer(1, 4 * mm))
+
+    # --- BOM table (grouped by category) --------------------------------
+    bom_pct = [0.11, 0.26, 0.09, 0.19, 0.07, 0.05, 0.08, 0.06, 0.09]
+    bom_w = [avail_w * p for p in bom_pct]
+    header = ["Category", "Material", "SAP Code", "Formula", "Quantity",
+              "Unit", "Unit Price (R)", "Waste %", "Line Cost (R)"]
+    data = [header]
+    cat_rows, optional_rows = [], []
+    current = object()
+    for it in ctx.get("items") or []:
+        cat = it.get("category")
+        if cat != current:
+            data.append([str(cat or ""), "", "", "", "", "", "", "", ""])
+            r = len(data) - 1
+            cat_rows.append(r)
+            if cat in optional_cats:
+                optional_rows.append(r)
+            current = cat
+        waste = it.get("waste_pct")
+        data.append([
+            "",
+            Paragraph(escape(str(it.get("material") or "")), body),
+            it.get("material_code") or "",
+            Paragraph(escape(str(it.get("formula") or "")), body),
+            _fmt2(it.get("quantity")),
+            it.get("unit") or "",
+            _fmt2(it.get("unit_price")),
+            ("%s%%" % waste) if waste else "",
+            _fmt2(it.get("line_cost")),
+        ])
+
+    bom_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1C2333")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#E6EDF3")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8.5),
+        ("FONTSIZE", (0, 1), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D0D7DE")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (4, 0), (4, -1), "RIGHT"),
+        ("ALIGN", (5, 0), (5, -1), "CENTER"),
+        ("ALIGN", (6, 0), (8, -1), "RIGHT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1 * mm),
+    ]
+    for r in cat_rows:
+        bom_style.append(("SPAN", (0, r), (-1, r)))
+        bom_style.append(("BACKGROUND", (0, r), (-1, r), colors.HexColor("#1F3A5F")))
+        bom_style.append(("TEXTCOLOR", (0, r), (-1, r), RED if r in optional_rows else BLUE))
+        bom_style.append(("FONTNAME", (0, r), (-1, r), "Helvetica-Bold"))
+        bom_style.append(("ALIGN", (0, r), (-1, r), "LEFT"))
+    bom_tbl = Table(data, colWidths=bom_w, repeatRows=1)
+    bom_tbl.setStyle(TableStyle(bom_style))
+    elements.append(bom_tbl)
+
+    # --- Chassis (optional) ---------------------------------------------
+    chassis = ctx.get("chassis")
+    if chassis and chassis.get("items"):
+        chead = "CHASSIS — %s-axle · %s · %s tyres · %s m" % (
+            chassis.get("axle_count"), chassis.get("tyre_style"),
+            chassis.get("tyre_count"), chassis.get("length"))
+        cdata = [[chead, "", "", "", "", "", "", "", ""]]
+        for it in chassis["items"]:
+            cdata.append([
+                it.get("kind") or "",
+                Paragraph(escape(str(it.get("label") or "")), body),
+                "", "",
+                _fmt2(it.get("qty")), "ea", _fmt2(it.get("unit_price")),
+                "", _fmt2(it.get("line_cost")),
+            ])
+        cdata.append(["Chassis Subtotal", "", "", "", "", "", "", "",
+                      _fmt2(chassis.get("subtotal"))])
+        last = len(cdata) - 1
+        ctbl = Table(cdata, colWidths=bom_w)
+        ctbl.setStyle(TableStyle([
+            ("SPAN", (0, 0), (-1, 0)),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F3A5F")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), BLUE),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("SPAN", (0, last), (-2, last)),
+            ("ALIGN", (0, last), (-2, last), "RIGHT"),
+            ("BACKGROUND", (0, last), (-1, last), colors.HexColor("#EFF3F8")),
+            ("FONTNAME", (0, last), (-1, last), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D0D7DE")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("ALIGN", (4, 1), (4, last - 1), "RIGHT"),
+            ("ALIGN", (5, 1), (5, last - 1), "CENTER"),
+            ("ALIGN", (6, 1), (8, last), "RIGHT"),
+            ("TOPPADDING", (0, 0), (-1, -1), 1 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1 * mm),
+        ]))
+        elements.append(Spacer(1, 4 * mm))
+        elements.append(ctbl)
+
+    # --- Category totals (optional) -------------------------------------
+    cat_totals = ctx.get("category_totals") or {}
+    if cat_totals:
+        ct_data = [["Category", "Subtotal (R)"]]
+        ct_optional = []
+        for cat, total in cat_totals.items():
+            ct_data.append([str(cat), _fmt2(total)])
+            if cat in optional_cats:
+                ct_optional.append(len(ct_data) - 1)
+        ct_tbl = Table(ct_data, colWidths=[avail_w * 0.45, avail_w * 0.15])
+        ct_style = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1C2333")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#E6EDF3")),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("FONTNAME", (1, 1), (1, -1), "Helvetica-Bold"),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor("#D0D7DE")),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.2 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2 * mm),
+        ]
+        for r in ct_optional:
+            ct_style.append(("TEXTCOLOR", (0, r), (-1, r), RED))
+        ct_tbl.setStyle(TableStyle(ct_style))
+        elements.append(Spacer(1, 4 * mm))
+        elements.append(ct_tbl)
+
+    # --- Summary ---------------------------------------------------------
+    def _summary_row(rows, label, value, grand=False):
+        rows.append((label, value, grand))
+
+    srows = []
+    _summary_row(srows, "Cost per m²", _fmt2(ctx.get("cost_per_sqm") or 0))
+    _summary_row(srows, "Total Manufacturing", _fmt2(ctx.get("grand_total") or 0))
+    if ctx.get("profit_amount"):
+        _summary_row(srows, "Profit Margin (%s%%)" % ctx.get("profit_margin"),
+                     _fmt2(ctx.get("profit_amount") or 0))
+    if ctx.get("ratio_amount"):
+        _summary_row(srows, "Ratio (%s)" % ctx.get("ratio_label"),
+                     _fmt2(ctx.get("ratio_amount") or 0))
+
+    selling = ctx.get("selling_price")
+    grand_total = ctx.get("grand_total") or 0
+    discount = ctx.get("discount_amount") or 0
+    try:
+        discount = float(discount)
+    except (TypeError, ValueError):
+        discount = 0
+    if discount > 0:
+        _summary_row(srows, "SELLING PRICE" if selling else "TOTAL",
+                     "R " + _fmt2(selling if selling else grand_total))
+        disc_lbl = "Discount"
+        if ctx.get("discount_kind") == "percent":
+            try:
+                disc_lbl = "Discount (%g%%)" % float(ctx.get("discount_input"))
+            except (TypeError, ValueError):
+                pass
+        _summary_row(srows, disc_lbl, "− R " + _fmt2(discount))
+        _summary_row(srows, "NET TOTAL", "R " + _fmt2(ctx.get("net_total") or 0),
+                     grand=True)
+    else:
+        _summary_row(
+            srows,
+            "SELLING PRICE" if selling else "TOTAL MANUFACTURING COST",
+            "R " + _fmt2(selling if selling else grand_total),
+            grand=True,
+        )
+
+    sdata = [[lbl, val] for (lbl, val, _g) in srows]
+    summary_tbl = Table(sdata, colWidths=[avail_w * 0.75, avail_w * 0.25])
+    s_style = [
+        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D0D7DE")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+    ]
+    for i, (_lbl, _val, grand) in enumerate(srows):
+        if grand:
+            s_style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#388BFD")))
+            s_style.append(("TEXTCOLOR", (0, i), (-1, i), colors.white))
+            s_style.append(("FONTSIZE", (0, i), (0, i), 11))
+            s_style.append(("FONTSIZE", (1, i), (1, i), 12))
+        else:
+            s_style.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor("#0D4A8A")))
+            s_style.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor("#C9D1D9")))
+            s_style.append(("TEXTCOLOR", (1, i), (1, i), BLUE))
+    summary_tbl.setStyle(TableStyle(s_style))
+    elements.append(Spacer(1, 5 * mm))
+    elements.append(summary_tbl)
+
+    # --- Footer (Generated … / Page X of Y) ------------------------------
+    gen_text = "Generated " + str(ctx.get("generated_at") or "")
+    foot_left_x = left_margin
+    foot_right_x = page_w - right_margin
+
+    class _NumberedCanvas(canvas.Canvas):
+        def __init__(self, *a, **k):
+            canvas.Canvas.__init__(self, *a, **k)
+            self._saved_pages = []
+
+        def showPage(self):
+            self._saved_pages.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved_pages)
+            for state in self._saved_pages:
+                self.__dict__.update(state)
+                self.setFont("Helvetica", 8)
+                self.setFillColor(colors.HexColor("#555555"))
+                self.drawString(foot_left_x, 8 * mm, gen_text)
+                self.drawRightString(
+                    foot_right_x, 8 * mm,
+                    "Page %d of %d" % (self._pageNumber, total))
+                canvas.Canvas.showPage(self)
+            canvas.Canvas.save(self)
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(A4),
+        leftMargin=left_margin, rightMargin=right_margin,
+        topMargin=12 * mm, bottomMargin=14 * mm,
+        title="Cost Breakdown — Report #%s" % ctx.get("record_id"),
+    )
+    doc.build(elements, canvasmaker=_NumberedCanvas)
+    return buf.getvalue()
+
+
 @router.get("/results/{record_id}/export/pdf")
 async def export_pdf(record_id: int, request: Request, db: Session = Depends(get_db)):
     user = get_current_user(request, db)
@@ -455,48 +799,52 @@ async def export_pdf(record_id: int, request: Request, db: Session = Depends(get
             "telephone": rec.customer.telephone or "",
         }
 
+    # Categories belonging to is_optional BOM sections — flagged once so the
+    # template/renderer can render their headers + totals in red, matching the
+    # on-screen results page.
+    _items = result.get("items", [])
+    optional_cats = sorted({it["category"] for it in _items if it.get("section_is_optional")})
+
+    ctx = {
+        "trailer_name": trailer_name,
+        "record_id": record_id,
+        "created_at_human": rec.created_at.strftime("%d %B %Y") if rec.created_at else "",
+        "generated_at": datetime.now().strftime("%d %b %Y %H:%M"),
+        "customer_name": (customer_info or {}).get("name") or "",
+        "is_repair": bool(rec.is_repair),
+        "dims": dims,
+        "items": _items,
+        "category_totals": result.get("category_totals", {}) or {},
+        "optional_cats": optional_cats,
+        "cost_per_sqm": result.get("cost_per_sqm", 0),
+        "profit_margin": result.get("profit_margin", 0),
+        "profit_amount": result.get("profit_amount", 0),
+        "ratio_value": result.get("ratio_value"),
+        "ratio_label": result.get("ratio_label"),
+        "ratio_amount": result.get("ratio_amount", 0),
+        "selling_price": result.get("selling_price"),
+        "grand_total": result.get("grand_total", 0),
+        "chassis": result.get("chassis"),
+        "materials_total": result.get("materials_total"),
+        "discount_kind": result.get("discount_kind"),
+        "discount_input": result.get("discount_input"),
+        "discount_amount": result.get("discount_amount", 0),
+        "net_total": result.get("net_total"),
+    }
+
     try:
-        from ..report_engine import _env
+        # Prefer WeasyPrint (high-fidelity HTML/CSS render) when it's available.
+        # It needs native GTK/Pango/cairo libs that this deployment deliberately
+        # omits (see requirements.txt + ADR 0017), so fall back to the pure-Python
+        # ReportLab renderer when the import fails — rendering the same ctx data.
         try:
-            from weasyprint import HTML
-        except ImportError as e:
-            raise RuntimeError("WeasyPrint is not installed.") from e
+            from weasyprint import HTML  # noqa: WPS433 (lazy, optional dep)
+            from ..report_engine import _env
 
-        # Categories belonging to is_optional BOM sections — flagged once so
-        # the template can render their headers + totals in red, matching the
-        # on-screen results page.
-        _items = result.get("items", [])
-        optional_cats = sorted({it["category"] for it in _items if it.get("section_is_optional")})
-
-        ctx = {
-            "trailer_name": trailer_name,
-            "record_id": record_id,
-            "created_at_human": rec.created_at.strftime("%d %B %Y") if rec.created_at else "",
-            "generated_at": datetime.now().strftime("%d %b %Y %H:%M"),
-            "customer_name": (customer_info or {}).get("name") or "",
-            "is_repair": bool(rec.is_repair),
-            "dims": dims,
-            "items": _items,
-            "category_totals": result.get("category_totals", {}) or {},
-            "optional_cats": optional_cats,
-            "cost_per_sqm": result.get("cost_per_sqm", 0),
-            "profit_margin": result.get("profit_margin", 0),
-            "profit_amount": result.get("profit_amount", 0),
-            "ratio_value": result.get("ratio_value"),
-            "ratio_label": result.get("ratio_label"),
-            "ratio_amount": result.get("ratio_amount", 0),
-            "selling_price": result.get("selling_price"),
-            "grand_total": result.get("grand_total", 0),
-            "chassis": result.get("chassis"),
-            "materials_total": result.get("materials_total"),
-            "discount_kind": result.get("discount_kind"),
-            "discount_input": result.get("discount_input"),
-            "discount_amount": result.get("discount_amount", 0),
-            "net_total": result.get("net_total"),
-        }
-
-        html_str = _env.get_template("cost_breakdown.html").render(**ctx)
-        pdf_bytes = HTML(string=html_str).write_pdf()
+            html_str = _env.get_template("cost_breakdown.html").render(**ctx)
+            pdf_bytes = HTML(string=html_str).write_pdf()
+        except (ImportError, OSError):
+            pdf_bytes = _cost_breakdown_pdf_reportlab(ctx)
 
         username = user.username if user else "unknown"
         filename = f"Costing_{trailer_name.replace(' ', '_')}_{record_id}_{username}.pdf"
@@ -507,10 +855,12 @@ async def export_pdf(record_id: int, request: Request, db: Session = Depends(get
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
+    except Exception:
+        # WO v4.36d §3.1 — log the full exception server-side; return a GENERIC client message. The prior
+        # detail=f"...: {exc}" leaked internal error text to the caller (Subagent B finding). 500 preserved.
+        import logging
+        logging.getLogger(__name__).exception("export_pdf failed (record %s)", record_id)
+        raise HTTPException(status_code=500, detail="PDF generation failed")
 
 
 @router.get("/results/{record_id}/report")
