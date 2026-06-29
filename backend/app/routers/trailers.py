@@ -274,10 +274,12 @@ async def add_bom_item(tt_id: int, request: Request, db: Session = Depends(get_d
 @router.put("/api/bom/{bom_id}")
 async def update_bom_item(bom_id: int, request: Request, db: Session = Depends(get_db)):
     body = await request.json()
-    # variable_value (insulation thickness in metres) may be written by any
-    # logged-in user so that switching an insulation radio persists for everyone.
-    # All other BOM fields (price, formula, group, section…) remain admin-only.
-    if set(body.keys()) <= {"variable_value"}:
+    # variable_value (insulation thickness in metres) AND unit_price_override
+    # (per-row estimator price override) may be written by any logged-in user
+    # (WO v4.37 §3.1 D-5 — restores GRP parity per CA3 §C.2: estimators persist
+    # insulation thickness + per-row price overrides). All other BOM fields
+    # (formula, group, section, material…) remain admin-only.
+    if set(body.keys()) <= {"variable_value", "unit_price_override"}:
         require_user(request, db)
     else:
         require_admin(request, db)

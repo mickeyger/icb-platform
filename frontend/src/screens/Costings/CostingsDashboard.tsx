@@ -350,7 +350,12 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                         </Tooltip>
                       ) : null}
                       {c.status === 'Pending' && c.created_by === profile.id.replace('rep_', '').toUpperCase() && (
-                        <button className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt">
+                        <button
+                          onClick={() => c.calculation_id && nav(`/costings/new?edit=${c.calculation_id}`)}
+                          disabled={!c.calculation_id}
+                          title={c.calculation_id ? 'Reopen this costing to edit' : 'Edit available on live costings only'}
+                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt disabled:opacity-50"
+                        >
                           <Pencil size={12} /> Edit
                         </button>
                       )}

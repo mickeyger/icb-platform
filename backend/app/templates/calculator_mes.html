@@ -1,8 +1,0 @@
-{# Icecold Bodies MES skin fork of the Cost Calculator.
-   Inherits the live /calculator template verbatim and overlays the MES skin
-   stylesheet on top. The live /calculator route stays bit-for-bit pristine.
-   Served at /mes/calculator (see app/routers/mes_views.py). WO v4.7. #}
-{% extends "calculator.html" %}
-{% block head %}{{ super() }}
-<link rel="stylesheet" href="/static/css/theme-mes.css?v=1"/>
-{% endblock %}
