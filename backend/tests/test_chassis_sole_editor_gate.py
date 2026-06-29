@@ -16,6 +16,7 @@ def _purge():
     with SessionLocal() as db:
         # CASCADE handles audit rows when a chassis is deleted; the edited_by_name sweep is belt-and-braces.
         db.execute(text("DELETE FROM icb_mes.chassis_records_audit WHERE edited_by_name LIKE :m"), {"m": f"{_MARK}%"})
+        db.execute(text("DELETE FROM icb_mes.prejob_cards WHERE created_by LIKE :m"), {"m": f"{_MARK}%"})       # §3.9 unlink test
         db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE :m"), {"m": f"{_MARK}%"})    # §3.8 link-path tests
         db.execute(text("DELETE FROM icb_mes.chassis_records WHERE created_source_ref LIKE :m"), {"m": f"{_MARK}%"})
         db.execute(text("DELETE FROM icb_costings.calculations WHERE quote_number LIKE :m"), {"m": f"{_MARK}%"})
@@ -181,7 +182,7 @@ def test_capture_vin_audited():
         capture_vin(db, rid, _VIN_OK, who=f"{_MARK}_vin")
         by = {r.field_name: r for r in db.query(ChassisRecordAudit).filter_by(chassis_id=rid).all()}
         assert "vin" in by and "vin_source" in by
-        assert by["vin"].new_value == _VIN_OK and by["vin"].source == "chassis_page"
+        assert by["vin"].old_value is None and by["vin"].new_value == _VIN_OK and by["vin"].source == "chassis_page"
         assert by["vin_source"].new_value == "chassis_page_manual"
 
 
@@ -260,8 +261,9 @@ def test_create_chassis_stub_adoption_audited():
     with SessionLocal() as db:
         create_chassis(db, ChassisRecordCreate(vin=_VIN_OK[:-1] + "1", production_job_id=jid, make="Isuzu FVR"),
                        who=f"{_MARK}_adopt")
-        by = {r.field_name for r in db.query(ChassisRecordAudit).filter_by(chassis_id=ph).all()}
-        assert {"vin", "make"} <= by                             # the adoption stamped + audited the real values
+        by = {r.field_name: r for r in db.query(ChassisRecordAudit).filter_by(chassis_id=ph).all()}
+        assert "vin" in by and "make" in by                      # the adoption stamped + audited the real values
+        assert by["vin"].source == "stub_adoption"               # §3.9 tightening — pin the source label
 
 
 def test_retrofit_link_audited_with_actor():
@@ -277,3 +279,89 @@ def test_retrofit_link_audited_with_actor():
         retrofit_link(db, rid, jid, who=f"{_MARK}_admin", actor_role="admin", actor_id=uid)
         rows = db.query(ChassisRecordAudit).filter_by(chassis_id=rid).all()
         assert rows and any(r.edited_by_user_id == uid for r in rows)
+
+
+# ── WO v4.36.5 §3.9 — the 3 status-transition leaks the §3.8 close-verify sweep found (qc.signoff +
+#    2 orphaning sites) + the fail-closed retrofit variant ──────────────────────────────────────────────
+def test_retrofit_link_fail_closed():
+    """§3.9 tightening — retrofit_link inherits the fail-closed gate: a non-edit actor_role → 403."""
+    from app.database import SessionLocal
+    from app.services.chassis import retrofit_link
+    rid = _make_chassis(make="MAN Orphan2", customer_name=None)
+    jid = _make_job()
+    with SessionLocal() as db:
+        with pytest.raises(HTTPException) as ei:
+            retrofit_link(db, rid, jid, who=f"{_MARK}_prod", actor_role="production", actor_id=None)
+        assert ei.value.status_code == 403
+
+
+def test_reconcile_orphan_audited():
+    """§3.9 leak 3 — reconcile_anchorless_chassis(apply=True) routes the orphaning transition through the chokepoint
+    (system actor). Isolation-safe: asserts in-session then rolls back (the sweep marks every anchorless row)."""
+    from app.database import SessionLocal
+    from app.services.integrity import reconcile_anchorless_chassis
+    from app.models.mes import ChassisRecord, ChassisRecordAudit
+    rid = _make_chassis(make="Anchorless")        # 'expected', no job, no card → anchorless
+    with SessionLocal() as db:
+        reconcile_anchorless_chassis(db, apply=True)
+        db.flush()                                 # autoflush=False — surface the in-session writes; NO commit
+        assert db.get(ChassisRecord, rid).status == "expected_orphaned"
+        row = db.query(ChassisRecordAudit).filter_by(chassis_id=rid, field_name="status",
+                                                     source="reconcile_orphaned").first()
+        assert row is not None and row.new_value == "expected_orphaned" and row.edited_by_name == "system"
+
+
+def test_qc_signoff_dispatch_audited():
+    """§3.9 leak 1 — a PASS QC sign-off routes the dispatch transition through the chokepoint (source='qc_passed')."""
+    from sqlalchemy import select
+    from app.database import SessionLocal, User
+    from app.services.qc import signoff
+    from app.models.mes import ChassisRecord, ChassisRecordAudit, DefectCategory, QcInspection
+    rid = _make_chassis(make="Hino QC")
+    with SessionLocal() as db:
+        admin = db.query(User).filter_by(username="admin").first()
+        aid = admin.id
+        db.get(ChassisRecord, rid).status = "awaiting_qa"            # precondition (setup, not the path under test)
+        cats = db.execute(select(DefectCategory).where(DefectCategory.is_active.is_(True))).scalars().all()
+        for c in cats:
+            db.add(QcInspection(chassis_record_id=rid, cycle_number=1, category_id=c.id,
+                                category_name=c.name, verdict="pass", created_by=f"{_MARK}_qc"))
+        db.commit()
+        out = signoff(db, rid, notes=None, user=admin)
+        assert out["overall_verdict"] == "pass" and out["new_status"] == "dispatched"
+    with SessionLocal() as db:
+        row = db.query(ChassisRecordAudit).filter_by(chassis_id=rid, field_name="status", source="qc_passed").first()
+        assert row is not None and row.new_value == "dispatched" and row.edited_by_user_id == aid
+
+
+def test_unlink_card_orphan_audited():
+    """§3.9 leak 2 — releasing a card's auto-created, now-unreferenced chassis orphans it through the chokepoint."""
+    import json
+    import uuid
+    from app.database import SessionLocal, Branch, CalculationRecord, User
+    from app.models.mes import ChassisRecord, ChassisRecordAudit, PrejobCard
+    from app.services.prejob_cards import _release_auto_created_chassis, _source_ref
+    with SessionLocal() as db:
+        jhb = db.query(Branch).filter_by(code="JHB").first()
+        admin = db.query(User).filter_by(username="admin").first()
+        aid = admin.id
+        calc = CalculationRecord(quote_number=f"{_MARK}{uuid.uuid4().hex[:8]}", status="accepted", branch_id=jhb.id,
+                                 dimensions_json=json.dumps({}), result_json=json.dumps({}))
+        db.add(calc)
+        db.commit()
+        card = PrejobCard(calculation_id=calc.id, status="draft", created_by=f"{_MARK}_card")
+        db.add(card)
+        db.commit()
+        ch = ChassisRecord(vin=None, status="expected", source="auto", created_via="pre_job_card",
+                           created_source_ref=_source_ref(calc, card), make="Stub")
+        db.add(ch)
+        db.commit()
+        card.chassis_record_id = ch.id
+        db.commit()
+        cid = ch.id
+        _release_auto_created_chassis(db, card, who=admin.username, actor_id=aid)
+        db.commit()
+    with SessionLocal() as db:
+        assert db.get(ChassisRecord, cid).status == "expected_orphaned"
+        row = db.query(ChassisRecordAudit).filter_by(chassis_id=cid, field_name="status", source="unlink_card").first()
+        assert row is not None and row.new_value == "expected_orphaned" and row.edited_by_user_id == aid

@@ -625,7 +625,7 @@ def sign_off(db: Session, card_id: int, role: str, attestation: str, user) -> Pr
     return card
 
 
-def _release_auto_created_chassis(db: Session, card: PrejobCard) -> None:
+def _release_auto_created_chassis(db: Session, card: PrejobCard, who: str = "system", actor_id: "int | None" = None) -> None:
     """WO v4.34 §3.4 (§0.6) — on reject, release a chassis THIS card auto-created at §3.2 submit
     (created_via='pre_job_card' AND created_source_ref == this card's ref). Drops the card link;
     if nothing else references the chassis (no production_job, no other prejob_card) it's set to
@@ -650,7 +650,8 @@ def _release_auto_created_chassis(db: Session, card: PrejobCard) -> None:
     other_card = db.execute(select(PrejobCard.id).where(
         PrejobCard.chassis_record_id == chassis_id, PrejobCard.id != card.id)).first()
     if job_link is None and other_card is None and chassis.status == "expected":
-        chassis.status = "expected_orphaned"               # no other links → free for re-use
+        from app.services.chassis import _apply_chassis_fields   # WO v4.36.5 §3.9 — orphaning transition audited
+        _apply_chassis_fields(db, chassis, {"status": "expected_orphaned"}, who, source="unlink_card", actor_id=actor_id)
 
 
 def reject(db: Session, card_id: int, role: str, reason: str, user) -> PrejobCard:
@@ -680,7 +681,7 @@ def reject(db: Session, card_id: int, role: str, reason: str, user) -> PrejobCar
     # at 'accepted'. The pipeline is preserved; Planning still gates on pre_job_confirmed.
     _sync_calc_status(db, card.calculation_id, "pre_job_sent")
     # WO v4.34 §3.4 (§0.6) — release the chassis this card auto-created (orphan it if unreferenced).
-    _release_auto_created_chassis(db, card)
+    _release_auto_created_chassis(db, card, who=getattr(user, "username", None), actor_id=getattr(user, "id", None))
     db.commit()
     db.refresh(card)
     return card
