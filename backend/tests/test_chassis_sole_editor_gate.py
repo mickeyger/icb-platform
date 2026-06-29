@@ -111,9 +111,9 @@ def test_soft_delete_and_restore_are_audited():
     rid = _make_chassis(make="Tata LPT")
     with SessionLocal() as db:
         soft_delete_chassis(db, rid, who=f"{_MARK}_del", reason="junk dupe")
-        rows = db.query(ChassisRecordAudit).filter_by(chassis_id=rid, source="soft_delete").all()
-        assert len(rows) == 1
-        assert rows[0].new_value == "junk dupe" and rows[0].edited_by_name == f"{_MARK}_del"
+        rows = {r.field_name: r for r in db.query(ChassisRecordAudit).filter_by(chassis_id=rid, source="soft_delete").all()}
+        assert "deleted_at" in rows and "deletion_reason" in rows         # §3.8 — real timestamp + a separate reason row
+        assert rows["deletion_reason"].new_value == "junk dupe" and rows["deletion_reason"].edited_by_name == f"{_MARK}_del"
     with SessionLocal() as db:
         restore_chassis(db, rid, who=f"{_MARK}_res")
         assert db.query(ChassisRecordAudit).filter_by(chassis_id=rid, source="restore").count() == 1
@@ -232,17 +232,18 @@ def test_soft_delete_audit_shape():
 def test_chokepoint_stamps_updated_by_and_actor_id():
     """§3.8 finding 8 mechanism — the chokepoint OWNS updated_by, and a passed actor_id lands on edited_by_user_id
     (the planning-ack path now passes it; this proves the row the ack writes carries the actor FK)."""
-    from app.database import SessionLocal
+    from app.database import SessionLocal, User
     from app.services.chassis import _apply_chassis_fields
     from app.models.mes import ChassisRecord, ChassisRecordAudit
     rid = _make_chassis(make="Scania R")
     with SessionLocal() as db:
+        uid = db.query(User).filter_by(username="admin").first().id     # a REAL user — the cross-schema FK is enforced (SET NULL)
         rec = db.get(ChassisRecord, rid)
-        _apply_chassis_fields(db, rec, {"notes": "via chokepoint"}, who=f"{_MARK}_ck", source="planning_ack", actor_id=4242)
+        _apply_chassis_fields(db, rec, {"notes": "via chokepoint"}, who=f"{_MARK}_ck", source="planning_ack", actor_id=uid)
         db.commit()
         assert rec.updated_by == f"{_MARK}_ck"                       # chokepoint stamped updated_by
         row = db.query(ChassisRecordAudit).filter_by(chassis_id=rid, field_name="notes").first()
-        assert row is not None and row.edited_by_user_id == 4242 and row.source == "planning_ack"
+        assert row is not None and row.edited_by_user_id == uid and row.source == "planning_ack"
 
 
 def test_create_chassis_stub_adoption_audited():
@@ -266,12 +267,13 @@ def test_create_chassis_stub_adoption_audited():
 def test_retrofit_link_audited_with_actor():
     """§3.8 finding 6 — admin Find-Orphan retrofit_link routes through update_chassis WITH the actor, so the gate
     runs and the audit row carries edited_by_user_id."""
-    from app.database import SessionLocal
+    from app.database import SessionLocal, User
     from app.services.chassis import retrofit_link
     from app.models.mes import ChassisRecordAudit
     rid = _make_chassis(make="MAN Orphan", customer_name=None)   # an orphan (no job link)
     jid = _make_job()
     with SessionLocal() as db:
-        retrofit_link(db, rid, jid, who=f"{_MARK}_admin", actor_role="admin", actor_id=77)
+        uid = db.query(User).filter_by(username="admin").first().id
+        retrofit_link(db, rid, jid, who=f"{_MARK}_admin", actor_role="admin", actor_id=uid)
         rows = db.query(ChassisRecordAudit).filter_by(chassis_id=rid).all()
-        assert rows and any(r.edited_by_user_id == 77 for r in rows)
+        assert rows and any(r.edited_by_user_id == uid for r in rows)
