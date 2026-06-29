@@ -1145,7 +1145,7 @@ function LivePlanningBoard() {
           re-added Dispatch zone) from the week-grid layout — fixing the v4.36c flex-coupling regression at
           its source AND hardening the pre-existing "slot-cell not stable" reflow flake (§3.1 trace). Mirrors
           the Cockpit dock's bounded pattern. max-h is an initial read of the layout (BA judges at click-through). */}
-      <div className="shrink-0 max-h-[44vh] overflow-y-auto">
+      <div data-testid="bay-model-wrap" className="shrink-0 max-h-[44vh] overflow-y-auto">
         <BayModelLanes />
       </div>
 
