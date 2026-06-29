@@ -129,13 +129,16 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
     if card.chassis_record_id is not None:
         ch = db.get(ChassisRecord, card.chassis_record_id)      # sync an auto-created 'expected' row with card edits
         if ch is not None and ch.created_via == "pre_job_card" and ch.status == "expected":
+            from app.services.chassis import _apply_chassis_fields   # WO v4.36.5 §3.8 — sync via the chokepoint (audited)
+            changes = {"body_gap_mm": card.body_gap_mm}
             if make_model:
-                ch.make = make_model
-            ch.body_gap_mm = card.body_gap_mm
+                changes["make"] = make_model
             if vin and not ch.vin:                              # §0.4 propagation — write-once NULL→value
                 ci.validate_vin_uniqueness(db, vin, exclude_id=ch.id)
-                ch.vin = vin
-                ch.vin_source = ch.vin_source or "pre_job_card"
+                changes["vin"] = vin
+                changes["vin_source"] = ch.vin_source or "pre_job_card"
+            _apply_chassis_fields(db, ch, changes, who=getattr(user, "username", None), source="pre_job_card",
+                                  actor_id=getattr(user, "id", None))
         return                                             # already linked — idempotent (sync only, no new row)
     # WO v4.36a.4 — REVERSES §3.2 case 2 (v4.34): we no longer no-op on empty make_model. Pre-Job submit
     # MUST anchor a chassis stub unconditionally (create_expected_chassis accepts make=None → an 'expected'
@@ -154,12 +157,17 @@ def _auto_create_chassis(db: Session, card: PrejobCard, user) -> None:
     if existing is not None:                               # §3.2 case A4 — adopt the job's chassis, don't duplicate
         card.chassis_record_id = existing.id
         if existing.created_via == "pre_job_card" and existing.status == "expected":
+            from app.services.chassis import _apply_chassis_fields   # WO v4.36.5 §3.8 — sync via the chokepoint (audited)
+            changes = {}
             if make_model:
-                existing.make = make_model                 # keep an auto-created 'expected' row synced
+                changes["make"] = make_model               # keep an auto-created 'expected' row synced
             if vin and not existing.vin:                   # §0.4 — propagate VIN onto the adopted 'expected' row
                 ci.validate_vin_uniqueness(db, vin, exclude_id=existing.id)
-                existing.vin = vin
-                existing.vin_source = existing.vin_source or "pre_job_card"
+                changes["vin"] = vin
+                changes["vin_source"] = existing.vin_source or "pre_job_card"
+            if changes:
+                _apply_chassis_fields(db, existing, changes, who=getattr(user, "username", None), source="pre_job_card",
+                                      actor_id=getattr(user, "id", None))
         return                                             # (real/foreign chassis: job wins, no sync — §3.2 review #3)
     calc = db.get(CalculationRecord, card.calculation_id)
     from app.services.chassis import create_expected_chassis

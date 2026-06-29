@@ -273,16 +273,15 @@ def create_chassis(db: Session, payload, who: str) -> ChassisRecord:
                 raise ci.ChassisIntegrityError(
                     f"Job {job.job_number or job.id} already has chassis VIN {ph.vin}. "
                     "Use Merge Chassis to swap the chassis.", status_code=409)
-            ph.vin = vin                                        # VIN is new (existing is None) → unique-safe
-            ph.vin_source = ph.vin_source or "chassis_page_manual"
-            ph.make = make
+            # WO v4.36.5 §3.8 — the stub→real adoption flows through the chokepoint (all six fields audited).
+            changes = {"vin": vin, "vin_source": ph.vin_source or "chassis_page_manual", "make": make}
             if payload.customer_name:
-                ph.customer_name = payload.customer_name
+                changes["customer_name"] = payload.customer_name
             if dealer_id is not None:
-                ph.dealer_id = dealer_id
+                changes["dealer_id"] = dealer_id
             if ph.status == "expected":
-                ph.status = "received"                          # the placeholder now has a real chassis
-            ph.updated_by = who
+                changes["status"] = "received"                  # the placeholder now has a real chassis
+            _apply_chassis_fields(db, ph, changes, who, source="stub_adoption")
             db.commit()
             db.refresh(ph)
             ph.adopted = False
@@ -373,11 +372,13 @@ def _apply_chassis_fields(db: Session, rec, data: dict, who: str, source: str,
         changed.append(field)
         if field in _AUDITED_FIELDS:
             _audit_chassis(db, rec.id, field, old, new, source, who, actor_id)
+    if changed:                                          # WO v4.36.5 §3.8 — the chokepoint OWNS updated_by, so
+        rec.updated_by = who                             # "write to chassis_records" and "go through the chokepoint" are synonymous
     return changed
 
 
 def update_chassis(db: Session, record_id: int, payload, who: str,
-                   actor_role: "str | None" = None, actor_id: "int | None" = None) -> ChassisRecord:
+                   actor_role: str, actor_id: "int | None" = None) -> ChassisRecord:
     """WO v4.36a §3.5c — link-aware edit chokepoint (the ADR-0024 guard on the EDIT door, symmetric with
     create_chassis so the edit modal can't be a MICKEYTEST-class bypass). The job↔chassis link is
     authoritative on production_jobs.chassis_record_id:
@@ -389,7 +390,7 @@ def update_chassis(db: Session, record_id: int, payload, who: str,
                   rec.job_number from the real job (clearing any stale free-text — closes the §3.0 FK-drift).
       • UNLINKED, no job selected → legacy behaviour (free-text job_number passes through)."""
     from app.services import chassis_integrity as ci
-    if actor_role is not None and actor_role not in _CHASSIS_EDIT_ROLES:
+    if actor_role not in _CHASSIS_EDIT_ROLES:            # §3.8 — FAIL-CLOSED: a missing/None/other role is refused, not waved through
         raise HTTPException(status_code=403,
                             detail="Chassis attributes are editable on the Chassis page by admin/planner only.")
     rec = db.get(ChassisRecord, record_id)
@@ -429,18 +430,18 @@ def update_chassis(db: Session, record_id: int, payload, who: str,
         data["dealer_id"] = ci.validate_dealer(db, data["dealer_id"])
     # §3.1 — apply + audit each changed field through the single chokepoint (chassis_page source).
     changed = _apply_chassis_fields(db, rec, data, who, source="chassis_page", actor_id=actor_id)
-    rec.updated_by = who
     if link_to is not None:
         db.flush()                                       # rec.id stable, same txn — mirror create's atomic link
         link_to.chassis_record_id = rec.id
     if changed or link_to is not None:                   # bump the optimistic-lock version on a real change
-        rec.version = (rec.version or 0) + 1
+        rec.version = (rec.version or 0) + 1              # §3.8 — updated_by is now stamped by _apply_chassis_fields
     db.commit()
     db.refresh(rec)
     return rec
 
 
-def retrofit_link(db: Session, chassis_id: int, job_id: int, who: str) -> ChassisRecord:
+def retrofit_link(db: Session, chassis_id: int, job_id: int, who: str,
+                  actor_role: str, actor_id: "int | None" = None) -> ChassisRecord:
     """WO v4.36a §3.6 — admin recovery: link an ORPHAN chassis to an unlinked job. Reuses the §3.5c
     atomic-link chokepoint (update_chassis UNLINKED→LINK): validates the job (422 if unknown), refuses an
     already-taken job (409), sets the FK + stamps job_number in one txn. Adopts the job's customer when the
@@ -460,7 +461,7 @@ def retrofit_link(db: Session, chassis_id: int, job_id: int, who: str) -> Chassi
         job_cust = _job_customer_name(db, ci.validate_job_link(db, job_id))
         if job_cust:
             payload["customer_name"] = job_cust
-    return update_chassis(db, chassis_id, ChassisRecordUpdate(**payload), who)
+    return update_chassis(db, chassis_id, ChassisRecordUpdate(**payload), who, actor_role=actor_role, actor_id=actor_id)
 
 
 def soft_delete_chassis(db: Session, chassis_id: int, who: str, reason: "str | None" = None) -> ChassisRecord:
@@ -491,13 +492,15 @@ def soft_delete_chassis(db: Session, chassis_id: int, who: str, reason: "str | N
         raise ci.ChassisIntegrityError(
             "Chassis has lifecycle history — it isn't junk. Use Merge Chassis to preserve the history.",
             status_code=409)
-    rec.deleted_at = func.now()
+    ts = datetime.now(timezone.utc)                      # §3.8 — concrete value so the audit stores the ACTUAL deleted_at
+    rec.deleted_at = ts
     rec.updated_by = who
     if reason and reason.strip():
         rec.notes = ((rec.notes + "\n") if rec.notes else "") + f"[soft-deleted §3.6: {reason.strip()}]"
-    # WO v4.36.5 §3.2 — trail the structural delete (source='soft_delete') so "who deleted this?" is answerable.
-    _audit_chassis(db, chassis_id, "deleted_at", None, (reason.strip() if reason and reason.strip() else "soft-deleted"),
-                   "soft_delete", who)
+    # WO v4.36.5 §3.2/§3.8 — trail the delete with the column's REAL new value (the timestamp); the reason is its own row.
+    _audit_chassis(db, chassis_id, "deleted_at", None, ts.isoformat(), "soft_delete", who)
+    if reason and reason.strip():
+        _audit_chassis(db, chassis_id, "deletion_reason", None, reason.strip(), "soft_delete", who)
     db.commit()
     db.refresh(rec)
     return rec
@@ -528,9 +531,8 @@ def capture_vin(db: Session, record_id: int, vin: str, who: str) -> ChassisRecor
         ChassisRecord.vin == vin, ChassisRecord.id != record_id)).first()
     if clash:
         raise HTTPException(status_code=409, detail=f"VIN {vin} already anchors another chassis record")
-    rec.vin = vin
-    rec.vin_source = "chassis_page_manual"
-    rec.updated_by = who
+    # WO v4.36.5 §3.8 — through the chokepoint so the late-VIN capture is trailed (vin + vin_source audited).
+    _apply_chassis_fields(db, rec, {"vin": vin, "vin_source": "chassis_page_manual"}, who, source="chassis_page")
     db.commit()
     db.refresh(rec)
     return rec
@@ -566,15 +568,15 @@ def capture_event(db: Session, record_id: int, event_type: str, payload, who: st
         event_date=payload.event_date or date.today(), checklist_json=payload.checklist_json,
         notes=payload.notes, created_by=who)
     db.add(evt)
-    rec.status = _STATUS_FOR[event_type]
-    # WO v4.33 §0.8 — lift Simeon's Body Gap entry from the VCL checklist through to the
-    # record column (Pre-Job Cards pre-populate from chassis_records.body_gap_mm).
+    # WO v4.36.5 §3.8 — status (+ the §0.8 VCL Body-Gap lift) flow through the chokepoint so the lifecycle
+    # transition is trailed in chassis_records_audit (source per-event), not a silent direct write.
+    changes = {"status": _STATUS_FOR[event_type]}
     if event_type == "VCL" and payload.checklist_json:
         raw = str(payload.checklist_json.get("body_gap_mm", "") or "")
         digits = "".join(ch for ch in raw if ch.isdigit())
         if digits:
-            rec.body_gap_mm = int(digits)
-    rec.updated_by = who
+            changes["body_gap_mm"] = int(digits)
+    _apply_chassis_fields(db, rec, changes, who, source=event_type.lower())
     db.commit()
     db.refresh(evt)
     return evt
@@ -655,8 +657,7 @@ def assign_assembly_bay(db: Session, record_id: int, bay_id: int, who: str,
     evt.event_date = event_date or date.today()
     if notes is not None:
         evt.notes = notes
-    rec.status = "in_assembly"                  # §0.12: denormalise STATE onto status (no bay column)
-    rec.updated_by = who
+    _apply_chassis_fields(db, rec, {"status": "in_assembly"}, who, source="assembly_assign")  # §3.8 — audited transition
     db.commit()
     db.refresh(evt)
     return evt
@@ -960,8 +961,7 @@ def record_moved_to_awaiting_qa(db: Session, record_id: int, who: str, notes=Non
                                 event_type="moved_to_awaiting_qa", event_date=date.today(),
                                 notes=notes, created_by=who)
     db.add(evt)
-    rec.status = "awaiting_qa"                        # PHASE TRANSITION — left assembly → clears the bay
-    rec.updated_by = who
+    _apply_chassis_fields(db, rec, {"status": "awaiting_qa"}, who, source="moved_to_awaiting_qa")  # §3.8 — audited
     db.commit()
     db.refresh(evt)
     return evt
@@ -1018,8 +1018,7 @@ def return_chassis_to_parking(db: Session, record_id: int, user, reason=None) ->
         ChassisLifecycleEvent.chassis_record_id == record_id,
         ChassisLifecycleEvent.event_type == "assembly_assigned",
         ChassisLifecycleEvent.cycle_number == cycle).delete(synchronize_session=False)
-    rec.status = "in_workshop"                                   # back to the parking pool
-    rec.updated_by = who
+    _apply_chassis_fields(db, rec, {"status": "in_workshop"}, who, source="return_to_parking")  # §3.8 — audited
     job = db.execute(
         select(ProductionJob).where(ProductionJob.chassis_record_id == record_id)).scalars().first()
     if job is not None:

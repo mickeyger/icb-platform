@@ -441,8 +441,8 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                     changes[col] = (val[:w] if w else val) or None
             # WO v4.36.5 §3.1 — route the ack's chassis writes through the central chokepoint (audited,
             # source='planning_ack'). Single source of truth onto chassis_records; the blob is still written.
-            _apply_chassis_fields(db, chassis, changes, who=actor, source="planning_ack")
-            chassis.updated_by = actor
+            _apply_chassis_fields(db, chassis, changes, who=actor, source="planning_ack",
+                                  actor_id=getattr(user, "id", None))   # §3.8 — symmetric actor capture w/ the PlanningAck row
     job.status = "planning"
     # hotfix (fix/prejob-card-status-sync) — keep the costing's status in lock-step so the Costings
     # dashboard shows 'Planning' and the costing surfaces as an unscheduled Planning card.

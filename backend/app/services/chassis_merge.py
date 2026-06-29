@@ -222,12 +222,13 @@ def restore_chassis(db: Session, chassis_id: int, who: str) -> ChassisRecord:
         raise ci.ChassisIntegrityError("This chassis is not deleted — nothing to restore.", status_code=409)
     if rec.vin:
         ci.validate_vin_uniqueness(db, rec.vin, exclude_id=chassis_id)   # 409 if a live chassis now holds it
+    prior = rec.deleted_at                               # §3.8 — audit the ACTUAL cleared timestamp as old_value
     rec.deleted_at = None
     rec.merged_into_id = None
     rec.updated_by = who
-    # WO v4.36.5 §3.2 — trail the restore (source='restore').
+    # WO v4.36.5 §3.2/§3.8 — trail the restore (source='restore'); old_value = the timestamp it cleared.
     from app.services.chassis import _audit_chassis     # lazy
-    _audit_chassis(db, chassis_id, "deleted_at", "(deleted)", None, "restore", who)
+    _audit_chassis(db, chassis_id, "deleted_at", (prior.isoformat() if prior else None), None, "restore", who)
     db.commit()
     db.refresh(rec)
     return rec

@@ -34,7 +34,8 @@ def retrofit_link(chassis_id: int, body: RetrofitLinkBody,
                   db: Session = Depends(get_db), user: User = Depends(require_admin)):
     """§3.6 STEP 3 — admin recovery: link an orphan chassis to an unlinked job (atomic FK + job_number
     via the §3.5c chokepoint). ChassisIntegrityError → 409/422 via the global handler."""
-    chassis_svc.retrofit_link(db, chassis_id, body.production_job_id, who=user.username)
+    chassis_svc.retrofit_link(db, chassis_id, body.production_job_id, who=user.username,
+                              actor_role=user.role, actor_id=user.id)
     return chassis_svc.get_detail(db, chassis_id)
 
 

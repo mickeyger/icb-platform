@@ -16,7 +16,9 @@ def _purge():
     with SessionLocal() as db:
         # CASCADE handles audit rows when a chassis is deleted; the edited_by_name sweep is belt-and-braces.
         db.execute(text("DELETE FROM icb_mes.chassis_records_audit WHERE edited_by_name LIKE :m"), {"m": f"{_MARK}%"})
+        db.execute(text("DELETE FROM icb_mes.production_jobs WHERE job_number LIKE :m"), {"m": f"{_MARK}%"})    # §3.8 link-path tests
         db.execute(text("DELETE FROM icb_mes.chassis_records WHERE created_source_ref LIKE :m"), {"m": f"{_MARK}%"})
+        db.execute(text("DELETE FROM icb_costings.calculations WHERE quote_number LIKE :m"), {"m": f"{_MARK}%"})
         db.commit()
 
 
@@ -144,3 +146,132 @@ def test_list_chassis_audit_returns_trail_recent_first():
         assert len(rows) >= 2 and all(r.chassis_id == rid for r in rows)
         assert rows[0].id > rows[-1].id                          # most-recent-first (desc)
         assert {r.field_name for r in rows} >= {"make", "notes"}
+
+
+# ── WO v4.36.5 §3.8 — the chokepoint-leak closures + the fail-closed gate ──────────────────────────────
+_VIN_OK = "V4365VN0000000000"   # 17-char ISO-3779-conformant marker VIN (no I/O/Q)
+
+
+def _make_job() -> int:
+    """A minimal marker ProductionJob (+ its marker calc) for the link-path tests; purged via _MARK."""
+    import json
+    import uuid
+    from app.database import SessionLocal, Branch, CalculationRecord
+    from app.models.mes import ProductionJob
+    with SessionLocal() as db:
+        jhb = db.query(Branch).filter_by(code="JHB").first()
+        c = CalculationRecord(quote_number=f"{_MARK}{uuid.uuid4().hex[:8]}", status="accepted", branch_id=jhb.id,
+                              dimensions_json=json.dumps({"body_type": "Test"}), result_json=json.dumps({"selling_zar": 1.0}))
+        db.add(c)
+        db.commit()
+        db.refresh(c)
+        pj = ProductionJob(calculation_record_id=c.id, branch_id=jhb.id, job_number=f"{_MARK}J{c.id}", status="planning")
+        db.add(pj)
+        db.commit()
+        return pj.id
+
+
+def test_capture_vin_audited():
+    """§3.8 finding 1 — late VIN capture now flows through the chokepoint: vin + vin_source audited."""
+    from app.database import SessionLocal
+    from app.services.chassis import capture_vin
+    from app.models.mes import ChassisRecordAudit
+    rid = _make_chassis(make="Isuzu FVR")                    # vin=None stub
+    with SessionLocal() as db:
+        capture_vin(db, rid, _VIN_OK, who=f"{_MARK}_vin")
+        by = {r.field_name: r for r in db.query(ChassisRecordAudit).filter_by(chassis_id=rid).all()}
+        assert "vin" in by and "vin_source" in by
+        assert by["vin"].new_value == _VIN_OK and by["vin"].source == "chassis_page"
+        assert by["vin_source"].new_value == "chassis_page_manual"
+
+
+def test_status_transition_audited():
+    """§3.8 finding 2 (+ the body_gap 5th leak) — a VCL transition trails status + the Body-Gap lift, source per-event."""
+    from datetime import date
+    from app.database import SessionLocal
+    from app.services.chassis import capture_event
+    from app.schemas.chassis import ChassisEventCapture
+    from app.models.mes import ChassisRecordAudit
+    rid = _make_chassis(make="Hino FVR")
+    with SessionLocal() as db:
+        capture_event(db, rid, "VCL",
+                      ChassisEventCapture(event_date=date.today(), checklist_json={"body_gap_mm": "50"}),
+                      who=f"{_MARK}_vcl")
+        by = {r.field_name: r for r in db.query(ChassisRecordAudit).filter_by(chassis_id=rid).all()}
+        assert "status" in by and by["status"].source == "vcl"
+        assert "body_gap_mm" in by and by["body_gap_mm"].new_value == "50"
+
+
+def test_role_gate_fail_closed():
+    """§3.8 finding 7 — the role-gate is FAIL-CLOSED: a None actor_role is refused (403), not waved through."""
+    from app.database import SessionLocal
+    from app.services.chassis import update_chassis
+    from app.schemas.chassis import ChassisRecordUpdate
+    rid = _make_chassis(make="UD Quon")
+    with SessionLocal() as db:
+        with pytest.raises(HTTPException) as ei:
+            update_chassis(db, rid, ChassisRecordUpdate(notes="x"), who=f"{_MARK}_none", actor_role=None)
+        assert ei.value.status_code == 403
+
+
+def test_soft_delete_audit_shape():
+    """§3.8 finding 5 — soft-delete trails the REAL deleted_at timestamp (parseable) + a separate deletion_reason row."""
+    from datetime import datetime
+    from app.database import SessionLocal
+    from app.services.chassis import soft_delete_chassis
+    from app.models.mes import ChassisRecordAudit
+    rid = _make_chassis(make="FAW Junk")
+    with SessionLocal() as db:
+        soft_delete_chassis(db, rid, who=f"{_MARK}_del", reason="junk dupe")
+        rows = {r.field_name: r for r in db.query(ChassisRecordAudit).filter_by(chassis_id=rid, source="soft_delete").all()}
+        assert "deleted_at" in rows and "deletion_reason" in rows
+        datetime.fromisoformat(rows["deleted_at"].new_value)         # the value is a real timestamp, not a sentinel string
+        assert rows["deletion_reason"].new_value == "junk dupe"
+
+
+def test_chokepoint_stamps_updated_by_and_actor_id():
+    """§3.8 finding 8 mechanism — the chokepoint OWNS updated_by, and a passed actor_id lands on edited_by_user_id
+    (the planning-ack path now passes it; this proves the row the ack writes carries the actor FK)."""
+    from app.database import SessionLocal
+    from app.services.chassis import _apply_chassis_fields
+    from app.models.mes import ChassisRecord, ChassisRecordAudit
+    rid = _make_chassis(make="Scania R")
+    with SessionLocal() as db:
+        rec = db.get(ChassisRecord, rid)
+        _apply_chassis_fields(db, rec, {"notes": "via chokepoint"}, who=f"{_MARK}_ck", source="planning_ack", actor_id=4242)
+        db.commit()
+        assert rec.updated_by == f"{_MARK}_ck"                       # chokepoint stamped updated_by
+        row = db.query(ChassisRecordAudit).filter_by(chassis_id=rid, field_name="notes").first()
+        assert row is not None and row.edited_by_user_id == 4242 and row.source == "planning_ack"
+
+
+def test_create_chassis_stub_adoption_audited():
+    """§3.8 finding 3 — stub→real adoption (a job's live placeholder gets the real VIN/make stamped) is audited."""
+    from app.database import SessionLocal
+    from app.services.chassis import create_chassis
+    from app.schemas.chassis import ChassisRecordCreate
+    from app.models.mes import ChassisRecordAudit, ProductionJob
+    ph = _make_chassis(make="")                                  # a live placeholder stub (status defaults to 'expected')
+    jid = _make_job()
+    with SessionLocal() as db:                                   # link the job to the placeholder
+        db.get(ProductionJob, jid).chassis_record_id = ph
+        db.commit()
+    with SessionLocal() as db:
+        create_chassis(db, ChassisRecordCreate(vin=_VIN_OK[:-1] + "1", production_job_id=jid, make="Isuzu FVR"),
+                       who=f"{_MARK}_adopt")
+        by = {r.field_name for r in db.query(ChassisRecordAudit).filter_by(chassis_id=ph).all()}
+        assert {"vin", "make"} <= by                             # the adoption stamped + audited the real values
+
+
+def test_retrofit_link_audited_with_actor():
+    """§3.8 finding 6 — admin Find-Orphan retrofit_link routes through update_chassis WITH the actor, so the gate
+    runs and the audit row carries edited_by_user_id."""
+    from app.database import SessionLocal
+    from app.services.chassis import retrofit_link
+    from app.models.mes import ChassisRecordAudit
+    rid = _make_chassis(make="MAN Orphan", customer_name=None)   # an orphan (no job link)
+    jid = _make_job()
+    with SessionLocal() as db:
+        retrofit_link(db, rid, jid, who=f"{_MARK}_admin", actor_role="admin", actor_id=77)
+        rows = db.query(ChassisRecordAudit).filter_by(chassis_id=rid).all()
+        assert rows and any(r.edited_by_user_id == 77 for r in rows)
