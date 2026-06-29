@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import platform
@@ -13,7 +14,7 @@ from ..database import (
     TrailerType, BillOfMaterial, BOMSection,
     CalculationRecord, Customer, Formula, GlobalVariable,
 )
-from ..deps import get_current_user, user_can
+from ..deps import get_current_user, user_can, active_branch, assert_calc_access, scoped_branch_id
 from ..services import (
     _bom_load_options,
     _compute_skin_formula_cost, _compute_taping_block_cost, _compute_floor_plate_cost,
@@ -28,6 +29,18 @@ from app.formula_engine import calculate_bom, evaluate_formula
 router = APIRouter()
 
 _approve_lock = asyncio.Lock()
+
+
+def _record_etag(rec) -> str:
+    """Optimistic-locking concurrency token for an edit (WO v4.37 §3.1 D-4).
+    A short content hash of the record's stored state — the editor sends back the
+    etag it loaded and an overwrite is refused (412) if it no longer matches, i.e.
+    someone else saved in the meantime. Absent etag ⇒ check skipped (the legacy
+    Jinja calculator never sends one, so its behaviour is unchanged)."""
+    basis = "|".join([
+        rec.result_json or "", rec.dimensions_json or "", rec.status or "",
+    ])
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
 def _attach_formula_debug(result: dict, body_vars: dict, formula_lib: dict,
@@ -708,7 +721,7 @@ async def check_duplicate(customer_id: int, trailer_type_id: int,
 # ─── Approve / save ───────────────────────────────────────────────────────────
 
 @router.post("/api/approve")
-async def api_approve(request: Request, db: Session = Depends(get_db)):
+async def api_approve(request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=401)
@@ -728,6 +741,10 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
     # brand-new one. version_action == "overwrite" updates that record in place;
     # "new_version" saves a fresh revision (optionally reusing its quote number).
     edit_record_id = body.get("edit_record_id")
+    # WO v4.37 §3.1 D-3 — stamp NEW records with the caller's working branch
+    # (explicit active branch, else their home branch) so cross-branch access can
+    # be scoped. Legacy/unbranched records stay NULL = shared (WO v4.29 D1).
+    stamp_branch_id = branch.id if branch is not None else getattr(user, "branch_id", None)
 
     tt = db.query(TrailerType).filter_by(id=trailer_id).first()
     if not tt:
@@ -787,6 +804,9 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
         "is_repair":                 is_repair,
         "ratio_value":               body.get("ratio_value"),
         "ratio_label":               body.get("ratio_label"),
+        # WO v4.37 §3.2 — persist per-quote insulation thickness so an edit-reopen
+        # re-hydrates it (keyed by material name; additive, legacy calc sends none).
+        "body_variable_overrides":   body.get("body_variable_overrides"),
         "chassis":                   body.get("chassis"),
         # Complete client-side UI snapshot (body options, DRD/SRD, configurator
         # draft states, optional sections, full price overrides, chassis, body
@@ -804,11 +824,22 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
             rec = db.query(CalculationRecord).filter_by(id=int(edit_record_id)).first()
             if not rec:
                 raise HTTPException(status_code=404, detail="Costing to edit was not found")
+            assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
             rec_status = rec.status or ("accepted" if rec.approved_at else "pending")
             if rec_status != "pending":
                 raise HTTPException(
                     status_code=409,
                     detail=f"Only pending costings can be edited — this one is '{rec_status}'.",
+                )
+            # WO v4.37 §3.1 D-4 — optimistic lock: refuse the overwrite if the
+            # record changed since the editor loaded it (no-op when no etag sent,
+            # so the legacy Jinja calculator's last-write-wins is unchanged).
+            base_etag = body.get("base_etag")
+            if base_etag and base_etag != _record_etag(rec):
+                raise HTTPException(
+                    status_code=412,
+                    detail="This costing was changed by someone else since you "
+                           "opened it. Reload it and re-apply your changes.",
                 )
             try:
                 _prev = json.loads(rec.result_json) if rec.result_json else {}
@@ -863,6 +894,7 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
         rec = CalculationRecord(
             trailer_type_id=trailer_id,
             user_id=user.id,
+            branch_id=stamp_branch_id,            # WO v4.37 §3.1 D-3
             customer_id=customer_id,
             dimensions_json=json.dumps(dims),
             result_json=json.dumps(result),
@@ -899,7 +931,22 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
         try:
             assign_quote_number(rec, db=db, user=user, trailer=tt)
         except Exception:
-            logging.exception("assign_quote_number failed for record %s", rec.id)
+            # WO v4.37 §3.1 — do NOT silently commit a record with a NULL quote
+            # number (ADR 0026 H6: silent deferral on a workflow-critical path).
+            # Roll the whole save back so no orphan persists, log loudly for admin
+            # attention, and surface the failure instead of a misleading 200.
+            db.rollback()
+            logging.error(
+                "QUOTE_NUMBER_ASSIGN_FAILED — costing save rolled back "
+                "(user=%s trailer=%s customer=%s); needs admin attention",
+                getattr(user, "id", None), trailer_id, customer_id, exc_info=True,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Your costing could not be saved because a quote number "
+                       "couldn't be assigned. Please try again — if it keeps "
+                       "happening, contact an administrator.",
+            )
         db.commit()
         db.refresh(rec)
 
@@ -914,13 +961,14 @@ async def api_approve(request: Request, db: Session = Depends(get_db)):
 # ─── Results page ─────────────────────────────────────────────────────────────
 
 @router.get("/results/{record_id}", response_class=HTMLResponse)
-async def results_page(record_id: int, request: Request, db: Session = Depends(get_db)):
+async def results_page(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     user = get_current_user(request, db)
     if not user:
         return RedirectResponse(url="/login")
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404)
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
     dims   = json.loads(rec.dimensions_json)
     result = json.loads(rec.result_json)
     result = strip_excluded_items(result)  # report shows only selected items
@@ -970,12 +1018,19 @@ async def results_page(record_id: int, request: Request, db: Session = Depends(g
 @router.get("/api/calculations")
 async def api_list_calculations(
     request: Request, db: Session = Depends(get_db),
-    filter: str = "all", limit: int = 20
+    filter: str = "all", limit: int = 20,
+    branch=Depends(active_branch),
 ):
     user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=401)
     q = db.query(CalculationRecord)
+    # WO v4.37 §3.1 D-3 — soft branch scope (ADR 0010): once a branch is switched,
+    # a non-admin sees only that branch's records plus unbranched/shared ones.
+    _scope = scoped_branch_id(branch)
+    if _scope is not None and user.role != "admin":
+        q = q.filter((CalculationRecord.branch_id == _scope)
+                     | (CalculationRecord.branch_id.is_(None)))
     now_utc = datetime.now(timezone.utc)
     if filter == "week":
         q = q.filter(CalculationRecord.created_at >= now_utc - timedelta(days=7))
@@ -1063,13 +1118,14 @@ async def api_list_calculations(
 
 @router.post("/api/calculations/{record_id}/accept")
 @router.post("/api/calculations/{record_id}/approve")  # legacy alias
-async def api_mark_calculation_accepted(record_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_mark_calculation_accepted(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=401)
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Calculation not found")
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
     if rec.approved_at:
         return {
             "ok": True, "already_decided": True, "status": "accepted",
@@ -1090,13 +1146,14 @@ async def api_mark_calculation_accepted(record_id: int, request: Request, db: Se
 
 
 @router.post("/api/calculations/{record_id}/decline")
-async def api_mark_calculation_declined(record_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_mark_calculation_declined(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=401)
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Calculation not found")
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
     body = await request.json()
     reason = (body.get("reason") or "").strip()
     if not reason:
@@ -1128,13 +1185,14 @@ async def api_delete_calculation(record_id: int, request: Request, db: Session =
 
 
 @router.get("/api/calculations/{record_id}")
-async def api_get_calculation(record_id: int, request: Request, db: Session = Depends(get_db)):
+async def api_get_calculation(record_id: int, request: Request, db: Session = Depends(get_db), branch=Depends(active_branch)):
     user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=401)
     rec = db.query(CalculationRecord).filter_by(id=record_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Calculation not found")
+    assert_calc_access(rec.branch_id, user, branch)  # WO v4.37 §3.1 D-3
     try:
         dims = json.loads(rec.dimensions_json) if rec.dimensions_json else {}
     except Exception:
@@ -1147,6 +1205,7 @@ async def api_get_calculation(record_id: int, request: Request, db: Session = De
     status = rec.status or ("accepted" if rec.approved_at else "pending")
     return {
         "id": rec.id,
+        "etag": _record_etag(rec),   # WO v4.37 §3.1 D-4 — optimistic-lock token
         "trailer_type_id": rec.trailer_type_id,
         "customer_id":     rec.customer_id,
         "dimensions":      dims,
@@ -1168,6 +1227,7 @@ async def api_get_calculation(record_id: int, request: Request, db: Session = De
         "flag_overrides":            input_state.get("flag_overrides") or {},
         "user_excluded_bom_ids":     input_state.get("user_excluded_bom_ids") or [],
         "optional_sections_enabled": input_state.get("optional_sections_enabled") or [],
+        "body_variable_overrides":   input_state.get("body_variable_overrides") or {},  # WO v4.37 §3.2 (edit re-hydrate)
         # Profit ratio lives at the top level of result_json on every record that
         # used one (set by _apply_chassis_and_margin) — read it there first so the
         # calculator restores the selling-price ratio on edit and the total doesn't

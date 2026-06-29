@@ -158,6 +158,40 @@ def active_branch(session_id: Optional[str] = Depends(current_session_id),
     return _sess.get_switched_branch(db, session_id)
 
 
+# ── Calculation branch scoping (WO v4.37 §3.1 D-3; builds on WO v4.29 D1 + ADR 0010) ──
+
+def scoped_branch_id(branch: Optional[Branch]) -> Optional[int]:
+    """Branch id to scope calculation reads/writes to, or None = 'see all'.
+    Per ADR 0010 scoping engages ONLY once a branch is explicitly switched; with no
+    active branch the caller sees every accessible record (unchanged pre-v4.37
+    behaviour)."""
+    return branch.id if branch is not None else None
+
+
+def can_access_calc(user: Optional[User], rec_branch_id: Optional[int],
+                    scope_branch_id: Optional[int]) -> bool:
+    """Branch-access predicate for a CalculationRecord. Admins see all; with no
+    active-branch scope every record is visible (ADR 0010 soft model); otherwise a
+    record is visible when it is unbranched (NULL = shared legacy data, WO v4.29 D1
+    'active branch covers calcs with no branch_id') or its branch matches."""
+    if user is not None and user.role == "admin":
+        return True
+    if scope_branch_id is None:
+        return True
+    if rec_branch_id is None:
+        return True
+    return rec_branch_id == scope_branch_id
+
+
+def assert_calc_access(rec_branch_id: Optional[int], user: Optional[User],
+                       branch: Optional[Branch]) -> None:
+    """Raise 404 when `user` may not access a calculation owned by `rec_branch_id`
+    under the session's active `branch` (WO v4.37 §3.1 D-3). 404 not 403 so a
+    cross-branch id cannot be probed for existence."""
+    if not can_access_calc(user, rec_branch_id, scoped_branch_id(branch)):
+        raise HTTPException(status_code=404, detail="Calculation not found")
+
+
 # ── Network / request helpers ─────────────────────────────────────────────────
 
 def _is_localhost(request: Request) -> bool:
