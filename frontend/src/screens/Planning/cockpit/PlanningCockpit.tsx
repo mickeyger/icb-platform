@@ -591,7 +591,7 @@ function LiveCockpit() {
           <span className="flex items-center gap-2 text-sm font-semibold text-body">
             <Layers size={15} className="text-primary" />
             Bay model
-            <span className="text-xs font-normal text-muted">Parking · Pre-Assembly · Merge · Awaiting QA</span>
+            <span className="text-xs font-normal text-muted">Parking · Pre-Assembly · Merge · Awaiting QA · Dispatch</span>
           </span>
           {dockOpen ? <ChevronDown size={16} className="text-muted" /> : <ChevronUp size={16} className="text-muted" />}
         </button>

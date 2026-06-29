@@ -100,3 +100,16 @@ jobs:
             python -m playwright install chromium
           fi
           pytest tests/journeys/ -v
+
+      # WO v4.36e §3.1 — on a journey FAILURE, upload the Playwright trace(s) so a CI-only regression
+      # (ADR 0011: deterministic-in-CI, unreproducible on-box) is diagnosable from the captured DOM
+      # snapshots + network + screenshots. _common.py writes them to <repo-root>/test-results/ only on
+      # failure; open locally with `playwright show-trace <zip>`. 14-day retention (cost vs debug value).
+      - name: Upload Playwright trace (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace-${{ matrix.os }}-${{ github.run_attempt }}
+          path: test-results/
+          retention-days: 14
+          if-no-files-found: ignore

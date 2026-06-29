@@ -1140,7 +1140,14 @@ function LivePlanningBoard() {
         </Card>
       </div>
 
-      <BayModelLanes />
+      {/* WO v4.36e §3.2 — bound the bay-model section (shrink-0 + capped height + its own scroll) so its
+          height can't perturb the flex-1 week grid above it. This isolates <BayModelLanes/> (incl. the
+          re-added Dispatch zone) from the week-grid layout — fixing the v4.36c flex-coupling regression at
+          its source AND hardening the pre-existing "slot-cell not stable" reflow flake (§3.1 trace). Mirrors
+          the Cockpit dock's bounded pattern. max-h is an initial read of the layout (BA judges at click-through). */}
+      <div data-testid="bay-model-wrap" className="shrink-0 max-h-[44vh] overflow-y-auto">
+        <BayModelLanes />
+      </div>
 
       <div className="flex shrink-0 items-center justify-between">
         <LastUpdated at={lastUpdated} onRefresh={refresh} />

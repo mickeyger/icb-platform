@@ -29,6 +29,7 @@ never CSS class names (which are styling, not contract).
 from __future__ import annotations
 
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -47,6 +48,9 @@ _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _BACKEND_DIR.parent
 _DIST_DIR = _REPO_ROOT / "frontend" / "dist"
 SCREENSHOT_ROOT = _REPO_ROOT / "docs" / "screenshots" / "journeys"
+# WO v4.36e §3.1 — Playwright trace dir. CI uploads it as an artifact on a journey FAILURE
+# (.github/workflows/ci.yml). Open a saved trace locally with `playwright show-trace <zip>`.
+TRACE_ROOT = _REPO_ROOT / "test-results"
 
 # ── Server boot config ───────────────────────────────────────────────────────
 _HOST = "127.0.0.1"
@@ -171,10 +175,26 @@ def browser(playwright_instance) -> "Browser":  # type: ignore[valid-type]
 
 # ── Per-test fixtures ────────────────────────────────────────────────────────
 @pytest.fixture()
-def browser_context(browser: "Browser", live_server: str) -> "BrowserContext":  # type: ignore[valid-type]
+def browser_context(browser: "Browser", live_server: str, request) -> "BrowserContext":  # type: ignore[valid-type]
     context = browser.new_context(base_url=live_server, viewport={"width": 1440, "height": 900})
-    yield context
-    context.close()
+    # WO v4.36e §3.1 — capture a full trace (DOM snapshots + screenshots + network + sources).
+    # Retained only when the test FAILS: the exact artifact a CI-only journey regression needs to
+    # diagnose without a local repro (ADR 0011 — deterministic-in-CI, flaky on-box). On a pass the
+    # trace is stopped and discarded (no path written), so green runs upload nothing.
+    context.tracing.start(screenshots=True, snapshots=True, sources=True)
+    try:
+        yield context
+    finally:
+        rep_call = getattr(request.node, "_journey_rep_call", None)
+        rep_setup = getattr(request.node, "_journey_rep_setup", None)
+        failed = (rep_call is not None and rep_call.failed) or (rep_setup is not None and rep_setup.failed)
+        if failed:
+            TRACE_ROOT.mkdir(parents=True, exist_ok=True)
+            safe = re.sub(r"[^\w.-]", "_", request.node.nodeid)[:120]
+            context.tracing.stop(path=str(TRACE_ROOT / f"{safe}.zip"))
+        else:
+            context.tracing.stop()
+        context.close()
 
 
 @pytest.fixture()
