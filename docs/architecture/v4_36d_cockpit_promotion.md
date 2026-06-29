@@ -63,6 +63,11 @@ is **strategy-neutral** whether the dropdown stays or the Cockpit later becomes 
   regression, and the Phase-1 deadline is binding.
 - **Bay-flag discoverability** — the v4.36b bay flags render in the Cockpit's bay dock, collapsed by default
   → less discoverable than on the Board. Deferred to a post-ship UX cycle (default-open the dock, or accept).
+- **Attention-count badge** (BA click-through note — *resolved, no action*): the "*N* attention items → Health
+  Check" badge appeared in the Cockpit nav but not the Board nav during the walk-through. It is a **global**
+  element (`TopNav.tsx:132`, gated only on `summary.total > 0`), so it renders identically on `/planning` and
+  `/planning/cockpit` — the difference was a transient `useFlagSummary` fetch-timing artifact, **not** a
+  Cockpit-only feature and **not** a Board gap.
 
 ## Method
 
