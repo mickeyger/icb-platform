@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/layout/Layout'
 import { Configurator } from './screens/Configurator/Configurator'
 import { PlanningBoard } from './screens/Planning/PlanningBoard'
+import { PlanningCockpit } from './screens/Planning/cockpit/PlanningCockpit'
 import { VacuumTablet } from './screens/ShopFloorTablet/VacuumTablet'
 import { KanbanTV } from './screens/KanbanTV/KanbanTV'
 import { ProductionDashboard } from './screens/Production/ProductionDashboard'
@@ -32,6 +33,8 @@ export default function App() {
       {/* Legacy redirect — old /configurator path */}
       <Route path="/configurator" element={<Navigate to="/costings/new" replace />} />
       <Route path="/planning" element={<Layout><PlanningBoard /></Layout>} />
+      {/* Cockpit (Concept 6) — additive alternate Planning layout; the board above is unchanged. */}
+      <Route path="/planning/cockpit" element={<Layout><PlanningCockpit /></Layout>} />
       {/* Work Order v4.11 — Materials, Buying & Stores. Weekly Forecast is a tab
           inside the dashboard at /materials?tab=forecast (not a separate route). */}
       <Route path="/materials" element={<Layout><MaterialsDashboard /></Layout>} />
