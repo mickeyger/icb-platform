@@ -65,7 +65,7 @@ def merge(loser_id: int, body: MergeBody,
           db: Session = Depends(get_db), user: User = Depends(require_admin)):
     """§3.6 STEP 6 — merge the loser chassis INTO the winner: re-point all FKs + renumber colliding cycles +
     soft-delete the loser (deleted_at + merged_into_id). One transaction; ChassisIntegrityError → 409/422."""
-    return chassis_merge.merge_chassis(db, loser_id, body.winner_id, who=user.username)
+    return chassis_merge.merge_chassis(db, loser_id, body.winner_id, who=user.username, actor_id=user.id)
 
 
 @router.patch("/{chassis_id}/restore", response_model=ChassisRecordDetail)

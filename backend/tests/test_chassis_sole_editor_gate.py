@@ -365,3 +365,26 @@ def test_unlink_card_orphan_audited():
         assert db.get(ChassisRecord, cid).status == "expected_orphaned"
         row = db.query(ChassisRecordAudit).filter_by(chassis_id=cid, field_name="status", source="unlink_card").first()
         assert row is not None and row.new_value == "expected_orphaned" and row.edited_by_user_id == aid
+
+
+def test_merge_winner_job_number_audited():
+    """§3.10 — the merge's winner-side job_number provenance-fill is audited ON THE WINNER (source='merge'),
+    closing the gap where the survivor's trail had no record of inheriting the loser's job number."""
+    from app.database import SessionLocal, User
+    from app.services.chassis_merge import merge_chassis
+    from app.models.mes import ChassisRecordAudit, ProductionJob
+    loser = _make_chassis(make="Loser w/ job")
+    winner = _make_chassis(make="Winner blank job")           # job_number=None (blank)
+    jid = _make_job()
+    with SessionLocal() as db:
+        aid = db.query(User).filter_by(username="admin").first().id
+        job = db.get(ProductionJob, jid)
+        job.chassis_record_id = loser                          # the loser carries the linked job
+        jobnum = job.job_number
+        db.commit()
+    with SessionLocal() as db:
+        merge_chassis(db, loser_id=loser, winner_id=winner, who=f"{_MARK}_mrg", actor_id=aid)
+        row = db.query(ChassisRecordAudit).filter_by(chassis_id=winner, field_name="job_number",
+                                                     source="merge").first()
+        assert row is not None
+        assert row.old_value is None and row.new_value == jobnum and row.edited_by_user_id == aid
