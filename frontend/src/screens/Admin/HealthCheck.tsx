@@ -27,7 +27,12 @@ function worstSeverity(e: FlagCatalogEntry): string {
   return sevs.includes('red') ? 'red' : sevs.includes('amber') ? 'amber' : 'sky'
 }
 
-function drillItem(domain: string, r: FlaggedRow): { label: string; href: string } {
+// WO v4.36c.1 — the three Pre-Job sign-off flags drill to the Outstanding Sign-offs admin
+// (/admin/prejob-signoffs); the other 'jobs' flags (the ETA pair) stay on the board until the ETA
+// destination design lands (v4.36b.4 post-ship). Keyed on the flag so one domain can split targets.
+const SIGNOFF_FLAGS = new Set(['prejob_sent_stale', 'signoff_pending_long', 'signoff_role_pending_5days'])
+
+function drillItem(domain: string, flag: string, r: FlaggedRow): { label: string; href: string } {
   if (domain === 'chassis') {
     const mm = [r.make, r.model].filter(Boolean).join(' ') || '—'
     return { label: `${r.vin || '(no VIN)'} · ${r.customer_name || '—'} · ${mm}`, href: `/chassis/${r.chassis_id}` }
@@ -35,7 +40,7 @@ function drillItem(domain: string, r: FlaggedRow): { label: string; href: string
   if (domain === 'jobs') {
     return {
       label: `Job ${r.job_number || r.job_id} · ${r.customer_name || '—'}${r.chassis_eta ? ` · ETA ${r.chassis_eta}` : ''}`,
-      href: '/planning',
+      href: SIGNOFF_FLAGS.has(flag) ? '/admin/prejob-signoffs' : '/planning',
     }
   }
   return { label: `Bay ${r.code || r.bay_id}`, href: '/planning' }
@@ -134,7 +139,7 @@ export function HealthCheckAdmin() {
           ) : (
             <ul className="divide-y divide-line" data-testid="health-drill-list">
               {drill.map((r, i) => {
-                const { label, href } = drillItem(sel.domain, r)
+                const { label, href } = drillItem(sel.domain, sel.flag, r)
                 return (
                   <li key={i} className="flex items-center justify-between py-1.5 text-sm">
                     <span>{label}</span>
