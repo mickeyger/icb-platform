@@ -3,14 +3,15 @@
  * permission-gated (admin sees both); the backend enforces chassis.vcl / chassis.dcl regardless. */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X, RotateCcw, AlertTriangle, FileDown } from 'lucide-react'
+import { ArrowLeft, Truck, LogIn, LogOut, Image, Pencil, X, RotateCcw, AlertTriangle, History, ChevronDown, ChevronRight, FileDown } from 'lucide-react'
 
 import { apiGet, apiPatch, apiPost, ApiError, handleApiError } from '../../lib/api'
+import { dmy, hhmm } from '../../lib/format'
 import { useToast } from '../../components/ui/toast'
 import { useAppData } from '../../store/AppDataContext'
 import { Card } from '../../components/ui/primitives'
 import { Skeleton, EmptyState, Spinner } from '../../components/ui/feedback'
-import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisEvent, type ChassisRecordDetail } from './types'
+import { CHASSIS_STATUS_STYLE, CHASSIS_PROVENANCE, type ChassisEvent, type ChassisRecordDetail, type ChassisAuditRow } from './types'
 import { VclDclForm, type ChecklistItem } from './VclDclForm'
 import { ChassisFieldsForm, type ChassisFieldValues } from './ChassisFieldsForm'
 import { data as mockData } from '../../data/mockData'
@@ -83,6 +84,79 @@ function EventCard({ ev }: { ev: ChassisEvent }) {
         </div>
       )}
       {ev.notes && <p className="mt-2 text-xs text-muted">{ev.notes}</p>}
+    </div>
+  )
+}
+
+// WO v4.36.5 §3.4 — per-consumer hook (no shared provider): lazily fetch the chassis audit trail on open.
+function useChassisAudit(chassisId: number, enabled: boolean) {
+  const [rows, setRows] = useState<ChassisAuditRow[]>([])
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    if (!enabled) return
+    let live = true
+    setLoading(true)
+    apiGet<ChassisAuditRow[]>(`/api/chassis-records/${chassisId}/audit`)
+      .then((r) => { if (live) setRows(r) })
+      .catch(() => { if (live) setRows([]) })
+      .finally(() => { if (live) setLoading(false) })
+    return () => { live = false }
+  }, [chassisId, enabled])
+  return { rows, loading }
+}
+
+// Friendly labels for the audit `source` — the actual values the chokepoint + structural ops write.
+const AUDIT_SOURCE_LABEL: Record<string, string> = {
+  chassis_page: 'Chassis edit', planning_ack: 'Planning ack', system_autocreate: 'Auto-created',
+  merge: 'Merge', soft_delete: 'Soft-deleted', restore: 'Restored', retrofit_link: 'Linked',
+}
+
+/** WO v4.36.5 §3.4 — chassis change-history viewer: chassis_records_audit for this chassis, most-recent
+ *  first, source rendered humanly. Lazy (fetches on first open); bounded to the latest 50 by the endpoint. */
+function ChassisAuditTrail({ chassisId }: { chassisId: number }) {
+  const [open, setOpen] = useState(false)
+  const { rows, loading } = useChassisAudit(chassisId, open)
+  return (
+    <div className="mt-6" data-testid="chassis-audit">
+      <button onClick={() => setOpen((o) => !o)} data-testid="chassis-audit-toggle"
+              className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide text-muted hover:text-body">
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<History size={14} /> Change history
+      </button>
+      {open && (
+        <div className="mt-2">
+          {loading ? (
+            <Skeleton rows={3} />
+          ) : rows.length === 0 ? (
+            <EmptyState title="No changes recorded" hint="Edits, merges, and deletes appear here once they happen." />
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-line">
+              <table className="w-full text-xs" data-testid="chassis-audit-table">
+                <thead className="bg-surface-alt text-left text-muted">
+                  <tr>
+                    <th className="px-2 py-1 font-semibold">When</th>
+                    <th className="px-2 py-1 font-semibold">Change</th>
+                    <th className="px-2 py-1 font-semibold">Field</th>
+                    <th className="px-2 py-1 font-semibold">From → To</th>
+                    <th className="px-2 py-1 font-semibold">By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.id} data-testid="chassis-audit-row" className="border-t border-line">
+                      <td className="whitespace-nowrap px-2 py-1 text-muted">{r.created_at ? `${dmy(r.created_at)} ${hhmm(r.created_at)}` : '—'}</td>
+                      <td className="px-2 py-1"><span className="rounded-full bg-surface-alt px-2 py-0.5 font-semibold text-body">{AUDIT_SOURCE_LABEL[r.source ?? ''] ?? (r.source ?? '—')}</span></td>
+                      <td className="px-2 py-1 font-medium text-body">{r.field_name.replace(/_/g, ' ')}</td>
+                      <td className="px-2 py-1 text-muted"><span className="line-through">{r.old_value || '—'}</span>{' → '}<span className="font-medium text-body">{r.new_value || '—'}</span></td>
+                      <td className="whitespace-nowrap px-2 py-1 text-body">{r.edited_by_name || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rows.length >= 50 && <div className="border-t border-line bg-surface-alt px-2 py-1 text-[10px] text-muted">Showing the latest 50 changes.</div>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -258,6 +332,9 @@ export function ChassisDetail() {
         </div>
       )}
 
+      {/* WO v4.36.5 §3.4 — change-history viewer (admin/planner; same audience as Edit). Lazy-loads on open. */}
+      {canEdit && <ChassisAuditTrail chassisId={rec.id} />}
+
       {editing && (
         <EditChassisModal rec={rec} onClose={() => setEditing(false)}
                           onSaved={() => { setEditing(false); load() }} />
@@ -344,6 +421,7 @@ function EditChassisModal({ rec, onClose, onSaved }: {
         tail_lift_code: form.tail_lift_code.trim() || null,
         description: form.description.trim() || null,
         notes: form.notes.trim() || null,
+        version: rec.version,                             // WO v4.36.5 §3.3 — optimistic-lock etag echo (stale → 409 "reload")
       }
       // §3.5c — never send job_number/production_job_id for a LINKED chassis (FK is read-only — swap = Merge).
       // For an UNLINKED chassis, sending production_job_id atomically links it (backend stamps job_number).

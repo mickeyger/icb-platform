@@ -34,7 +34,8 @@ def retrofit_link(chassis_id: int, body: RetrofitLinkBody,
                   db: Session = Depends(get_db), user: User = Depends(require_admin)):
     """§3.6 STEP 3 — admin recovery: link an orphan chassis to an unlinked job (atomic FK + job_number
     via the §3.5c chokepoint). ChassisIntegrityError → 409/422 via the global handler."""
-    chassis_svc.retrofit_link(db, chassis_id, body.production_job_id, who=user.username)
+    chassis_svc.retrofit_link(db, chassis_id, body.production_job_id, who=user.username,
+                              actor_role=user.role, actor_id=user.id)
     return chassis_svc.get_detail(db, chassis_id)
 
 
@@ -64,7 +65,7 @@ def merge(loser_id: int, body: MergeBody,
           db: Session = Depends(get_db), user: User = Depends(require_admin)):
     """§3.6 STEP 6 — merge the loser chassis INTO the winner: re-point all FKs + renumber colliding cycles +
     soft-delete the loser (deleted_at + merged_into_id). One transaction; ChassisIntegrityError → 409/422."""
-    return chassis_merge.merge_chassis(db, loser_id, body.winner_id, who=user.username)
+    return chassis_merge.merge_chassis(db, loser_id, body.winner_id, who=user.username, actor_id=user.id)
 
 
 @router.patch("/{chassis_id}/restore", response_model=ChassisRecordDetail)

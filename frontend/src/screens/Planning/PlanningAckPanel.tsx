@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowRightCircle, Lock, Truck, ShieldCheck, Calendar, BookOpen, X, Wrench, AlertCircle, Loader2,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { SidePanel } from '../../components/ui/overlays'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { useAppData } from '../../store/AppDataContext'
@@ -69,6 +70,8 @@ export function PlanningAckPanel({
   }, [costing, chassisLocked, vinLocked, knownVin, card])
   const [form, setForm] = useState<ChassisEtaPayload>(seed)
   useEffect(() => setForm(seed), [seed])
+  // WO v4.36.5 §3.3 — the linked chassis id (from the prefill), for the read-only "Edit on Chassis page" link.
+  const [chassisId, setChassisId] = useState<number | null>(null)
 
   // WO v4.36b — chassis-field unification: overlay the LIVE linked chassis fields from chassis_records (the
   // single source of truth) so the ack shows what the Chassis page shows — the identity fields
@@ -81,6 +84,7 @@ export function PlanningAckPanel({
     let live = true
     apiGet<ChassisPrefill>(`/api/production-jobs/${jobId}/chassis-prefill`).then((p) => {
       if (!live) return
+      setChassisId(p.chassis_id ?? null)
       setForm((f) => ({
         ...f,
         customer_name: p.customer_name ?? f.customer_name,
@@ -200,6 +204,7 @@ export function PlanningAckPanel({
               canEdit={canAck}
               chassisLocked={chassisLocked}
               vinLocked={vinLocked}
+              chassisId={chassisId}
             />
           )}
 
@@ -348,12 +353,14 @@ function ChassisExternalSection({
   canEdit,
   chassisLocked,
   vinLocked,
+  chassisId,
 }: {
   form: ChassisEtaPayload
   setForm: React.Dispatch<React.SetStateAction<ChassisEtaPayload>>
   canEdit: boolean
   chassisLocked?: boolean
   vinLocked?: boolean
+  chassisId?: number | null
 }) {
   // WO v4.36b — chassis-field unification: the ack uses the SAME ChassisFieldsForm as the Chassis page Edit
   // modal, so both present these fields identically over chassis_records. Map the ack form (ChassisEtaPayload)
@@ -403,6 +410,11 @@ function ChassisExternalSection({
           locks={locks}
           etaHint={<><Calendar size={10} className="mr-1 inline-block" />Required — when will the customer’s chassis arrive at Icecold?</>}
           vinNote={vinLocked ? 'Attested upstream — locked.' : undefined}
+          editNotice={!canEdit ? (
+            <>These chassis fields are maintained on the {chassisId
+              ? <Link to={`/chassis/${chassisId}`} className="font-semibold text-primary underline">Chassis page</Link>
+              : 'Chassis page'}.</>
+          ) : undefined}
         />
       </div>
     </Tooltip>

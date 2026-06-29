@@ -85,3 +85,23 @@ def test_vin_capture_rejects_duplicate(api):
 def test_vin_capture_empty_422(api):
     rid = _expected_chassis("Fuso FA")
     assert api.post(f"/api/chassis-records/{rid}/vin", json={"vin": "  "}).status_code == 422
+
+
+def test_chassis_detail_serializes_version_for_etag(api):
+    """WO v4.36.5 §3.3 — the detail GET exposes `version` so the Edit modal can echo it back on PATCH
+    (the optimistic-lock etag). A fresh row reads 0 (the column's server_default). The stale-version → 409
+    behaviour itself is covered at the service level in test_chassis_sole_editor_gate.py."""
+    rid = _expected_chassis("Tata Prima")
+    body = api.get(f"/api/chassis-records/{rid}").json()
+    assert "version" in body and body["version"] == 0
+
+
+def test_chassis_audit_endpoint_returns_trail(api):
+    """WO v4.36.5 §3.4 — GET /{id}/audit returns the change history (admin/planner via chassis.update). A PATCH
+    writes a row; the endpoint surfaces it with field_name/new_value + the snapshot edited_by_name + source."""
+    rid = _expected_chassis("MAN TGS")
+    assert api.patch(f"/api/chassis-records/{rid}", json={"notes": "qc", "version": 0}).status_code == 200
+    rows = api.get(f"/api/chassis-records/{rid}/audit").json()
+    assert isinstance(rows, list) and len(rows) >= 1
+    assert rows[0]["field_name"] == "notes" and rows[0]["new_value"] == "qc"
+    assert "edited_by_name" in rows[0] and rows[0]["source"] == "chassis_page"

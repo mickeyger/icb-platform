@@ -333,6 +333,7 @@ def chassis_prefill(db: Session, job_id: int) -> dict:
     dealer_id = chassis.dealer_id if chassis else None
     dealer_name = (db.get(Customer, dealer_id).name if dealer_id and db.get(Customer, dealer_id) else None)
     return {"customer_name": customer_name, "customer_id": customer_id, "chassis_type": chassis_type,
+            "chassis_id": (chassis.id if chassis else None),   # WO v4.36.5 §3.3 — the ack's "Edit on Chassis page" deep link
             "dealer_id": dealer_id, "dealer_name": dealer_name, "vin_number": vin_number,
             "vin_source": vin_source,
             # WO v4.36b — chassis-field unification: surface the rest of the linked chassis fields so the
@@ -440,8 +441,8 @@ def record_planning_ack(db: Session, job_id: int, chassis_eta: Optional[date],
                     changes[col] = (val[:w] if w else val) or None
             # WO v4.36.5 §3.1 — route the ack's chassis writes through the central chokepoint (audited,
             # source='planning_ack'). Single source of truth onto chassis_records; the blob is still written.
-            _apply_chassis_fields(db, chassis, changes, who=actor, source="planning_ack")
-            chassis.updated_by = actor
+            _apply_chassis_fields(db, chassis, changes, who=actor, source="planning_ack",
+                                  actor_id=getattr(user, "id", None))   # §3.8 — symmetric actor capture w/ the PlanningAck row
     job.status = "planning"
     # hotfix (fix/prejob-card-status-sync) — keep the costing's status in lock-step so the Costings
     # dashboard shows 'Planning' and the costing surfaces as an unscheduled Planning card.

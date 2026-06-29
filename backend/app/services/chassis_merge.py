@@ -131,7 +131,7 @@ def preview_merge(db: Session, loser_id: int, winner_id: int) -> dict:
     }
 
 
-def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
+def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str, actor_id: "int | None" = None) -> dict:
     """WO v4.36a §3.6 STEP 6 — merge the LOSER chassis INTO the WINNER, one transaction:
       1) renumber the loser's colliding lifecycle cycles (renumber_plan) + re-point its events to the winner;
       2) re-point the loser's production_jobs + prejob_cards to the winner (no UNIQUE on chassis_record_id —
@@ -186,7 +186,10 @@ def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
             sj = db.execute(select(ProductionJob).where(ProductionJob.chassis_record_id == winner_id)
                             .order_by(ProductionJob.id.desc())).scalars().first()
             if sj is not None and sj.job_number:
-                winner.job_number = sj.job_number
+                # WO v4.36.5 §3.10 — route the survivor's job_number provenance-fill through the chokepoint so
+                # the WINNER's trail records "job_number filled from the merge" (closes the winner-side gap).
+                from app.services.chassis import _apply_chassis_fields
+                _apply_chassis_fields(db, winner, {"job_number": sj.job_number}, who, source="merge", actor_id=actor_id)
         # 4) flatten any prior chain: tombstones that pointed at THIS loser now resolve straight to the
         #    winner (A→B then B→C ⇒ A→C), keeping merged_into_id always pointing at a live survivor.
         db.execute(update(ChassisRecord).where(ChassisRecord.merged_into_id == loser_id)
@@ -196,6 +199,9 @@ def merge_chassis(db: Session, loser_id: int, winner_id: int, who: str) -> dict:
         loser.merged_into_id = winner_id
         loser.updated_by = who
         winner.updated_by = who
+        # WO v4.36.5 §3.2 — trail the merge (source='merge') so "who merged this into what?" is answerable.
+        from app.services.chassis import _audit_chassis     # lazy — chassis_merge is imported by chassis-side flows
+        _audit_chassis(db, loser_id, "merged_into_id", None, winner_id, "merge", who, actor_id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -219,9 +225,13 @@ def restore_chassis(db: Session, chassis_id: int, who: str) -> ChassisRecord:
         raise ci.ChassisIntegrityError("This chassis is not deleted — nothing to restore.", status_code=409)
     if rec.vin:
         ci.validate_vin_uniqueness(db, rec.vin, exclude_id=chassis_id)   # 409 if a live chassis now holds it
+    prior = rec.deleted_at                               # §3.8 — audit the ACTUAL cleared timestamp as old_value
     rec.deleted_at = None
     rec.merged_into_id = None
     rec.updated_by = who
+    # WO v4.36.5 §3.2/§3.8 — trail the restore (source='restore'); old_value = the timestamp it cleared.
+    from app.services.chassis import _audit_chassis     # lazy
+    _audit_chassis(db, chassis_id, "deleted_at", (prior.isoformat() if prior else None), None, "restore", who)
     db.commit()
     db.refresh(rec)
     return rec

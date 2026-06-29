@@ -164,9 +164,11 @@ def reconcile_anchorless_chassis(db: Session, *, apply: bool = False) -> dict:
     anchorless = find_anchorless_chassis(db)
     marked: list[int] = []
     if apply:
+        from app.services.chassis import _apply_chassis_fields   # WO v4.36.5 §3.9 — orphaning transition audited (system actor)
         for row in anchorless:
             if row["status"] == "expected":
-                db.get(ChassisRecord, row["id"]).status = "expected_orphaned"
+                ch = db.get(ChassisRecord, row["id"])
+                _apply_chassis_fields(db, ch, {"status": "expected_orphaned"}, who="system", source="reconcile_orphaned")
                 marked.append(row["id"])
     return {"anchorless": [r["id"] for r in anchorless],
             "marked_orphaned": marked if apply else []}

@@ -104,7 +104,7 @@ def test_update_persists_fields():
         _cleanup_chassis(db)
         try:
             rec = _create(db, "U")
-            svc.update_chassis(db, rec.id, ChassisRecordUpdate(customer_name="Renamed", make="FAW"), _WHO)
+            svc.update_chassis(db, rec.id, ChassisRecordUpdate(customer_name="Renamed", make="FAW"), _WHO, actor_role="admin")
             again = svc.get_detail(db, rec.id)
             assert again.customer_name == "Renamed" and again.make == "FAW"
         finally:
