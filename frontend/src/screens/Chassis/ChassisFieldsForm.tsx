@@ -3,6 +3,7 @@
 // of truth (chassis_records). Purely presentational: controlled inputs only (no fetch, no save) — each
 // wrapper owns the seed, the submit, and the per-field lock flags. Reuses ChassisModelSelect + DealerSelect.
 import type { ReactNode } from 'react'
+import { Lock } from 'lucide-react'
 import { ChassisModelSelect } from './ChassisModelSelect'
 import { DealerSelect } from './DealerSelect'
 
@@ -37,6 +38,7 @@ function Locked({ testid, value, mono }: { testid?: string; value: string; mono?
 export function ChassisFieldsForm({
   values, onChange, locks = {}, hidden = [], etaLabel = 'Delivery ETA', etaHint, etaDisabled,
   vinNote, vinPlaceholder = '(filled when the chassis physically arrives)', tailLifts, testidPrefix = 'chassis',
+  editNotice,
 }: {
   values: ChassisFieldValues
   onChange: (patch: Partial<ChassisFieldValues>) => void
@@ -49,12 +51,23 @@ export function ChassisFieldsForm({
   vinPlaceholder?: string
   tailLifts: { code: string; supplier: string; model: string }[]
   testidPrefix?: string
+  editNotice?: ReactNode               // WO v4.36.5 §3.3 — centralized "edits happen on the Chassis page" banner
 }) {
   const show = (k: keyof ChassisFieldValues) => !hidden.includes(k)
   const tid = (s: string) => `${testidPrefix}-${s}`
 
   return (
     <div className="space-y-3">
+      {/* WO v4.36.5 §3.3 — centralized read-only affordance: a non-editor surface (e.g. the Planning-ack
+          read-only view) passes editNotice, so every chassis-fields display carries the same "edit on the
+          Chassis page" signal. The Chassis-page Edit modal — the sole editor — omits it. */}
+      {editNotice && (
+        <div data-testid={tid('edit-notice')}
+             className="flex items-center gap-2 rounded-md border border-line bg-surface-alt px-3 py-2 text-[11px] text-muted">
+          <Lock size={12} className="shrink-0" />
+          <span>{editNotice}</span>
+        </div>
+      )}
       {show('customer_name') && (
         <label className="block text-xs"><span className="font-semibold text-muted">Customer</span>
           {locks.customer

@@ -80,7 +80,19 @@ export interface ChassisRecordDetail extends ChassisRecord {
   merged_into_id?: number | null
   merged_into_vin?: string | null
   chassis_eta?: string | null   // §3.5e — the linked job's Delivery ETA (YYYY-MM-DD)
+  version?: number              // WO v4.36.5 §3.3 — optimistic-lock etag; echoed back on PATCH (stale → 409)
   events: ChassisEvent[]
+}
+
+// WO v4.36.5 §3.4 — one chassis_records_audit entry (mirrors backend schemas/chassis.py ChassisAuditRow).
+export interface ChassisAuditRow {
+  id: number
+  field_name: string
+  old_value?: string | null
+  new_value?: string | null
+  source?: string | null
+  edited_by_name?: string | null   // write-time snapshot
+  created_at?: string | null
 }
 
 export const CHASSIS_STATUS_STYLE: Record<string, string> = {

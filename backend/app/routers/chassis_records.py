@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    AssemblyAssignRequest, AwaitingQaOut, BayOut, BodyAttachedRequest, ChassisCreateResult,
+    AssemblyAssignRequest, AwaitingQaOut, BayOut, BodyAttachedRequest, ChassisAuditRow, ChassisCreateResult,
     ChassisEventCapture, ChassisEventOut, ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate,
     ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate, ChassisVinCapture,
     MoveToAwaitingQaRequest, ReturnToParkingRequest,
@@ -98,6 +98,15 @@ def update_record(record_id: int, payload: ChassisRecordUpdate, db: Session = De
     # optimistic-locked on version, and the change is trailed in chassis_records_audit.
     svc.update_chassis(db, record_id, payload, who=user.username, actor_role=user.role, actor_id=user.id)
     return svc.get_detail(db, record_id)
+
+
+@router.get("/{record_id}/audit", response_model=List[ChassisAuditRow])
+def chassis_audit(record_id: int, limit: int = Query(50, le=200), offset: int = Query(0, ge=0),
+                  db: Session = Depends(get_db), user: User = Depends(require_permission("chassis.update"))):
+    """WO v4.36.5 §3.4 — the per-field change history for a chassis (chassis_records_audit), most-recent-first.
+    Gated on chassis.update: the audience that EDITS chassis is the audience that reviews who changed what
+    (the BA's parallel-run forensic view). edited_by_name is a snapshot → a single bounded read, no join."""
+    return svc.list_chassis_audit(db, record_id, limit=limit, offset=offset)
 
 
 @router.post("/{record_id}/vin", response_model=ChassisRecordDetail)

@@ -197,9 +197,12 @@ def signoff(db: Session, chassis_id: int, *, notes, user) -> dict:
                      inspector_user_id=getattr(user, "id", None),
                      overall_verdict=overall, notes=notes, created_by=who))
     if overall == "pass":
-        rec.status = "dispatched"                        # PHASE TRANSITION — left QA -> dispatch zone
-    # FAIL: status stays 'awaiting_qa' (the failed signoff is the audit; re-inspection opens cycle+1).
-    rec.updated_by = who
+        # WO v4.36.5 §3.9 — the dispatch transition routes through the chokepoint (audited, source='qc_passed').
+        from app.services.chassis import _apply_chassis_fields
+        _apply_chassis_fields(db, rec, {"status": "dispatched"}, who, source="qc_passed", actor_id=getattr(user, "id", None))
+    else:
+        # FAIL: status stays 'awaiting_qa' (the failed signoff is the audit; re-inspection opens cycle+1).
+        rec.updated_by = who
     db.commit()
     return {"chassis_id": chassis_id, "cycle_number": cycle, "overall_verdict": overall,
             "new_status": rec.status, "pdf_available": overall == "pass"}

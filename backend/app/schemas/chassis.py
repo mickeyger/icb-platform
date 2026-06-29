@@ -75,6 +75,9 @@ class ChassisRecordDetail(ChassisRecordOut):
     merged_into_id: Optional[int] = None
     merged_into_vin: Optional[str] = None
     chassis_eta: Optional[date] = None              # WO v4.36a §3.5e — the LINKED job's ETA (get_detail fills it)
+    # WO v4.36.5 §3.3 — optimistic-lock version (the etag): the Edit modal echoes this back on PATCH; a stale
+    # value → 409. server_default="0" on the column, so existing rows read 0.
+    version: int = 0
     events: List[ChassisEventOut] = []
 
 
@@ -122,6 +125,17 @@ class ChassisRecordUpdate(BaseModel):
     # WO v4.36.5 — optimistic lock: the Chassis-page Edit modal echoes the version it loaded; a stale value
     # (someone else saved in between) → 409 "reload". Optional/back-compat: omitted → no concurrency check.
     version: Optional[int] = None
+
+
+class ChassisAuditRow(BaseModel):                 # WO v4.36.5 §3.4 — one chassis_records_audit entry (read)
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    field_name: str
+    old_value: Optional[str] = None
+    new_value: Optional[str] = None
+    source: Optional[str] = None
+    edited_by_name: Optional[str] = None          # write-time SNAPSHOT (no users-join; survives a user delete)
+    created_at: Optional[datetime] = None
 
 
 class ChassisCreateResult(BaseModel):
