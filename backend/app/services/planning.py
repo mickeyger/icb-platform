@@ -288,7 +288,17 @@ def _occupied(db: Session, week: date, bay: str, exclude_slot_id=None) -> bool:
     stmt = select(PlanningSlot).where(PlanningSlot.week == week, PlanningSlot.bay == bay)
     if exclude_slot_id is not None:
         stmt = stmt.where(PlanningSlot.id != exclude_slot_id)
-    return db.execute(stmt).first() is not None
+    rows = db.execute(stmt).scalars().all()
+    if not rows:
+        return False
+    # WO v1.39.1 — mirror build_board's read filter in the write guard. A slot whose job has
+    # PROGRESSED off the board (panels→bay / body_attached / awaiting_qa) is HIDDEN from the grid
+    # (build_board drops it via _progressed_job_ids), so the cell reads EMPTY to the user — its
+    # PlanningSlot row is left intact non-destructively. Without this filter that lingering row
+    # makes a visibly-empty cell raise "already occupied" (the bug). Only a VISIBLE (non-progressed)
+    # slot counts as occupied here, exactly as the board paints it.
+    progressed = _progressed_job_ids(db)
+    return any(r.production_job_id not in progressed for r in rows)
 
 
 def _set_start(job: ProductionJob, monday: date) -> None:

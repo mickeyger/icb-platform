@@ -483,7 +483,6 @@ function SignoffCheck({
                   ? 'border-primary bg-white text-primary hover:bg-primary-light'
                   : 'border-line bg-surface-alt text-muted'
             }`}
-            title={signed ? 'Signed' : canSign ? `Sign as ${requiredRole}` : `Disabled — requires ${requiredRole} role`}
           >
             {signed ? <CheckCircle2 size={16} /> : !canSign ? <Lock size={13} /> : null}
           </button>

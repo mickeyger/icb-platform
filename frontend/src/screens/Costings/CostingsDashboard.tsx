@@ -266,9 +266,11 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                   <td className="px-3 py-2">
                     <span>{c.body_type.replace(/\s*\(REPAIR\)$/i, '')}</span>
                     {c.requires_chassis && (
-                      <span title="Requires chassis" className="ml-1 inline-flex">
-                        <Truck size={12} className="text-muted" />
-                      </span>
+                      <Tooltip text="Requires chassis">
+                        <span className="ml-1 inline-flex">
+                          <Truck size={12} className="text-muted" />
+                        </span>
+                      </Tooltip>
                     )}
                     {c.quote_type === 'Repair' && (
                       <span className="ml-1 inline-flex items-center rounded bg-[#7E22CE]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#7E22CE]">
@@ -299,12 +301,11 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                       </div>
                     )}
                     {mode === 'live' && c.status === 'Accepted' && !c.production_job_id && (
-                      <span
-                        title="Accepted in the orderbook, but the production job hasn't been created yet."
-                        className="ml-1 inline-flex items-center rounded bg-status-amber/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-status-amber"
-                      >
-                        job pending
-                      </span>
+                      <Tooltip text="Accepted in the orderbook, but the production job hasn't been created yet.">
+                        <span className="ml-1 inline-flex items-center rounded bg-status-amber/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-status-amber">
+                          job pending
+                        </span>
+                      </Tooltip>
                     )}
                     {c.status === 'Pre-Job Sent' && !c.prejob_card && (
                       // §0.21 — the legacy bottleneck dot reads job-level signoff columns the
@@ -336,16 +337,17 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                         </Tooltip>
                       )}
                       {mode === 'live' && c.status === 'Accepted' && !c.production_job_id ? (
-                        <button
-                          onClick={() => acceptCosting(c.quote_number)}
-                          disabled={acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'}
-                          title="The costing was accepted but its production job wasn't created — retry (safe, idempotent)."
-                          className="flex items-center gap-1 rounded-md bg-status-amber px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
-                        >
-                          {acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'
-                            ? <Spinner size={12} />
-                            : <RotateCw size={12} />} Retry job creation
-                        </button>
+                        <Tooltip text="The costing was accepted but its production job wasn't created — retry (safe, idempotent).">
+                          <button
+                            onClick={() => acceptCosting(c.quote_number)}
+                            disabled={acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'}
+                            className="flex items-center gap-1 rounded-md bg-status-amber px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                          >
+                            {acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'
+                              ? <Spinner size={12} />
+                              : <RotateCw size={12} />} Retry job creation
+                          </button>
+                        </Tooltip>
                       ) : canPreJob && c.status === 'Accepted' && (mode !== 'live' || c.production_job_id) ? (
                         <Tooltip k="costings_dashboard.pre_job_card_button">
                           <button
@@ -436,14 +438,15 @@ function ModePill({ mode }: { mode: 'live' | 'mock' | 'loading' }) {
   }
   const live = mode === 'live'
   return (
-    <span
-      title={live ? 'Live data from /api/calculations' : 'Bundled mock data (FastAPI app unreachable)'}
-      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-        live ? 'bg-status-green/15 text-status-green' : 'bg-surface-alt text-muted'
-      }`}
-    >
-      {live ? <RadioTower size={11} /> : <Database size={11} />}
-      {live ? 'Live' : 'Mock'}
-    </span>
+    <Tooltip text={live ? 'Live data from /api/calculations' : 'Bundled mock data (FastAPI app unreachable)'}>
+      <span
+        className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+          live ? 'bg-status-green/15 text-status-green' : 'bg-surface-alt text-muted'
+        }`}
+      >
+        {live ? <RadioTower size={11} /> : <Database size={11} />}
+        {live ? 'Live' : 'Mock'}
+      </span>
+    </Tooltip>
   )
 }
