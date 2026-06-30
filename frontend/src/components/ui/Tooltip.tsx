@@ -27,7 +27,10 @@ function prefixClasses(prefix: string | null): string {
 }
 
 interface TooltipProps {
-  k: string
+  /** i18n key into icb_tooltips.json. Optional when `text` is supplied directly. */
+  k?: string
+  /** Free text — v1.39.1: lets callers convert native dark `title=` attributes to the light custom tooltip. */
+  text?: string
   children: ReactNode
   /** Override placement (default: auto below, flips above near bottom edge). */
   placement?: 'auto' | 'top' | 'bottom'
@@ -51,9 +54,9 @@ interface TooltipProps {
  *  - global tooltipsEnabled flag silently disables all tooltips.
  *  - missing key → wrapped element with no tooltip (no error).
  */
-export function Tooltip({ k, children, placement = 'auto' }: TooltipProps) {
+export function Tooltip({ k, text: textProp, children, placement = 'auto' }: TooltipProps) {
   const { tooltipsEnabled } = useAppData()
-  const text = lookupTooltip(k)
+  const text = textProp ?? (k ? lookupTooltip(k) : undefined)
   const id = useId()
   const wrapperRef = useRef<HTMLSpanElement>(null)
   const showTimer = useRef<number | null>(null)

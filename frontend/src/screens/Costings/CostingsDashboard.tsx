@@ -362,14 +362,15 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                           onto the /mes/calculator iframe src; the legacy calc JS (calculator.js:2112) loads
                           that calculation for editing. Same ?edit=<id> contract as v4.37.1 #57 on main. */}
                       {c.status === 'Pending' && (
-                        <button
-                          onClick={() => c.calculation_id && nav(`/costings/new?edit=${c.calculation_id}`)}
-                          disabled={!c.calculation_id}
-                          title={c.calculation_id ? 'Reopen this costing to edit' : 'Edit available on live costings only'}
-                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt disabled:opacity-50"
-                        >
-                          <Pencil size={12} /> Edit
-                        </button>
+                        <Tooltip text={c.calculation_id ? 'Reopen this costing to edit' : 'Edit available on live costings only'}>
+                          <button
+                            onClick={() => c.calculation_id && nav(`/costings/new?edit=${c.calculation_id}`)}
+                            disabled={!c.calculation_id}
+                            className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt disabled:opacity-50"
+                          >
+                            <Pencil size={12} /> Edit
+                          </button>
+                        </Tooltip>
                       )}
                       {c.status === 'Repair' && (
                         <button

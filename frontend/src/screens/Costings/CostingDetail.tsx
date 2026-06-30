@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -241,6 +241,7 @@ export function CostingDetail() {
           <Card className={`mb-4 border-l-4 ${c.chassis_received_at ? 'border-status-green' : 'border-status-amber'}`}>
             <SectionTitle>Chassis received</SectionTitle>
             <div className="flex flex-wrap items-start gap-4">
+              <Tooltip text={hasPermission('production.chassis_received') ? (c.chassis_received_at ? 'Un-tick (mistake correction)' : 'Tick to mark chassis received') : 'Requires Planning role'}>
               <button
                 type="button"
                 disabled={!hasPermission('production.chassis_received')}
@@ -260,10 +261,10 @@ export function CostingDetail() {
                     ? 'border-status-green bg-status-green text-white'
                     : 'border-status-amber bg-white text-status-amber hover:bg-status-amber/10'
                 }`}
-                title={hasPermission('production.chassis_received') ? (c.chassis_received_at ? 'Un-tick (mistake correction)' : 'Tick to mark chassis received') : 'Requires Planning role'}
               >
                 {c.chassis_received_at ? <CheckCircle2 size={22} /> : <Circle size={22} />}
               </button>
+              </Tooltip>
               <div className="flex-1 min-w-[260px]">
                 {c.chassis_received_at ? (
                   <div className="space-y-1 text-sm">
@@ -607,32 +608,46 @@ function StatusTimeline({ c, statusHex }: { c: Costing; statusHex: string }) {
   )
 }
 
-// v1.39.1 backport (Item 5+7) — the REAL bill of materials. Fetches the saved BOM rows from the costing
-// detail endpoint (GET /api/calculations/{id} → saved_result.items[]) keyed on the row's calculation_id,
-// mirroring the LiveTimeline fetch pattern. Filters soft-excluded rows (the legacy results page strips
-// them too). Graceful fallback (not-live / no id / fetch error → a soft message, never fake numbers).
+// v1.39.1 backport (Item 5+7) — the REAL bill of materials, laid out to match the LEGACY costings Results
+// page (Costing model/app/templates/results.html): grouped by category (first-seen order) with an uppercase
+// category band, the full legacy column set (Material / SAP Code / Formula / Qty / Unit / Unit Price / Waste% /
+// Line Cost), a dim per-category subtotal, and a single emphasised grand-total band. Fetches saved_result.items[]
+// from GET /api/calculations/{id} keyed on calculation_id (LiveTimeline pattern), filters soft-excluded rows.
+// Graceful fallback (not-live / no id / fetch error / no items → a soft message, never fake numbers).
 interface BomRow {
+  category?: string | null
   bom_id?: number
   material: string
   material_code?: string | null
   unit?: string | null
+  formula?: string | null
   quantity?: number
+  unit_price?: number
+  waste_pct?: number | null
   line_cost?: number
   excluded?: boolean
 }
 
+interface SavedResult {
+  items?: BomRow[]
+  category_totals?: Record<string, number>
+  grand_total?: number
+}
+
 function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: string }) {
   const [rows, setRows] = useState<BomRow[] | null>(null)
+  const [catTotals, setCatTotals] = useState<Record<string, number>>({})
   const [total, setTotal] = useState<number | null>(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
     if (calculationId == null) return
     let alive = true
-    apiGet<{ saved_result?: { items?: BomRow[]; grand_total?: number } }>(`/api/calculations/${calculationId}`)
+    apiGet<{ saved_result?: SavedResult }>(`/api/calculations/${calculationId}`)
       .then((r) => {
         if (!alive) return
         const items = (r.saved_result?.items ?? []).filter((l) => !l.excluded)
         setRows(items)
+        setCatTotals(r.saved_result?.category_totals ?? {})
         setTotal(r.saved_result?.grand_total ?? items.reduce((s, l) => s + (l.line_cost ?? 0), 0))
       })
       .catch(() => { if (alive) setErr(true) })
@@ -645,29 +660,70 @@ function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: 
   if (rows == null) return <p className="px-4 py-3 text-sm text-muted">Loading bill of materials…</p>
   if (rows.length === 0) return <p className="px-4 py-3 text-sm text-muted">No bill-of-materials lines recorded on this costing.</p>
 
+  // Group by category preserving first-seen order (matches the legacy ns.current_cat break detection —
+  // categories are contiguous runs in array order, never re-sorted).
+  const groups: { cat: string; items: BomRow[] }[] = []
+  const index = new Map<string, number>()
+  for (const it of rows) {
+    const cat = it.category ?? 'Uncategorised'
+    let gi = index.get(cat)
+    if (gi == null) { gi = groups.length; index.set(cat, gi); groups.push({ cat, items: [] }) }
+    groups[gi].items.push(it)
+  }
+  const subtotalFor = (g: { cat: string; items: BomRow[] }) =>
+    catTotals[g.cat] ?? g.items.reduce((s, l) => s + (l.line_cost ?? 0), 0)
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-primary text-left text-white">
           <tr>
-            <th className="px-3 py-2 font-semibold">Item</th>
-            <th className="px-3 py-2 font-semibold">Description</th>
+            <th className="px-3 py-2 font-semibold">Category</th>
+            <th className="px-3 py-2 font-semibold">Material</th>
+            <th className="px-3 py-2 font-semibold">SAP Code</th>
+            <th className="px-3 py-2 font-semibold">Formula</th>
             <th className="px-3 py-2 text-right font-semibold">Qty</th>
-            <th className="px-3 py-2 text-right font-semibold">Cost</th>
+            <th className="px-3 py-2 font-semibold">Unit</th>
+            <th className="px-3 py-2 text-right font-semibold">Unit Price</th>
+            <th className="px-3 py-2 text-right font-semibold">Waste&nbsp;%</th>
+            <th className="px-3 py-2 text-right font-semibold">Line Cost</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((l, i) => (
-            <tr key={`${l.bom_id ?? l.material_code ?? l.material}-${i}`} className={i % 2 ? 'bg-surface-alt' : 'bg-white'}>
-              <td className="px-3 py-2 font-mono text-xs">{l.material_code ?? '—'}</td>
-              <td className="px-3 py-2">{l.material}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{l.quantity ?? 0}{l.unit ? ` ${l.unit}` : ''}</td>
-              <td className="px-3 py-2 text-right tabular-nums">{zar(l.line_cost ?? 0)}</td>
-            </tr>
+          {groups.map((g) => (
+            <Fragment key={g.cat}>
+              {/* Category band — uppercase mono label across the full row (results.html category header) */}
+              <tr className="bg-surface-alt">
+                <td colSpan={9} className="px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-primary">
+                  {g.cat}
+                </td>
+              </tr>
+              {g.items.map((l, i) => (
+                <tr key={`${l.bom_id ?? l.material_code ?? l.material}-${i}`} className="border-t border-line">
+                  <td className="px-3 py-2" />
+                  <td className="px-3 py-2 text-body">{l.material}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-muted">{l.material_code ?? '—'}</td>
+                  <td className="px-3 py-2 font-mono text-xs text-muted">{l.formula ?? ''}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {(l.quantity ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-muted">{l.unit ?? ''}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{zar(l.unit_price ?? 0, { decimals: true })}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted">{l.waste_pct ? `${l.waste_pct}%` : ''}</td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums">{zar(l.line_cost ?? 0, { decimals: true })}</td>
+                </tr>
+              ))}
+              {/* Per-category subtotal — dim right-aligned label + accent value */}
+              <tr className="border-t border-line bg-surface-alt/40">
+                <td colSpan={8} className="px-3 py-1.5 text-right text-xs text-muted">{g.cat} subtotal</td>
+                <td className="px-3 py-1.5 text-right text-xs font-semibold tabular-nums text-primary">{zar(subtotalFor(g), { decimals: true })}</td>
+              </tr>
+            </Fragment>
           ))}
-          <tr className="border-t border-line font-semibold">
-            <td className="px-3 py-2" colSpan={3}>Total cost</td>
-            <td className="px-3 py-2 text-right tabular-nums">{zar(total ?? 0)}</td>
+          {/* Grand total band */}
+          <tr className="border-t-2 border-primary bg-primary/5">
+            <td colSpan={8} className="px-3 py-2.5 text-sm font-bold uppercase text-body">Total manufacturing cost</td>
+            <td className="px-3 py-2.5 text-right text-base font-bold tabular-nums text-primary">{zar(total ?? 0, { decimals: true })}</td>
           </tr>
         </tbody>
       </table>

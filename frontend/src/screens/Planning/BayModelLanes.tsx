@@ -433,8 +433,62 @@ export function BayModelLanes() {
           down the chute) above MERGE (chassis joins the body at the chute end). VISUAL ONLY for the Burt
           demo; functional wiring + V/P counters + colour-coded ageing land in v4.36b. */}
       <div className="flex flex-col gap-4">
-        {/* v1.39.1 backport (Item 8): the hardcoded VISUAL-ONLY Pre-Assembly placeholder Card was removed —
-            the live pre_assembly bay state is already rendered inside the MERGE tiles below (useBayModel `bays`). */}
+        {/* v1.39.1 (Item 8): LIVE Pre-Assembly card — the pre_assembly bays from useBayModel's `bays` (panels
+            built down the chute, no chassis yet), driven by REAL data (not the deleted hardcoded demo cards).
+            Rendered HERE only; the Merge grid's inline pre_assembly branch is removed below to avoid a double-render. */}
+        <Card>
+          {(() => {
+            const preBays = bays.filter((b) => (b.state ?? 'empty') === 'pre_assembly')
+            return (
+              <>
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-semibold uppercase tracking-wide text-muted">Pre-Assembly</span>
+                  <span className="text-[11px] text-muted">{preBays.length} {preBays.length === 1 ? 'bay' : 'bays'} with panels</span>
+                </div>
+                {preBays.length > 0 ? (
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
+                    {preBays.map((bay) => {
+                      const ui = BAY_TILE.pre_assembly
+                      const jobNo = bay.panels_job_number ?? bay.occupant_job_number ?? bay.panels_job_id ?? '—'
+                      return (
+                        <div
+                          key={bay.id}
+                          data-testid="pre-assembly-bay"
+                          data-bay-id={bay.id}
+                          data-bay-code={bay.code}
+                          data-bay-state="pre_assembly"
+                          className={`relative rounded-md p-2 ${ui.border}`}
+                        >
+                          <div className="flex items-center justify-between text-[11px] text-muted">
+                            <span>{bay.code}</span>
+                            {ui.badge ? (
+                              <span className={`rounded px-1 text-[10px] font-medium ${ui.badgeClass}`}>{ui.badge}</span>
+                            ) : null}
+                          </div>
+                          <div className="font-mono text-xs font-semibold text-sky-700">Panels in bay</div>
+                          <div className="truncate text-[11px] text-muted">Job {jobNo}</div>
+                          {bay.panels_chassis_vin && (
+                            <div className="truncate text-[11px] text-muted">{bay.panels_chassis_vin}</div>
+                          )}
+                          {bay.panels_customer_name && (
+                            <div className="truncate text-[11px] text-muted">{bay.panels_customer_name}</div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-line p-4 text-center text-xs text-muted">
+                    No bays in pre-assembly — panels appear here when a scheduled job’s panels are dropped on a bay before its chassis.
+                  </div>
+                )}
+                <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
+                  Panels built down the chute · the chassis joins them in Merge below.
+                </div>
+              </>
+            )
+          })()}
+        </Card>
 
         {/* MERGE bays — drop targets for a parked chassis AND for a scheduled job's panels. */}
         <Card>
@@ -520,11 +574,6 @@ export function BayModelLanes() {
                   <>
                     <div className="font-mono text-xs font-semibold">{occ.vin}</div>
                     <div className="truncate text-[11px] text-muted">{occ.customer_name || '—'}</div>
-                  </>
-                ) : state === 'pre_assembly' ? (
-                  <>
-                    <div className="font-mono text-xs font-semibold text-sky-700">Panels in bay</div>
-                    <div className="truncate text-[11px] text-muted">Job {bay.occupant_job_number ?? '—'}</div>
                   </>
                 ) : (
                   <div className="flex min-h-[32px] items-center justify-center text-[11px] text-muted">
