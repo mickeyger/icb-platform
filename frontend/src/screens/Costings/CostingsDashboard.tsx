@@ -49,6 +49,13 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
   useEffect(() => {
     if (mode === 'live' && !userPickedScope) setScope('all')
   }, [mode, userPickedScope])
+
+  // v1.39.1 backport (Item 4): refetch when the dashboard mounts so a costing saved
+  // in the /mes/calculator iframe (or changed out-of-band) appears on return. The
+  // CostingsProvider otherwise loads once at app-mount + on branch switch only, so the
+  // list showed stale after "save → navigate back to the dashboard". `refresh` is a
+  // stable useCallback, so this runs once per mount (no loop).
+  useEffect(() => { void refresh() }, [refresh])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [preJobTarget, setPreJobTarget] = useState<Costing | null>(null)
   const [repairTarget, setRepairTarget] = useState<Costing | null>(null)
@@ -349,8 +356,18 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                           </button>
                         </Tooltip>
                       ) : null}
-                      {c.status === 'Pending' && c.created_by === profile.id.replace('rep_', '').toUpperCase() && (
-                        <button className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt">
+                      {/* v1.39.1 backport (Item 1): (a) gate on status only — the live FastAPI created_by
+                          ('admin') never equals the persona id ('ADMIN'), so the button never rendered;
+                          (b) wire Edit → /costings/new?edit=<calculation_id>. LiveCalculator threads ?edit=
+                          onto the /mes/calculator iframe src; the legacy calc JS (calculator.js:2112) loads
+                          that calculation for editing. Same ?edit=<id> contract as v4.37.1 #57 on main. */}
+                      {c.status === 'Pending' && (
+                        <button
+                          onClick={() => c.calculation_id && nav(`/costings/new?edit=${c.calculation_id}`)}
+                          disabled={!c.calculation_id}
+                          title={c.calculation_id ? 'Reopen this costing to edit' : 'Edit available on live costings only'}
+                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt disabled:opacity-50"
+                        >
                           <Pencil size={12} /> Edit
                         </button>
                       )}

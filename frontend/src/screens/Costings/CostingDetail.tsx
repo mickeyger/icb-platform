@@ -20,7 +20,7 @@ import { Card, SectionTitle, StatusPill } from '../../components/ui/primitives'
 import { Toast } from '../../components/ui/overlays'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { zar, dmy, hhmm } from '../../lib/format'
-import { demoBom, demoBomTotal } from '../../data/mockData'
+// v1.39.1 backport (Item 5+7): demoBom/demoBomTotal removed — the BOM is now fetched live (see LiveBom below).
 import { styleForStatus, StatusPillCosting } from './statusPalette'
 import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
@@ -51,6 +51,12 @@ export function CostingDetail() {
     const t = setTimeout(() => setToast(''), 2200)
     return () => clearTimeout(t)
   }, [toast])
+
+  // v1.39.1 backport (Item 6): refetch on mount so a pre-job sign-off / approval done
+  // elsewhere (the /prejob/:id/signoff deep-link page, the outstanding-signoffs admin
+  // page, or another tab) is reflected when this costing detail is opened. CostingsContext
+  // otherwise loads once at app mount. `refresh` is a stable useCallback (runs once per mount).
+  useEffect(() => { void refresh() }, [refresh])
 
   if (!c) {
     return (
@@ -225,36 +231,8 @@ export function CostingDetail() {
       ) : null}
 
       <Card className="mb-4 p-0">
-        <div className="p-4 pb-2"><SectionTitle>Bill of materials (illustrative)</SectionTitle></div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-primary text-left text-white">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Item</th>
-                <th className="px-3 py-2 font-semibold">Description</th>
-                <th className="px-3 py-2 text-right font-semibold">Qty</th>
-                <th className="px-3 py-2 text-right font-semibold">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {demoBom.map((l, i) => (
-                <tr key={l.sap_item_code} className={i % 2 ? 'bg-surface-alt' : 'bg-white'}>
-                  <td className="px-3 py-2 font-mono text-xs">{l.sap_item_code}</td>
-                  <td className="px-3 py-2">{l.description}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{l.qty}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{zar(l.cost_zar)}</td>
-                </tr>
-              ))}
-              <tr className="border-t border-line font-semibold">
-                <td className="px-3 py-2" colSpan={3}>Total cost</td>
-                <td className="px-3 py-2 text-right tabular-nums">{zar(demoBomTotal)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="px-4 py-2 text-[11px] text-muted">
-          Mock BOM (reconciled to the demo job 32891). In Live mode the full BOM would come from the costing app's detail endpoint.
-        </p>
+        <div className="p-4 pb-2"><SectionTitle>Bill of materials</SectionTitle></div>
+        <LiveBom calculationId={c.calculation_id ?? null} mode={mode} />
       </Card>
 
       {/* v4.3 — Chassis-received tick box (only after chassis ETA captured) */}
@@ -626,6 +604,74 @@ function StatusTimeline({ c, statusHex }: { c: Costing; statusHex: string }) {
         )
       })}
     </ol>
+  )
+}
+
+// v1.39.1 backport (Item 5+7) — the REAL bill of materials. Fetches the saved BOM rows from the costing
+// detail endpoint (GET /api/calculations/{id} → saved_result.items[]) keyed on the row's calculation_id,
+// mirroring the LiveTimeline fetch pattern. Filters soft-excluded rows (the legacy results page strips
+// them too). Graceful fallback (not-live / no id / fetch error → a soft message, never fake numbers).
+interface BomRow {
+  bom_id?: number
+  material: string
+  material_code?: string | null
+  unit?: string | null
+  quantity?: number
+  line_cost?: number
+  excluded?: boolean
+}
+
+function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: string }) {
+  const [rows, setRows] = useState<BomRow[] | null>(null)
+  const [total, setTotal] = useState<number | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    if (calculationId == null) return
+    let alive = true
+    apiGet<{ saved_result?: { items?: BomRow[]; grand_total?: number } }>(`/api/calculations/${calculationId}`)
+      .then((r) => {
+        if (!alive) return
+        const items = (r.saved_result?.items ?? []).filter((l) => !l.excluded)
+        setRows(items)
+        setTotal(r.saved_result?.grand_total ?? items.reduce((s, l) => s + (l.line_cost ?? 0), 0))
+      })
+      .catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [calculationId])
+
+  if (mode !== 'live' || calculationId == null)
+    return <p className="px-4 py-3 text-sm text-muted">The full bill of materials is available on live (saved) costings.</p>
+  if (err) return <p className="px-4 py-3 text-sm text-muted">Bill of materials unavailable — couldn’t load the costing detail.</p>
+  if (rows == null) return <p className="px-4 py-3 text-sm text-muted">Loading bill of materials…</p>
+  if (rows.length === 0) return <p className="px-4 py-3 text-sm text-muted">No bill-of-materials lines recorded on this costing.</p>
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-primary text-left text-white">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Item</th>
+            <th className="px-3 py-2 font-semibold">Description</th>
+            <th className="px-3 py-2 text-right font-semibold">Qty</th>
+            <th className="px-3 py-2 text-right font-semibold">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((l, i) => (
+            <tr key={`${l.bom_id ?? l.material_code ?? l.material}-${i}`} className={i % 2 ? 'bg-surface-alt' : 'bg-white'}>
+              <td className="px-3 py-2 font-mono text-xs">{l.material_code ?? '—'}</td>
+              <td className="px-3 py-2">{l.material}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{l.quantity ?? 0}{l.unit ? ` ${l.unit}` : ''}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{zar(l.line_cost ?? 0)}</td>
+            </tr>
+          ))}
+          <tr className="border-t border-line font-semibold">
+            <td className="px-3 py-2" colSpan={3}>Total cost</td>
+            <td className="px-3 py-2 text-right tabular-nums">{zar(total ?? 0)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   )
 }
 

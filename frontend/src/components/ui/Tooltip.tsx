@@ -220,7 +220,9 @@ export function Tooltip({ k, children, placement = 'auto' }: TooltipProps) {
         }}
         onMouseLeave={() => hide()}
         style={{ top: pos.top, left: pos.left, width: 360 }}
-        className={`pointer-events-auto fixed z-[100] rounded-md bg-slate-800 px-3 py-2 text-[13px] leading-snug text-slate-100 shadow-2xl ring-1 ring-black/20 ${
+        // v1.39.1 backport (Item 3): surface-matched LIGHT tooltip (BA override of the dark convention) —
+        // bg-white + dark text, with a border + shadow so it stays visually distinct from the page surface.
+        className={`pointer-events-auto fixed z-[100] rounded-md border border-slate-200 bg-white px-3 py-2 text-[13px] leading-snug text-slate-900 shadow-lg ${
           isLong ? '' : 'animate-fadeIn'
         }`}
       >
@@ -231,7 +233,7 @@ export function Tooltip({ k, children, placement = 'auto' }: TooltipProps) {
         )}
         <span>{rest}</span>
         {isLong && (
-          <div className="mt-2 text-right text-[11px] uppercase tracking-wide text-slate-400">
+          <div className="mt-2 text-right text-[11px] uppercase tracking-wide text-slate-500">
             Click outside or press Esc to close
           </div>
         )}

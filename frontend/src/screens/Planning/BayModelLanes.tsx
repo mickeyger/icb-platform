@@ -75,15 +75,9 @@ function dayCount(since?: string | null): number | null {
   return days >= 0 ? days : 0
 }
 
-// WO v4.36a.5 — VISUAL-ONLY Pre-Assembly placeholders (HARDCODED, not DB rows — §0.14; the [DEMO] pill +
-// footer make that explicit). Bay 2 + Bay 4 only; 1/3/5 render an empty cell. Job numbers are deliberately
-// off the live canonical 404xx/405xx/406xx range so no real MERGE job appears twice. Full functional wiring
-// + V/P counters + colour-coded ageing pills land in the v4.36b sprint.
-interface PreAssemblyDemoCard { job: string; customer: string; body: string; day: number }
-const DEMO_PREASSEMBLY_CARDS: Record<number, PreAssemblyDemoCard> = {
-  2: { job: '40910', customer: 'Mzansi Cold Chain (Pty) Ltd', body: '5.4 m Chiller body', day: 2 },
-  4: { job: '40920', customer: 'TransCarriers SA', body: '6.0 m Freezer body', day: 4 },
-}
+// v1.39.1 backport (Item 8): removed the hardcoded VISUAL-ONLY Pre-Assembly demo cards (interface + const
+// + the placeholder Card below). The live pre_assembly bay state (a bay holding panels but no chassis yet)
+// is already rendered in the MERGE tiles from useBayModel's `bays` — the demo block was redundant cruft.
 
 export function BayModelLanes() {
   const toast = useToast()
@@ -439,53 +433,8 @@ export function BayModelLanes() {
           down the chute) above MERGE (chassis joins the body at the chute end). VISUAL ONLY for the Burt
           demo; functional wiring + V/P counters + colour-coded ageing land in v4.36b. */}
       <div className="flex flex-col gap-4">
-        {/* PRE-ASSEMBLY — placeholder section. The 2 cards are hardcoded demo data (§0.14); the [DEMO] pill +
-            footer + amber fill mark them as not-real. Bays 1/3/5 are clean empty cells (no drop affordance). */}
-        <Card data-testid="preassembly-zone">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold uppercase tracking-wide text-muted">Pre-Assembly</span>
-            <span className="text-[11px] text-muted">5 bays</span>
-          </div>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
-            {[1, 2, 3, 4, 5].map((n) => {
-              const card = DEMO_PREASSEMBLY_CARDS[n]
-              return (
-                <div
-                  key={n}
-                  data-testid="preassembly-bay"
-                  data-bay-label={`Bay ${n}`}
-                  className={card
-                    ? 'relative rounded-md border border-line border-l-4 border-l-status-amber bg-status-amber/10 p-2'
-                    : 'rounded-md border border-dashed border-line bg-surface-alt/40 p-2'}
-                >
-                  <div className="flex items-center justify-between text-[11px] text-muted">
-                    <span>Bay {n}</span>
-                    {card && (
-                      <span className="flex items-center gap-1">
-                        <AgeingPill days={card.day} testid="day-counter" />{/* §3.7 — consistent colour-coded day-counter */}
-                        <span data-testid="demo-pill"
-                              className="rounded bg-status-amber px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">DEMO</span>
-                      </span>
-                    )}
-                  </div>
-                  {card ? (
-                    <>
-                      <div className="font-mono text-xs font-semibold">Job {card.job}</div>
-                      <div className="truncate text-xs text-body">{card.customer}</div>
-                      <div className="truncate text-[11px] text-muted">{card.body}</div>
-                      <div className="mt-1 text-[9px] italic text-muted">Placeholder for demo only</div>
-                    </>
-                  ) : (
-                    <div className="flex min-h-[32px] items-center justify-center text-[11px] text-muted">empty</div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-          <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
-            Panels move down the bay during pre-assembly · merge below when chassis arrives
-          </div>
-        </Card>
+        {/* v1.39.1 backport (Item 8): the hardcoded VISUAL-ONLY Pre-Assembly placeholder Card was removed —
+            the live pre_assembly bay state is already rendered inside the MERGE tiles below (useBayModel `bays`). */}
 
         {/* MERGE bays — drop targets for a parked chassis AND for a scheduled job's panels. */}
         <Card>
