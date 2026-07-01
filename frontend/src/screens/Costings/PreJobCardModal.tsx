@@ -44,6 +44,11 @@ interface PrejobCard {
 
 const BODY_CLASSES = ['icecream', 'chiller', 'freezer', 'meathanger', 'bakery', 'explosive', 'trailer']
 
+// v1.39.3 — Simeon (planner-eligible) is auto-CC'd on every check email. Pre-filled on NEW cards
+// only (see createDraft); an existing card's saved CC is never overwritten. Role-based address by
+// operational choice (planner@ rather than personal). Keep in step with seed_phase1_users.py.
+const DEFAULT_CC = 'planner@icecoldgrp.co.za'
+
 function bodyClassOf(costing: Costing): string | undefined {
   const low = (costing.body_type || '').toLowerCase()
   if (low.includes('trailer') || low.includes('body only')) return 'trailer'
@@ -208,9 +213,12 @@ export function PreJobCardModal({
     if (!costing || liveCalcId == null || templateId === '') return
     setBusy(true)
     try {
-      setCard(await apiPost<PrejobCard>('/api/prejob-cards', {
+      const created = await apiPost<PrejobCard>('/api/prejob-cards', {
         calculation_id: liveCalcId, template_id: templateId,
-      }))
+      })
+      // v1.39.3 — auto-populate CC with Simeon on a NEW card only (never overwrite a saved CC).
+      // Local pre-fill; persists on the next Save Draft / Submit (both PATCH cc_recipients).
+      setCard(created.cc_recipients ? created : { ...created, cc_recipients: DEFAULT_CC })
     } catch (e) { handleApiError(e, toast.push) } finally { setBusy(false) }
   }
 
@@ -272,14 +280,6 @@ export function PreJobCardModal({
     else window.open(url, '_blank')
   }
 
-  const openEmail = async () => {
-    if (!card) return
-    try {
-      const e = await apiGet<{ mailto: string }>(`/api/prejob-cards/${card.id}/email`)
-      window.location.href = e.mailto                   // §0.11 — opens the user's mail client
-    } catch (e) { handleApiError(e, toast.push) }
-  }
-
   const submit = async () => {
     if (!card || !costing) return
     const saved = await saveDraft(true)                 // submit what's on screen
@@ -289,8 +289,12 @@ export function PreJobCardModal({
       const sent = await apiPost<PrejobCard>(
         `/api/prejob-cards/${saved.id}/submit-for-check`, { waive_body_gap: waiveGap })
       setCard(sent)
-      toast.push({ kind: 'ok', message: 'Sent for check — opening your email client (§0.11)' })
-      void openEmail()                                  // auto-open the prefilled mail draft
+      // v1.39.3 — server-side SMTP is the sole email path (the mailto: draft was removed — it
+      // could not carry multiple To recipients reliably). The backend emails the signers + CC on
+      // the submit-for-check transition; here we just confirm.
+      const signers = [sent.sales_rep_username, sent.planner_username].filter(Boolean).join(' + ')
+      toast.push({ kind: 'ok',
+        message: `Submitted for check — notification emailed to ${signers || 'the signers'}${sent.cc_recipients ? ' (+ CC)' : ''}.` })
       await onConfirm(costing)
     } catch (e) { handleApiError(e, toast.push) } finally { setBusy(false) }
   }
@@ -563,7 +567,7 @@ export function PreJobCardModal({
               <label className="block text-xs text-muted">
                 CC on the check email (comma-separated addresses — optional)
                 <input value={card.cc_recipients ?? ''} disabled={!editable}
-                  placeholder="e.g. burt@icecoldbodies.co.za, nadie@icecoldbodies.co.za"
+                  placeholder="e.g. planner@icecoldgrp.co.za, nadie@icecoldgrp.co.za"
                   data-testid="prejob-cc"
                   onChange={(e) => patchCard({ cc_recipients: e.target.value || null })}
                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body disabled:bg-surface-alt" />
@@ -596,19 +600,13 @@ export function PreJobCardModal({
               )}
               {!editable && (
                 <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line pt-3">
-                  {/* §0.11 post-submit helpers: re-open the prefilled mail draft + grab the PDF
-                      for manual attach (mailto cannot carry attachments — BA-corrected §0.11). */}
+                  {/* v1.39.3 — the mailto "Open email draft" helper was removed (server-side SMTP is
+                      the sole email path). The records-copy PDF stays for manual attach if needed. */}
                   {(card.status === 'sent_for_check' || card.status === 'pre_job_confirmed') && (
-                    <>
-                      <button onClick={() => void openEmail()} data-testid="prejob-open-email"
-                        className="flex items-center gap-1 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt">
-                        <Send size={14} /> Open email draft
-                      </button>
-                      <button onClick={openPdf} data-testid="prejob-download-pdf"
-                        className="flex items-center gap-1 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt">
-                        <FileText size={14} /> Download PDF
-                      </button>
-                    </>
+                    <button onClick={openPdf} data-testid="prejob-download-pdf"
+                      className="flex items-center gap-1 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:bg-surface-alt">
+                      <FileText size={14} /> Download PDF
+                    </button>
                   )}
                   <button onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm">Close</button>
                 </div>

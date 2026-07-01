@@ -113,6 +113,10 @@ class User(Base):
     username = Column(String(100), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     role = Column(String(20), default="user")
+    # v1.39.3 backport (migration 0030) — real address for Pre-Job Card check auto-send
+    # (Sales/Planner signers + CC). server_default '' so pre-0030 rows are valid; the
+    # seed_phase1_users script sets the three Phase-1 addresses.
+    email = Column(String(255), nullable=False, server_default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_login_at = Column(DateTime, nullable=True)  # stamped on successful login
     calculations = relationship("CalculationRecord", back_populates="user", foreign_keys="CalculationRecord.user_id")

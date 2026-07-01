@@ -5,8 +5,8 @@ created with the CORE TOKENS BAKED (External-dimensions line carries real mm —
 left in the dims text), fridge dropdown live-substitutes the GRP provision line, signers
 selected, Submit for Check (with the §0.8 waiver when Body Gap is pending) → toast + status.
 Render-assertion style; the lifecycle depth lives in the API suites. J433C* markers, purge at
-setup AND teardown. NOTE: submit auto-opens a mailto: draft — headless chromium drops the
-unhandled protocol and stays on-page (asserted via the surviving toast/banner).
+setup AND teardown. NOTE: submit now sends server-side (v1.39.3 — no mailto: draft opens); the
+authoritative success signal is the submit-for-check 200 + the modal closing.
 """
 from __future__ import annotations
 
