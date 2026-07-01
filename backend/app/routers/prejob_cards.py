@@ -143,10 +143,14 @@ def update_card(card_id: int, payload: PrejobCardUpdate, db: Session = Depends(g
 
 
 @router.post("/{card_id}/submit-for-check", response_model=PrejobCardOut)
-def submit_for_check(card_id: int, payload: SubmitForCheck, db: Session = Depends(get_db),
+def submit_for_check(request: Request, card_id: int, payload: SubmitForCheck,
+                     db: Session = Depends(get_db),
                      user: User = Depends(require_permission("prejob.create"))):
+    # base_url (request origin) drives the v1.39.3 server-side check email; same source the
+    # /email mailto endpoint uses for its sign-off deep links.
     return _out(db, svc.submit_for_check(db, card_id, user,
-                                         waive_body_gap=payload.waive_body_gap))
+                                         waive_body_gap=payload.waive_body_gap,
+                                         base_url=str(request.base_url)))
 
 
 # ── §3.5 — check sign-off + reject (per-role gates; admin passes via the wildcard — Q4) ──

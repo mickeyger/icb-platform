@@ -44,6 +44,11 @@ interface PrejobCard {
 
 const BODY_CLASSES = ['icecream', 'chiller', 'freezer', 'meathanger', 'bakery', 'explosive', 'trailer']
 
+// v1.39.3 — Simeon (planner-eligible) is auto-CC'd on every check email. Pre-filled on NEW cards
+// only (see createDraft); an existing card's saved CC is never overwritten. Role-based address by
+// operational choice (planner@ rather than personal). Keep in step with seed_phase1_users.py.
+const DEFAULT_CC = 'planner@icecoldgrp.co.za'
+
 function bodyClassOf(costing: Costing): string | undefined {
   const low = (costing.body_type || '').toLowerCase()
   if (low.includes('trailer') || low.includes('body only')) return 'trailer'
@@ -208,9 +213,12 @@ export function PreJobCardModal({
     if (!costing || liveCalcId == null || templateId === '') return
     setBusy(true)
     try {
-      setCard(await apiPost<PrejobCard>('/api/prejob-cards', {
+      const created = await apiPost<PrejobCard>('/api/prejob-cards', {
         calculation_id: liveCalcId, template_id: templateId,
-      }))
+      })
+      // v1.39.3 — auto-populate CC with Simeon on a NEW card only (never overwrite a saved CC).
+      // Local pre-fill; persists on the next Save Draft / Submit (both PATCH cc_recipients).
+      setCard(created.cc_recipients ? created : { ...created, cc_recipients: DEFAULT_CC })
     } catch (e) { handleApiError(e, toast.push) } finally { setBusy(false) }
   }
 
@@ -563,7 +571,7 @@ export function PreJobCardModal({
               <label className="block text-xs text-muted">
                 CC on the check email (comma-separated addresses — optional)
                 <input value={card.cc_recipients ?? ''} disabled={!editable}
-                  placeholder="e.g. burt@icecoldbodies.co.za, nadie@icecoldbodies.co.za"
+                  placeholder="e.g. planner@icecoldgrp.co.za, nadie@icecoldgrp.co.za"
                   data-testid="prejob-cc"
                   onChange={(e) => patchCard({ cc_recipients: e.target.value || null })}
                   className="mt-1 w-full rounded-md border border-line px-2 py-1.5 text-sm text-body disabled:bg-surface-alt" />

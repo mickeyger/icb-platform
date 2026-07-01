@@ -46,6 +46,8 @@ class Settings(BaseSettings):
 
     # ── Outbound integrations ──
     SMTP_URL: str = ""                        # empty = no email sent (dev mode)
+    EMAIL_FROM: str = ""                      # optional From override (real relays, e.g. Gmail);
+                                              # empty = derive user@host from SMTP_URL (dev default)
     SAP_ENABLED: bool = False
     SAP_BASE_URL: str = ""
 
