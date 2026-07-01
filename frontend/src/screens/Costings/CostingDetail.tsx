@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -120,7 +120,11 @@ export function CostingDetail() {
             </button>
           )}
           <button
-            onClick={() => setToast('PDF generated — sent to printer')}
+            onClick={() =>
+              c.calculation_id
+                ? window.open(`/results/${c.calculation_id}`, '_blank', 'noopener')
+                : setToast('Print / PDF is available on live (saved) costings only')
+            }
             className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-dark"
           >
             <Printer size={14} /> Print costing PDF (MES style)
@@ -169,24 +173,30 @@ export function CostingDetail() {
         </Card>
 
         <Card>
-          <SectionTitle>Totals</SectionTitle>
-          <dl className="space-y-2 text-sm">
-            <TotalRow label="Cost" value={c.cost_zar} />
-            {/* WO v4.30 §0.2a — net_total is the headline; when a discount exists, show the pre-discount
-                selling as "before discount" + the discount, then the highlighted Net total. No decoration
-                when there's no discount (net == selling). */}
-            {(c.discount_amount ?? 0) > 0 ? (
-              <>
-                <TotalRow label="Before discount" value={c.gross_selling_zar ?? c.selling_zar} muted />
-                <TotalRow label="Discount" valueText={`- ${zar(c.discount_amount ?? 0)}`} muted />
-                <TotalRow label="Net total" value={c.selling_zar} highlight />
-              </>
-            ) : (
-              <TotalRow label="Selling price" value={c.selling_zar} highlight />
-            )}
-            <TotalRow label="Gross profit" value={c.gross_profit_zar} muted />
-            <TotalRow label="Markup" valueText={`${c.markup_pct}%`} muted />
-          </dl>
+          <SectionTitle>Cost summary</SectionTitle>
+          {/* v1.39.1 (Michael) — full cost review as per the /results report: manufacturing cost, cost/m²,
+              margin, ratio, discount, net + SELLING PRICE. Live rows read the saved_result (the costing-object
+              c.cost_zar/markup_pct are 0 — never populated from the calc); mock rows keep the legacy fallback. */}
+          <CostSummary
+            calculationId={c.calculation_id ?? null}
+            mode={mode}
+            fallback={
+              <dl className="space-y-2 text-sm">
+                <TotalRow label="Cost" value={c.cost_zar} />
+                {(c.discount_amount ?? 0) > 0 ? (
+                  <>
+                    <TotalRow label="Before discount" value={c.gross_selling_zar ?? c.selling_zar} muted />
+                    <TotalRow label="Discount" valueText={`- ${zar(c.discount_amount ?? 0)}`} muted />
+                    <TotalRow label="Net total" value={c.selling_zar} highlight />
+                  </>
+                ) : (
+                  <TotalRow label="Selling price" value={c.selling_zar} highlight />
+                )}
+                <TotalRow label="Gross profit" value={c.gross_profit_zar} muted />
+                <TotalRow label="Markup" valueText={`${c.markup_pct}%`} muted />
+              </dl>
+            }
+          />
         </Card>
       </div>
 
@@ -530,17 +540,23 @@ function TotalRow({
   valueText,
   highlight,
   muted,
+  accentGreen,
 }: {
   label: string
   value?: number
   valueText?: string
   highlight?: boolean
   muted?: boolean
+  accentGreen?: boolean
 }) {
   return (
     <div className="flex items-center justify-between">
       <dt className={muted ? 'text-muted' : 'text-body'}>{label}</dt>
-      <dd className={`tabular-nums ${highlight ? 'text-lg font-bold text-primary' : 'font-semibold'}`}>
+      <dd
+        className={`tabular-nums ${
+          highlight ? 'text-lg font-bold text-primary' : accentGreen ? 'font-semibold text-status-green' : 'font-semibold'
+        }`}
+      >
         {valueText ?? (value != null ? zar(value) : '—')}
       </dd>
     </div>
@@ -633,6 +649,70 @@ interface SavedResult {
   items?: BomRow[]
   category_totals?: Record<string, number>
   grand_total?: number
+  cost_per_sqm?: number
+  profit_margin?: number
+  profit_amount?: number
+  ratio_label?: string
+  ratio_amount?: number
+  selling_price?: number
+  discount_kind?: string
+  discount_input?: number
+  discount_amount?: number
+  net_total?: number
+}
+
+function CostSummary({
+  calculationId,
+  mode,
+  fallback,
+}: {
+  calculationId: number | null
+  mode: string
+  fallback: ReactNode
+}) {
+  const [sr, setSr] = useState<SavedResult | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    if (calculationId == null) return
+    let alive = true
+    apiGet<{ saved_result?: SavedResult }>(`/api/calculations/${calculationId}`)
+      .then((r) => { if (alive) setSr(r.saved_result ?? null) })
+      .catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [calculationId])
+
+  if (mode !== 'live' || calculationId == null || err) return <>{fallback}</>
+  if (!sr) return <p className="py-1 text-sm text-muted">Loading cost summary…</p>
+
+  const disc = sr.discount_amount ?? 0
+  const money = (v?: number) => zar(v ?? 0, { decimals: true })
+  return (
+    <dl className="space-y-2 text-sm">
+      {sr.cost_per_sqm != null && <TotalRow label="Cost per m²" valueText={money(sr.cost_per_sqm)} muted />}
+      <TotalRow label="Total manufacturing" valueText={money(sr.grand_total)} />
+      {!!sr.profit_amount && (
+        <TotalRow label={`Profit margin (${sr.profit_margin}%)`} valueText={`+ ${money(sr.profit_amount)}`} accentGreen />
+      )}
+      {!!sr.ratio_amount && (
+        <TotalRow label={`Ratio (${sr.ratio_label})`} valueText={`+ ${money(sr.ratio_amount)}`} accentGreen />
+      )}
+      {sr.selling_price != null ? (
+        <TotalRow label="Selling price" valueText={money(sr.selling_price)} highlight />
+      ) : (
+        <TotalRow label="Total manufacturing cost" valueText={money(sr.grand_total)} highlight />
+      )}
+      {disc > 0 && (
+        <>
+          <TotalRow
+            label={`Discount${sr.discount_kind === 'percent' ? ` (${sr.discount_input}%)` : ''}`}
+            valueText={`− ${money(disc)}`}
+            accentGreen
+          />
+          <TotalRow label="Net total" valueText={money(sr.net_total)} highlight />
+        </>
+      )}
+    </dl>
+  )
 }
 
 function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: string }) {
