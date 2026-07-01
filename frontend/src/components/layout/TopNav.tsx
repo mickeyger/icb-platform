@@ -149,16 +149,17 @@ export function TopNav({ dark = false }: { dark?: boolean }) {
             dark={dark}
           />
         )}
-        <button
-          onClick={() => setTooltipsEnabled(!tooltipsEnabled)}
-          title={tooltipsEnabled ? 'Hide demo tooltips' : 'Show demo tooltips'}
-          aria-pressed={tooltipsEnabled}
-          className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
-            tooltipsEnabled ? 'bg-white/20 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'
-          }`}
-        >
-          <Info size={14} /> Tips {tooltipsEnabled ? 'on' : 'off'}
-        </button>
+        <Tooltip text={tooltipsEnabled ? 'Hide demo tooltips' : 'Show demo tooltips'}>
+          <button
+            onClick={() => setTooltipsEnabled(!tooltipsEnabled)}
+            aria-pressed={tooltipsEnabled}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
+              tooltipsEnabled ? 'bg-white/20 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'
+            }`}
+          >
+            <Info size={14} /> Tips {tooltipsEnabled ? 'on' : 'off'}
+          </button>
+        </Tooltip>
         <UserSwitcher
           profile={profile}
           onChange={setProfile}
@@ -331,22 +332,23 @@ function UserSwitcher({
     .toUpperCase()
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-white/10"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Switch demo user profile"
-      >
-        <div className="hidden text-right sm:block">
-          <div className="text-sm font-semibold leading-tight">{profile.name}</div>
-          <div className="text-[11px] opacity-80">{profile.role}</div>
-        </div>
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-xs font-bold">
-          {initials}
-        </div>
-        <ChevronDown size={14} className="opacity-70" />
-      </button>
+      <Tooltip text="Switch demo user profile">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-white/10"
+          aria-haspopup="menu"
+          aria-expanded={open}
+        >
+          <div className="hidden text-right sm:block">
+            <div className="text-sm font-semibold leading-tight">{profile.name}</div>
+            <div className="text-[11px] opacity-80">{profile.role}</div>
+          </div>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-xs font-bold">
+            {initials}
+          </div>
+          <ChevronDown size={14} className="opacity-70" />
+        </button>
+      </Tooltip>
       {open && (
         <div
           role="menu"
@@ -438,17 +440,18 @@ function BranchPicker({
 
   return (
     <div ref={ref} className="relative hidden sm:block">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Switch active branch — refreshes Planning Board and Materials views"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-semibold hover:bg-white/20"
-      >
-        {busyId != null ? <Spinner size={12} /> : <Building2 size={13} />}
-        {active.code}
-        <ChevronDown size={12} className="opacity-70" />
-      </button>
+      <Tooltip text="Switch active branch — refreshes Planning Board and Materials views">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-xs font-semibold hover:bg-white/20"
+        >
+          {busyId != null ? <Spinner size={12} /> : <Building2 size={13} />}
+          {active.code}
+          <ChevronDown size={12} className="opacity-70" />
+        </button>
+      </Tooltip>
       {open && (
         <div
           role="menu"

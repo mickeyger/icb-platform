@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { CheckCircle2, Loader2, MessageSquarePlus, X } from 'lucide-react'
 import { ApiError, apiPost, apiUpload } from '../../lib/api'
+import { Tooltip } from '../ui/Tooltip'
 
 type Phase = 'form' | 'submitting' | 'clarify' | 'done' | 'error'
 
@@ -138,16 +139,17 @@ export function FeedbackWidget() {
 
   return (
     <>
-      <button
-        data-feedback-ui="1"
-        data-testid="feedback-launcher"
-        onClick={openWidget}
-        title="Report an issue"
-        className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-white shadow-lg transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/40"
-      >
-        <MessageSquarePlus size={18} />
-        <span className="hidden text-sm font-medium sm:inline">Report issue</span>
-      </button>
+      <Tooltip text="Report an issue" placement="top">
+        <button
+          data-feedback-ui="1"
+          data-testid="feedback-launcher"
+          onClick={openWidget}
+          className="fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-white shadow-lg transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <MessageSquarePlus size={18} />
+          <span className="hidden text-sm font-medium sm:inline">Report issue</span>
+        </button>
+      </Tooltip>
 
       {open && (
         <div data-feedback-ui="1" className="fixed inset-0 z-50 flex items-center justify-center p-4">

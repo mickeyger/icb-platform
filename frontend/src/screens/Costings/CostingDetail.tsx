@@ -12,6 +12,8 @@ import {
   AlertCircle,
   ShieldCheck,
   Lock,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
 import { apiGet } from '../../lib/api'
@@ -638,6 +640,16 @@ function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: 
   const [catTotals, setCatTotals] = useState<Record<string, number>>({})
   const [total, setTotal] = useState<number | null>(null)
   const [err, setErr] = useState(false)
+  // v1.39.1 (Michael's :8006 pass) — per-category collapse. Empty Set = all OPEN (matches the
+  // initial view he reviewed); a category key (g.cat) in the set hides that category's rows + subtotal.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggleCat = (cat: string) =>
+    setCollapsed((s) => {
+      const n = new Set(s)
+      if (n.has(cat)) n.delete(cat)
+      else n.add(cat)
+      return n
+    })
   useEffect(() => {
     if (calculationId == null) return
     let alive = true
@@ -691,32 +703,42 @@ function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: 
         <tbody>
           {groups.map((g) => (
             <Fragment key={g.cat}>
-              {/* Category band — uppercase mono label across the full row (results.html category header) */}
-              <tr className="bg-surface-alt">
+              {/* Category band — uppercase mono label; click to collapse/expand (results.html category header) */}
+              <tr
+                className="cursor-pointer select-none bg-surface-alt hover:bg-surface-alt/70"
+                onClick={() => toggleCat(g.cat)}
+              >
                 <td colSpan={9} className="px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-primary">
-                  {g.cat}
+                  <span className="inline-flex items-center gap-1.5">
+                    {collapsed.has(g.cat) ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    {g.cat}
+                  </span>
                 </td>
               </tr>
-              {g.items.map((l, i) => (
-                <tr key={`${l.bom_id ?? l.material_code ?? l.material}-${i}`} className="border-t border-line">
-                  <td className="px-3 py-2" />
-                  <td className="px-3 py-2 text-body">{l.material}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-muted">{l.material_code ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-muted">{l.formula ?? ''}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {(l.quantity ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-muted">{l.unit ?? ''}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{zar(l.unit_price ?? 0, { decimals: true })}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-muted">{l.waste_pct ? `${l.waste_pct}%` : ''}</td>
-                  <td className="px-3 py-2 text-right font-semibold tabular-nums">{zar(l.line_cost ?? 0, { decimals: true })}</td>
-                </tr>
-              ))}
-              {/* Per-category subtotal — dim right-aligned label + accent value */}
-              <tr className="border-t border-line bg-surface-alt/40">
-                <td colSpan={8} className="px-3 py-1.5 text-right text-xs text-muted">{g.cat} subtotal</td>
-                <td className="px-3 py-1.5 text-right text-xs font-semibold tabular-nums text-primary">{zar(subtotalFor(g), { decimals: true })}</td>
-              </tr>
+              {!collapsed.has(g.cat) && (
+                <>
+                  {g.items.map((l, i) => (
+                    <tr key={`${l.bom_id ?? l.material_code ?? l.material}-${i}`} className="border-t border-line">
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2 text-body">{l.material}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted">{l.material_code ?? '—'}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted">{l.formula ?? ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {(l.quantity ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted">{l.unit ?? ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{zar(l.unit_price ?? 0, { decimals: true })}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{l.waste_pct ? `${l.waste_pct}%` : ''}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">{zar(l.line_cost ?? 0, { decimals: true })}</td>
+                    </tr>
+                  ))}
+                  {/* Per-category subtotal — dim right-aligned label + accent value */}
+                  <tr className="border-t border-line bg-surface-alt/40">
+                    <td colSpan={8} className="px-3 py-1.5 text-right text-xs text-muted">{g.cat} subtotal</td>
+                    <td className="px-3 py-1.5 text-right text-xs font-semibold tabular-nums text-primary">{zar(subtotalFor(g), { decimals: true })}</td>
+                  </tr>
+                </>
+              )}
             </Fragment>
           ))}
           {/* Grand total band */}
