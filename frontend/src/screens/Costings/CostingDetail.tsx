@@ -333,7 +333,8 @@ export function CostingDetail() {
       <Card>
         <SectionTitle>Status history</SectionTitle>
         {mode === 'live' && c.production_job_id
-          ? <LiveTimeline pjId={c.production_job_id} />
+          ? <LiveTimeline pjId={c.production_job_id}
+              refreshKey={`${c.status}|${prejobCard?.status ?? ''}|${c.pre_job_confirmed_at ?? ''}|${c.chassis_received_at ?? ''}`} />
           : <StatusTimeline c={c} statusHex={style.hex} />}
       </Card>
 
@@ -392,13 +393,6 @@ function PreJobCardStatusPanel({ card, onView }: { card: PrejobCardSummary; onVi
           : { s: 'GREY', label: 'Draft' }
   const border = pill.s === 'GREEN' ? 'border-status-green' : pill.s === 'RED' ? 'border-status-red' : 'border-status-amber'
 
-  const openEmail = async () => {
-    try {
-      const e = await apiGet<{ mailto: string }>(`/api/prejob-cards/${card.id}/email`)
-      window.location.href = e.mailto                     // §0.11 — opens the user's mail client
-    } catch { /* no mail client / offline — non-fatal, the deep-links live in the card too */ }
-  }
-
   return (
     <Tooltip k="costings_detail.prejob_signoff_section">
       <Card data-testid="prejob-status-panel" className={`mb-4 ${border}`}>
@@ -424,10 +418,7 @@ function PreJobCardStatusPanel({ card, onView }: { card: PrejobCardSummary; onVi
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-dark">
             View Pre-Job Card →
           </button>
-          <button onClick={() => void openEmail()}
-            className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface-alt">
-            <Send size={14} /> Open email draft
-          </button>
+          {/* v1.39.3 — mailto "Open email draft" removed; server-side SMTP is the sole email path. */}
           <button onClick={() => window.open(`/api/prejob-cards/${card.id}/pdf`, '_blank')}
             className="flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-surface-alt">
             <Printer size={14} /> Download PDF
@@ -868,7 +859,11 @@ const TIMELINE_LABELS: Record<string, string> = {
   chassis_received: 'Chassis received',
 }
 
-function LiveTimeline({ pjId }: { pjId: number }) {
+// v1.39.3 — `refreshKey` refetches the timeline when the costing's lifecycle changes (accept /
+// sign-off / confirm / chassis-received). Without it the Status-history card fetched once on mount
+// and went stale after an on-page action — the parent's refresh() updates `c` but not this
+// independent fetch (Michael: "Approve → bottom section stale, needs manual refresh").
+function LiveTimeline({ pjId, refreshKey }: { pjId: number; refreshKey?: string }) {
   const [events, setEvents] = useState<{ event_type: string; occurred_at: string; actor: string | null }[] | null>(null)
   const [err, setErr] = useState(false)
   useEffect(() => {
@@ -877,7 +872,7 @@ function LiveTimeline({ pjId }: { pjId: number }) {
       .then((e) => { if (alive) setEvents(e) })
       .catch(() => { if (alive) setErr(true) })
     return () => { alive = false }
-  }, [pjId])
+  }, [pjId, refreshKey])
 
   if (err) return <p className="text-xs text-muted">Live timeline unavailable.</p>
   if (!events) return <p className="text-xs text-muted">Loading timeline…</p>
