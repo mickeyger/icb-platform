@@ -12,6 +12,14 @@ from ..templates_config import templates
 
 router = APIRouter()
 
+# Roles the admin UI may assign. Broadened in v1.39.3 (CA10): the legacy list was
+# {user,full,admin} only — but the Phase-1 operational roles (sales/planner and the
+# workshop-floor roles) are real, so editing a sales/planner user must not be forced to
+# reset them to a legacy value. Kept permissive (free-string role column); this is the
+# admin-UI guard, not a DB constraint.
+_ASSIGNABLE_ROLES = ["user", "full", "admin", "sales", "planner",
+                     "production", "workshop", "qc_inspector"]
+
 
 @router.get("/api/users")
 async def get_users(request: Request, db: Session = Depends(get_db)):
@@ -21,6 +29,7 @@ async def get_users(request: Request, db: Session = Depends(get_db)):
         "id": u.id,
         "username": u.username,
         "role": u.role,
+        "email": u.email or "",
         "can_view_full_cost": u.can_view_full_cost,
         "created_at":    u.created_at.isoformat()    if u.created_at    else None,
         "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
@@ -83,7 +92,7 @@ async def update_user_role(user_id: int, request: Request, db: Session = Depends
     require_admin(request, db)
     body = await request.json()
     role = str(body.get("role", "")).strip().lower()
-    if role not in ["user", "full", "admin"]:
+    if role not in _ASSIGNABLE_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
     u = db.query(User).filter_by(id=user_id).first()
     if not u:
@@ -93,6 +102,29 @@ async def update_user_role(user_id: int, request: Request, db: Session = Depends
     return {"id": u.id, "role": u.role, "can_view_full_cost": u.can_view_full_cost}
 
 
+# v1.39.3 (CA10) — admin-editable email so ops can update a signer's address without SQL.
+# Empty is allowed (e.g. the admin account is never a check recipient); a non-empty value must
+# be email-shaped. Admin-only, mirroring the /role + /password endpoints.
+import re as _re
+
+_EMAIL_RE = _re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@router.put("/api/users/{user_id}/email")
+async def update_user_email(user_id: int, request: Request, db: Session = Depends(get_db)):
+    require_admin(request, db)
+    body = await request.json()
+    email = str(body.get("email", "")).strip()
+    if email and not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address (or leave blank)")
+    u = db.query(User).filter_by(id=user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.email = email
+    db.commit()
+    return {"id": u.id, "username": u.username, "email": u.email}
+
+
 @router.post("/api/users")
 async def create_user(request: Request, db: Session = Depends(get_db)):
     require_admin(request, db)
@@ -100,19 +132,24 @@ async def create_user(request: Request, db: Session = Depends(get_db)):
     username = str(body.get("username", "")).strip()
     password = str(body.get("password", "")).strip()
     role = str(body.get("role", "user")).strip().lower()
+    email = str(body.get("email", "")).strip()
     if not username or not password:
         raise HTTPException(status_code=400, detail="Username and password required")
     if len(password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-    if role not in ["user", "full", "admin"]:
+    if role not in _ASSIGNABLE_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    if email and not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address (or leave blank)")
     if db.query(User).filter_by(username=username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
-    new_user = User(username=username, password_hash=pwd_context.hash(password), role=role)
+    new_user = User(username=username, password_hash=pwd_context.hash(password),
+                    role=role, email=email)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return {"id": new_user.id, "username": new_user.username, "role": new_user.role}
+    return {"id": new_user.id, "username": new_user.username,
+            "role": new_user.role, "email": new_user.email or ""}
 
 
 @router.put("/api/users/{user_id}/password")
