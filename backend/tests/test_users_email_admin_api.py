@@ -38,6 +38,7 @@ def env(app_mod):
     with SessionLocal() as db:
         _purge(db)
         admin = db.query(User).filter_by(username="admin").first()
+        admin_id = admin.id            # capture as a plain int (avoid DetachedInstanceError later)
         target = User(username=f"P39EU_target_{uuid.uuid4().hex[:6]}", role="user",
                       email="old@icecoldgrp.co.za", password_hash=pwd_context.hash("x"))
         db.add(target)
@@ -45,24 +46,24 @@ def env(app_mod):
         target_id = target.id
         made_users.append(target_id)
 
-        def _client_as(role):
-            with SessionLocal() as d2:
-                if role == "admin":
-                    uid = admin.id
-                else:
-                    u = User(username=f"P39EU_{role}_{uuid.uuid4().hex[:6]}", role=role,
-                             email="", password_hash=pwd_context.hash("x"))
-                    d2.add(u)
-                    d2.commit()
-                    uid = u.id
-                    made_users.append(uid)
-                sid = f"p39eu-{uuid.uuid4().hex[:8]}"
-                d2.merge(UserSession(id=sid, user_id=uid, role=role, csrf_token="t"))
+    def _client_as(role):
+        with SessionLocal() as d2:
+            if role == "admin":
+                uid = admin_id
+            else:
+                u = User(username=f"P39EU_{role}_{uuid.uuid4().hex[:6]}", role=role,
+                         email="", password_hash=pwd_context.hash("x"))
+                d2.add(u)
                 d2.commit()
-                made_sids.append(sid)
-            c = TestClient(app_mod.app)
-            c.cookies.set("session_id", sid)
-            return c
+                uid = u.id
+                made_users.append(uid)
+            sid = f"p39eu-{uuid.uuid4().hex[:8]}"
+            d2.merge(UserSession(id=sid, user_id=uid, role=role, csrf_token="t"))
+            d2.commit()
+            made_sids.append(sid)
+        c = TestClient(app_mod.app)
+        c.cookies.set("session_id", sid)
+        return c
 
     yield _client_as, target_id
 
