@@ -157,11 +157,15 @@ export function CostingsProvider({ children }: { children: ReactNode }) {
         // §0.21 — the live Pre-Job Card summaries; tolerate an older backend (→ no supersede).
         apiGet<PrejobCardSummary[]>('/api/prejob-cards/summaries').catch(() => [] as PrejobCardSummary[]),
       ])
-      if (!Array.isArray(calcs) || calcs.length === 0) {
+      if (!Array.isArray(calcs)) {
+        // Malformed (non-array) response — treat as unreachable; keep the demo seed.
         setCostings(costingsMock.costings)
         setMode('mock')
         return
       }
+      // A valid array — even an empty one — is REAL backend state: render it live. A
+      // freshly-wiped / blank-slate backend therefore shows an EMPTY Costings list, not
+      // the bundled demo rows. (Only a genuine fetch failure → the catch below → mock.)
       const pjByCalc = new Map((pjs ?? []).map((p) => [p.calculation_record_id, p]))
       const cardByCalc = new Map((cards ?? []).map((s) => [s.calculation_id, s]))
       const rows = calcs.map((c) => ({
