@@ -376,6 +376,10 @@ export function BayModelLanes() {
   }
 
   const freeBays = bays.filter((b) => !occupantByBay[b.id] && (b.state ?? 'empty') === 'empty').length
+  // v1.39.2 Phase 1 (BA-ratified filter) — the Merge lane shows only NON-EMPTY bays: empty bays live in
+  // the Pre-Assembly lane above (panel drop targets). A bay "moves" into Merge once it holds panels or a
+  // chassis, so an empty bay never offers both "drop panels" + "drop a chassis" (the dual-empty ambiguity).
+  const mergeBays = bays.filter((b) => (b.state ?? 'empty') !== 'empty')
 
   return (
     <div className="mt-4 grid grid-cols-[260px_1fr] gap-4" data-testid="bay-model">
@@ -551,10 +555,10 @@ export function BayModelLanes() {
         <Card>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-semibold uppercase tracking-wide text-muted">Merge</span>
-          <span className="text-[11px] text-muted">{bays.length} bays · {freeBays} free</span>
+          <span className="text-[11px] text-muted">{mergeBays.length} {mergeBays.length === 1 ? 'bay' : 'bays'} in merge</span>
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
-          {bays.map((bay) => {
+          {mergeBays.map((bay) => {
             const occ = occupantByBay[bay.id]
             const state: BayState = bay.state ?? (occ ? 'awaiting_attachment' : 'empty')
             const ui = BAY_TILE[state]
@@ -683,7 +687,11 @@ export function BayModelLanes() {
               </div>
             )
           })}
-          {bays.length === 0 && <div className="text-sm text-muted">No assembly bays.</div>}
+          {mergeBays.length === 0 && (
+            <div className="col-span-full rounded-md border border-dashed border-line p-4 text-center text-xs text-muted">
+              No bays in merge yet — a bay moves here once it holds panels or a chassis (empty bays are in Pre-Assembly above).
+            </div>
+          )}
         </div>
         <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
           {canAssign
