@@ -4491,6 +4491,18 @@ async function _doApprove(versionAction, nextVersion, reuseQno) {
     } else {
       toast(`Costing approved${custName}${verLabel} — saved as #${result.record_id}`, 'success');
     }
+    // v1.39.6 — when embedded on the MES shell (/costings/new → LiveCalculator), tell the
+    // parent frame a costing was saved so the CostingsDashboard below the calculator refetches
+    // without a manual reload (companion to the v1.39.4 KPI-strip fix on the LIST page). No-op
+    // when the calculator runs standalone (window.parent === window) or cross-origin.
+    if (window.parent && window.parent !== window) {
+      try {
+        window.parent.postMessage(
+          { type: 'mes:costing-saved', recordId: result.record_id, quoteNumber: result.quote_number || null },
+          window.location.origin,
+        );
+      } catch (e) { /* detached / cross-origin parent — non-fatal */ }
+    }
   } catch(e) {
     toast('Approve failed: ' + e.message, 'error');
     btn.disabled = false;
