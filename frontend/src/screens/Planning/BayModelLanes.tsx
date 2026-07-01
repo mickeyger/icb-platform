@@ -438,40 +438,97 @@ export function BayModelLanes() {
             Rendered HERE only; the Merge grid's inline pre_assembly branch is removed below to avoid a double-render. */}
         <Card>
           {(() => {
-            const preBays = bays.filter((b) => (b.state ?? 'empty') === 'pre_assembly')
+            // v1.39.2 Phase 1 — Pre-Assembly is now a proper LANE (state-based, D3): EMPTY bays are panel
+            // drop targets; pre_assembly bays are building. Reuses the native-DnD drop (onBayDrop →
+            // panels-arrived) + clear_panels_arrived (the ✕ drag-back). The build-progress bar + manual
+            // drag-to-advance land in Phase 2 (after the schema migration). The Merge lane below still
+            // renders all 5 bays for the chassis/merge side, so empty bays appear in both views — a
+            // Phase-1 presentation point flagged for BA review (whether to filter the Merge lane).
+            const preBays = bays.filter((b) => {
+              const s = b.state ?? 'empty'
+              return s === 'empty' || s === 'pre_assembly'
+            })
+            const building = preBays.filter((b) => (b.state ?? 'empty') === 'pre_assembly').length
             return (
               <>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-semibold uppercase tracking-wide text-muted">Pre-Assembly</span>
-                  <span className="text-[11px] text-muted">{preBays.length} {preBays.length === 1 ? 'bay' : 'bays'} with panels</span>
+                  <span className="text-[11px] text-muted">
+                    {building} {building === 1 ? 'bay' : 'bays'} building · {preBays.length - building} free
+                  </span>
                 </div>
                 {preBays.length > 0 ? (
                   <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
                     {preBays.map((bay) => {
-                      const ui = BAY_TILE.pre_assembly
+                      const state = (bay.state ?? 'empty') as BayState
+                      const isEmpty = state === 'empty'
+                      const ui = BAY_TILE[state]
                       const jobNo = bay.panels_job_number ?? bay.occupant_job_number ?? bay.panels_job_id ?? '—'
+                      const rejected = rejectBay === bay.id
+                      const busy = busyBay === bay.id
+                      // R3/R4 — only EMPTY bays highlight + accept a panel-set drop; occupied (building) bays
+                      // reject (no drop handlers). The drag SOURCE (a scheduled slot-cell) is already gated on
+                      // canSchedule (D2: readiness == scheduled), so not-ready / unscheduled jobs aren't draggable.
+                      const dropCue = panelDragActive && canAssign && isEmpty
+                        ? (panelHoverBay === bay.id ? ' ring-2 ring-sky-500' : ' ring-1 ring-sky-400/50')
+                        : ''
                       return (
                         <div
                           key={bay.id}
-                          data-testid="pre-assembly-bay"
+                          data-testid={isEmpty ? 'pre-assembly-empty' : 'pre-assembly-bay'}
                           data-bay-id={bay.id}
                           data-bay-code={bay.code}
-                          data-bay-state="pre_assembly"
-                          className={`relative rounded-md p-2 ${ui.border}`}
+                          data-bay-state={state}
+                          onDragOver={(e) => {
+                            if (!canAssign || !isEmpty) return
+                            const isPanel = e.dataTransfer.types.includes('application/x-panel-job')
+                            if (drag || isPanel) e.preventDefault()
+                          }}
+                          onDragEnter={(e) => {
+                            if (canAssign && isEmpty && e.dataTransfer.types.includes('application/x-panel-job')) setPanelHoverBay(bay.id)
+                          }}
+                          onDragLeave={() => setPanelHoverBay((b) => (b === bay.id ? null : b))}
+                          onDrop={(e) => { if (isEmpty) onBayDrop(e, bay.id) }}
+                          className={`relative rounded-md p-2 transition ${
+                            rejected ? 'border-2 border-status-red bg-status-red/20' : ui.border
+                          }${dropCue}`}
                         >
+                          {busy && (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-white/60 text-[11px] text-muted">
+                              working…
+                            </div>
+                          )}
                           <div className="flex items-center justify-between text-[11px] text-muted">
                             <span>{bay.code}</span>
-                            {ui.badge ? (
+                            {!isEmpty && ui.badge ? (
                               <span className={`rounded px-1 text-[10px] font-medium ${ui.badgeClass}`}>{ui.badge}</span>
                             ) : null}
                           </div>
-                          <div className="font-mono text-xs font-semibold text-sky-700">Panels in bay</div>
-                          <div className="truncate text-[11px] text-muted">Job {jobNo}</div>
-                          {bay.panels_chassis_vin && (
-                            <div className="truncate text-[11px] text-muted">{bay.panels_chassis_vin}</div>
-                          )}
-                          {bay.panels_customer_name && (
-                            <div className="truncate text-[11px] text-muted">{bay.panels_customer_name}</div>
+                          {isEmpty ? (
+                            <div className="flex min-h-[42px] items-center justify-center gap-1 text-center text-[11px] text-muted">
+                              <Plus size={12} /> drop a ready panel-set
+                            </div>
+                          ) : (
+                            <>
+                              <div className="font-mono text-xs font-semibold text-sky-700">Panels in bay</div>
+                              <div className="truncate text-[11px] text-muted">Job {jobNo}</div>
+                              {bay.panels_chassis_vin && (
+                                <div className="truncate text-[11px] text-muted">{bay.panels_chassis_vin}</div>
+                              )}
+                              {bay.panels_customer_name && (
+                                <div className="truncate text-[11px] text-muted">{bay.panels_customer_name}</div>
+                              )}
+                              {canAssign && bay.panels_job_id != null && (
+                                <button
+                                  data-testid="clear-panels-pre"
+                                  onClick={() => void onClearPanels(bay)}
+                                  title="Move this job's panels back out of the bay (reversible until the chassis attaches)"
+                                  className="mt-1 w-full rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:bg-surface-alt"
+                                >
+                                  ✕ move panels back
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       )
@@ -479,11 +536,11 @@ export function BayModelLanes() {
                   </div>
                 ) : (
                   <div className="rounded-md border border-dashed border-line p-4 text-center text-xs text-muted">
-                    No bays in pre-assembly — panels appear here when a scheduled job’s panels are dropped on a bay before its chassis.
+                    All bays are in Merge — no empty or building pre-assembly bays right now.
                   </div>
                 )}
                 <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
-                  Panels built down the chute · the chassis joins them in Merge below.
+                  Drop a scheduled job's ready panels on an empty bay to start the body · it builds down the chute · the chassis joins it in Merge below.
                 </div>
               </>
             )
