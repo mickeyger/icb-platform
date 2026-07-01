@@ -318,13 +318,27 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                   </td>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap items-center gap-1">
-                      <Tooltip k="costings_dashboard.view_button">
-                        <Link
-                          to={`/costings/${encodeURIComponent(c.quote_number)}`}
-                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
-                        >
-                          <Eye size={12} /> View
-                        </Link>
+                      {/* v1.39.1 (Michael) — View opens the full /results report (the light legacy report,
+                          same-origin). Live rows link straight to it; mock rows (no calculation_id) fall back
+                          to the React costing detail. */}
+                      <Tooltip text={c.calculation_id ? 'Open the full costing report' : 'Open the costing detail'}>
+                        {c.calculation_id ? (
+                          <a
+                            href={`/results/${c.calculation_id}`}
+                            target="_blank"
+                            rel="noopener"
+                            className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
+                          >
+                            <Eye size={12} /> View
+                          </a>
+                        ) : (
+                          <Link
+                            to={`/costings/${encodeURIComponent(c.quote_number)}`}
+                            className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
+                          >
+                            <Eye size={12} /> View
+                          </Link>
+                        )}
                       </Tooltip>
                       {canAccept && c.status === 'Pending' && (
                         <Tooltip k="costings_dashboard.accept_button">
