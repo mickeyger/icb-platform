@@ -684,8 +684,22 @@ function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: 
   const subtotalFor = (g: { cat: string; items: BomRow[] }) =>
     catTotals[g.cat] ?? g.items.reduce((s, l) => s + (l.line_cost ?? 0), 0)
 
+  // v1.39.1 (Michael) — Collapse all / Expand all toggle (mirrors the legacy calculator's COLLAPSE ALL).
+  const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.cat))
+  const setAll = (collapse: boolean) =>
+    setCollapsed(collapse ? new Set(groups.map((g) => g.cat)) : new Set())
+
   return (
     <div className="overflow-x-auto">
+      <div className="flex justify-end px-1 pb-2">
+        <button
+          onClick={() => setAll(!allCollapsed)}
+          className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
+        >
+          {allCollapsed ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          {allCollapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      </div>
       <table className="w-full text-sm">
         <thead className="bg-primary text-left text-white">
           <tr>
