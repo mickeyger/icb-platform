@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ExternalLink, RadioTower, RefreshCw, AlertCircle, Loader2 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
@@ -26,7 +26,21 @@ export function LiveCalculator() {
   // CostingsProvider attempts a dev-mode auto-login on mount; wait for it to
   // finish (mode flips off 'loading') before mounting the iframe so the
   // session cookie is in place when /calculator loads.
-  const { mode } = useCostings()
+  const { mode, refresh } = useCostings()
+
+  // v1.39.6 — the embedded CostingsDashboard below the calculator loads once on mount and
+  // otherwise never refetches, so a costing saved via the iframe's "Approve & Save Costing"
+  // left the dashboard stale until a manual reload. The legacy calculator now posts a
+  // `mes:costing-saved` message to this parent frame on save (calculator.js _doApprove);
+  // refetch the shared costings list when it arrives. Origin-checked (same-origin embed).
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      if (e.origin !== window.location.origin) return
+      if (e.data?.type === 'mes:costing-saved') void refresh()
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [refresh])
 
   // v1.39.1 backport (Item 1b): thread a dashboard "Edit" deep-link (/costings/new?edit=<calculation_id>)
   // onto the iframe src so the legacy calculator (calculator.js:2112 reads ?edit=) reopens that calculation
