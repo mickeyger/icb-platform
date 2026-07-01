@@ -708,12 +708,21 @@ function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: 
                 className="cursor-pointer select-none bg-surface-alt hover:bg-surface-alt/70"
                 onClick={() => toggleCat(g.cat)}
               >
-                <td colSpan={9} className="px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-primary">
+                <td
+                  colSpan={collapsed.has(g.cat) ? 8 : 9}
+                  className="px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-primary"
+                >
                   <span className="inline-flex items-center gap-1.5">
                     {collapsed.has(g.cat) ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                     {g.cat}
                   </span>
                 </td>
+                {/* v1.39.1 (Michael) — a COLLAPSED category still shows its total on the band row. */}
+                {collapsed.has(g.cat) && (
+                  <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-primary">
+                    {zar(subtotalFor(g), { decimals: true })}
+                  </td>
+                )}
               </tr>
               {!collapsed.has(g.cat) && (
                 <>
