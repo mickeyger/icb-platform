@@ -1,13 +1,19 @@
 // CostingsKpiStrip.tsx — WO v4.31 §3.4 (§0.7): the 5 METRIC tiles lifted from the legacy
 // server-rendered dashboard into the React Costings dashboard (action tiles deliberately NOT
 // lifted). Values come from GET /api/dashboard/kpis, which shares compute_kpis() with the legacy
-// Jinja page — parity by construction. Fetched ONCE on page load (§0.11 — no polling/websocket;
-// fresher numbers = reload; tile-refresh is a v4.34 conversation). Renders nothing in mock mode /
-// on fetch failure.
-import { useEffect, useState } from 'react'
+// Jinja page — parity by construction. Renders nothing in mock mode / on fetch failure.
+//
+// v1.39.4 — the strip used to fetch ONCE on mount (empty deps), so the Accepted totals + approval
+// rate went stale after a costing was accepted/approved/signed-off until a full reload. It now
+// refetches whenever a KPI-affecting input moves: it derives a compact signature from the shared
+// costings context (count + per-row status:selling_zar — exactly what compute_kpis aggregates) and
+// keys the fetch effect on it. CostingsContext replaces the array on each refetch(), so the sig
+// changes on a real mutation but NOT on unrelated search/filter/selection churn.
+import { useEffect, useMemo, useState } from 'react'
 import { apiGet } from '../../lib/api'
 import { KpiTile } from '../../components/ui/primitives'
 import { zarShort } from '../../lib/format'
+import { useCostings } from '../../store/CostingsContext'
 
 interface ApprovalBucket {
   approved: number
@@ -26,14 +32,23 @@ interface Kpis {
 }
 
 export function CostingsKpiStrip() {
+  const { costings } = useCostings()
   const [kpis, setKpis] = useState<Kpis | null>(null)
+  // Signature of exactly the inputs compute_kpis() aggregates (accepted count/value, approval rate,
+  // total quoted). Changes only when a KPI-affecting field moves — so the effect below refetches
+  // after an accept/approve/sign-off but not on pure reference churn (e.g. a branch-switch that
+  // returns identical rows).
+  const sig = useMemo(
+    () => `${costings.length}|${costings.map((c) => `${c.status}:${c.selling_zar}`).join(',')}`,
+    [costings],
+  )
   useEffect(() => {
     let live = true
     apiGet<Kpis>('/api/dashboard/kpis')
       .then((k) => { if (live) setKpis(k) })
       .catch(() => { /* offline / mock mode — the strip simply doesn't render */ })
     return () => { live = false }
-  }, [])
+  }, [sig])
   if (!kpis) return null
   const r = kpis.approval_rates
   return (
