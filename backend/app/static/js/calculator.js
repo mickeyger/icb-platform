@@ -365,15 +365,31 @@ async function restoreLastSession() {
 }
 
 // Master ON/OFF toggle for a DRD/SRD group — mutually exclusive with each other
-function onDrdSrdToggle(grp, checked) {
+async function onDrdSrdToggle(grp, checked) {
+  // Door active before this change (for carrying the rear-door thickness across).
+  const prevGrp = _DRDSR_TOGGLE_GROUPS.find(g => drdSrdEnabled[g]);
   if (checked) {
     _DRDSR_TOGGLE_GROUPS.forEach(g => {
       drdSrdEnabled[g] = (g === grp);
       if (g !== grp) _clearDrdSrdSelections(g);  // deactivate the other group
     });
+    // Carry the rear-door insulation thickness onto the newly-selected door,
+    // zero the other. Default 0.06 m when nothing is set yet.
+    await _carryRearDoorThickness(grp, (prevGrp && prevGrp !== grp) ? prevGrp : null);
   } else {
     drdSrdEnabled[grp] = false;
     _clearDrdSrdSelections(grp);
+    // No rear door selected → zero this door's insulation so it neither warns
+    // nor leaks a deduction into the {SRD …} formulas.
+    const pair = _doorInsulationPair(grp);
+    if (pair) {
+      for (const row of [pair.eps, pair.pu]) {
+        if ((Number(row.variable_value) || 0) !== 0) {
+          row.variable_value = 0;
+          try { await api('PUT', `/api/bom/${row.id}`, { variable_value: 0 }); } catch (e) { /* non-fatal */ }
+        }
+      }
+    }
   }
   saveDrdSrdEnabled();
   renderBodyOptions(bomData);
@@ -433,6 +449,96 @@ function _insulationPairFor(masterId) {
   return { eps, pu };
 }
 
+// ── Rear-door (DRD/SRD) insulation carry ─────────────────────────────────
+// A body is quoted as EITHER double rear doors (DRD) OR a single rear door
+// (SRD), never both. There is one rear-door insulation thickness that follows
+// the user's door-type choice: only the selected door carries it; the other
+// door is zeroed. All BOM skin formulas read {SRD EPS}/{SRD PU} (none read
+// {DRD …}), so a DRD quote (SRD = 0) deducts no rear-door insulation while an
+// SRD quote does — this is the intended costing.
+const DEFAULT_REAR_DOOR_THICKNESS_M = 0.06;
+
+// The EPS/PU insulation pair under a DRD/SRD door group, or null.
+function _doorInsulationPair(grp) {
+  const sibs = bomData.filter(r => r.is_body_option
+    && r.body_option_group === grp
+    && (r.body_option_subgroup || '').toUpperCase() === 'INSULATION'
+    && /EPS|PU/i.test(r.material_name || ''));
+  const eps = sibs.find(r => /EPS/i.test(r.material_name || ''));
+  const pu  = sibs.find(r => /PU/i.test(r.material_name || '') && !/EPS/i.test(r.material_name || ''));
+  return (eps && pu) ? { eps, pu } : null;
+}
+
+// The active thickness + side carried by a pair, or null when both are zero.
+function _doorActiveCell(pair) {
+  if (!pair) return null;
+  const e = Number(pair.eps.variable_value) || 0;
+  const u = Number(pair.pu.variable_value)  || 0;
+  if (e > 0) return { T: e, side: 'EPS' };
+  if (u > 0) return { T: u, side: 'PU' };
+  return null;
+}
+
+// Carry the rear-door thickness onto the newly-selected door's matching side
+// and zero the other door entirely. Thickness + side follow the previous door
+// (so EPS stays EPS, PU stays PU across the switch); default 0.06 m when no
+// value exists yet. Persists each change to the body template via PUT /api/bom,
+// mirroring the EPS/PU copy-on-switch flow.
+async function _carryRearDoorThickness(newGrp, oldGrp) {
+  const newPair = _doorInsulationPair(newGrp);
+  if (!newPair) return;                       // door has no insulation pair
+  const oldPair = oldGrp ? _doorInsulationPair(oldGrp) : null;
+  const active = _doorActiveCell(oldPair) || _doorActiveCell(newPair)
+              || { T: DEFAULT_REAR_DOOR_THICKNESS_M, side: 'EPS' };
+  const { T, side } = active;
+  const writes = [];
+  const setVal = (row, v) => {
+    v = Number(v) || 0;
+    if ((Number(row.variable_value) || 0) !== v) { row.variable_value = v; writes.push([row.id, v]); }
+  };
+  setVal(newPair.eps, side === 'EPS' ? T : 0);
+  setVal(newPair.pu,  side === 'PU'  ? T : 0);
+  bodyOptionSelections[String(newPair.eps.id)] = (side === 'EPS');
+  bodyOptionSelections[String(newPair.pu.id)]  = (side === 'PU');
+  if (oldPair) {
+    setVal(oldPair.eps, 0);
+    setVal(oldPair.pu,  0);
+    bodyOptionSelections[String(oldPair.eps.id)] = false;
+    bodyOptionSelections[String(oldPair.pu.id)]  = false;
+  }
+  for (const [id, v] of writes) {
+    try { await api('PUT', `/api/bom/${id}`, { variable_value: v }); } catch (e) { /* non-fatal */ }
+  }
+  if (writes.length) {
+    try { toast(`Rear-door insulation → ${side} ${T.toFixed(3)} m on ${newGrp}  ·  Body Template updated`, 'success'); } catch (e) {}
+  }
+}
+
+// Map a door-type SELECTOR's name/label to its rear-door group. Matches the
+// door-type radio ("DRD"/"SRD") or the folder label ("DOUBLE/SINGLE DOORS"),
+// but NOT the insulation rows ("DRD EPS", "SRD PU") or door fittings.
+function _doorFromSelectorName(name) {
+  const n = (name || '').toUpperCase().trim();
+  if (n.includes('DOUBLE')) return 'DRD';
+  if (n.includes('SINGLE')) return 'SRD';
+  if (n === 'DRD') return 'DRD';
+  if (n === 'SRD') return 'SRD';
+  return null;
+}
+
+// Which rear door is currently selected, independent of configurator layout:
+// prefer the checked DOOR TYPE selector (category-radio bodies keep both DRD/SRD
+// gates enabled), else fall back to a solely-enabled DRD/SRD gate (folder bodies).
+function _selectedRearDoor() {
+  for (const it of bomData) {
+    if (!it.is_body_option) continue;
+    const d = _doorFromSelectorName(it.material_name);
+    if (d && bodyOptionSelections[String(it.id)]) return d;
+  }
+  const on = _DRDSR_TOGGLE_GROUPS.filter(g => drdSrdEnabled[g]);
+  return on.length === 1 ? on[0] : null;
+}
+
 // Copy-on-switch: when an insulation radio is newly selected, carry the
 // sibling's thickness onto the selected row and zero the sibling. Persists
 // both to the body template via PUT /api/bom (same flow as manual bv-edit).
@@ -481,6 +587,15 @@ function validateInsulationPairs() {
     if (spans.length !== 2) return;
     const pair = _insulationPairFor(spans[0].dataset.bomId);
     if (!pair) return;
+    // Suppress the both-zero warning for a DRD/SRD door type that isn't
+    // selected — the non-quoted rear door is legitimately 0/0 (only the chosen
+    // door carries thickness). The selected door is auto-populated, so it
+    // won't be 0/0 anyway.
+    const _doorGrp = pair.eps.body_option_group;
+    if (_DRDSR_TOGGLE_GROUPS.includes(_doorGrp)) {
+      const _selDoor = _selectedRearDoor();
+      if (_selDoor && _doorGrp !== _selDoor) return;
+    }
     const bothZero = (Number(pair.eps.variable_value) || 0) <= 0
                   && (Number(pair.pu.variable_value)  || 0) <= 0;
     if (!bothZero) return;
@@ -2841,6 +2956,28 @@ function renderBodyOptionsFromDraft(draft, tid) {
     });
   }
 
+  // Sync the DRD/SRD gate, and when the active rear door actually changed,
+  // carry the rear-door insulation thickness onto the chosen door (zeroing the
+  // other) so the {SRD …} formulas deduct correctly and the both-zero warning
+  // doesn't fire on the freshly-selected door. Awaited by the v2 configurator
+  // handlers so the PUT lands before the recalc.
+  async function _syncDoorAndCarry(clickedDoor) {
+    const _prevDoor = _DRDSR_TOGGLE_GROUPS.find(g => drdSrdEnabled[g]);
+    _syncDrdSrdFromDraft();
+    // Newly-active rear door: prefer an explicitly-clicked DRD/SRD selector
+    // (category-radio bodies keep BOTH gates enabled, so the gate never flips),
+    // else the gate that just turned on (folder-gated bodies).
+    const _gate = _DRDSR_TOGGLE_GROUPS.find(g => drdSrdEnabled[g]);
+    const newDoor = clickedDoor || (_gate && _gate !== _prevDoor ? _gate : null);
+    if (newDoor) {
+      const oldDoor = newDoor === 'DRD' ? 'SRD' : 'DRD';
+      await _carryRearDoorThickness(newDoor, oldDoor);
+      // Handlers toggle visibility without re-rendering, so refresh the panel to
+      // show the carried thickness, EPS/PU selection + clear the warning.
+      renderBodyOptions(bomData);
+    }
+  }
+
   // Seed state once per trailer load.
   if (_draftFlagStateTrailer !== tid) {
     _draftFlagStateTrailer = tid;
@@ -3282,7 +3419,7 @@ function renderBodyOptionsFromDraft(draft, tid) {
       } else {
         myMids.forEach(mid => { bodyOptionSelections[String(mid)] = el.checked; });
       }
-      _syncDrdSrdFromDraft(); // keep DRD/SRD BOM gate in sync
+      await _syncDoorAndCarry(_doorFromSelectorName(el.closest('label')?.textContent || '')); // door-type change carries rear-door thickness
       saveBodyOptSel();
       // Insulation EPS/PU radio switch → carry thickness to the selected side.
       if (el.type === 'radio' && myMids.length) {
@@ -3300,7 +3437,7 @@ function renderBodyOptionsFromDraft(draft, tid) {
   // is tracked by sourceCategoryKey and the server gates the section via the
   // excluded_categories name list).
   list.querySelectorAll('[data-draft-cat-masterless]').forEach(el => {
-    el.addEventListener('change', () => {
+    el.addEventListener('change', async () => {
       if (el.type === 'radio' && el.name) {
         clearCategoryRadioGroup(el.name);
         const pid = el.name.startsWith('dfc-') ? el.name.slice(4) : '';
@@ -3310,7 +3447,7 @@ function renderBodyOptionsFromDraft(draft, tid) {
         // draftExcludedSections can read it correctly.
         draftMasterlessCatState[el.dataset.draftCatKey] = el.checked;
       }
-      _syncDrdSrdFromDraft(); // keep DRD/SRD BOM gate in sync
+      await _syncDoorAndCarry(_doorFromSelectorName(el.closest('label')?.textContent || '')); // door-type change carries rear-door thickness
       saveBodyOptSel();
       syncInputs();
       scheduleCalc();
@@ -3319,7 +3456,7 @@ function renderBodyOptionsFromDraft(draft, tid) {
 
   // Wire selectable folder (radio/tickbox) handlers.
   list.querySelectorAll('[data-draft-folder]').forEach(el => {
-    el.addEventListener('change', () => {
+    el.addEventListener('change', async () => {
       const nodeId = el.dataset.draftFolder;
       const node   = nodes[nodeId];
       if (!node) return;
@@ -3353,8 +3490,9 @@ function renderBodyOptionsFromDraft(draft, tid) {
       }
 
       // Sync the legacy drdSrdEnabled gate so SRD/DRD BOM sections
-      // appear/disappear correctly when door-type folders are toggled.
-      _syncDrdSrdFromDraft();
+      // appear/disappear correctly when door-type folders are toggled, and
+      // carry the rear-door insulation thickness onto the chosen door.
+      await _syncDoorAndCarry(_doorFromSelectorName(el.closest('label')?.textContent || ''));
       saveBodyOptSel();
       syncInputs();
       scheduleCalc();
