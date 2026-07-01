@@ -27,7 +27,10 @@ function prefixClasses(prefix: string | null): string {
 }
 
 interface TooltipProps {
-  k: string
+  /** i18n key into icb_tooltips.json. Optional when `text` is supplied directly. */
+  k?: string
+  /** Free text — v1.39.1: lets callers convert native dark `title=` attributes to the light custom tooltip. */
+  text?: string
   children: ReactNode
   /** Override placement (default: auto below, flips above near bottom edge). */
   placement?: 'auto' | 'top' | 'bottom'
@@ -51,9 +54,9 @@ interface TooltipProps {
  *  - global tooltipsEnabled flag silently disables all tooltips.
  *  - missing key → wrapped element with no tooltip (no error).
  */
-export function Tooltip({ k, children, placement = 'auto' }: TooltipProps) {
+export function Tooltip({ k, text: textProp, children, placement = 'auto' }: TooltipProps) {
   const { tooltipsEnabled } = useAppData()
-  const text = lookupTooltip(k)
+  const text = textProp ?? (k ? lookupTooltip(k) : undefined)
   const id = useId()
   const wrapperRef = useRef<HTMLSpanElement>(null)
   const showTimer = useRef<number | null>(null)
@@ -220,7 +223,9 @@ export function Tooltip({ k, children, placement = 'auto' }: TooltipProps) {
         }}
         onMouseLeave={() => hide()}
         style={{ top: pos.top, left: pos.left, width: 360 }}
-        className={`pointer-events-auto fixed z-[100] rounded-md bg-slate-800 px-3 py-2 text-[13px] leading-snug text-slate-100 shadow-2xl ring-1 ring-black/20 ${
+        // v1.39.1 backport (Item 3): surface-matched LIGHT tooltip (BA override of the dark convention) —
+        // bg-white + dark text, with a border + shadow so it stays visually distinct from the page surface.
+        className={`pointer-events-auto fixed z-[100] rounded-md border border-slate-200 bg-white px-3 py-2 text-[13px] leading-snug text-slate-900 shadow-lg ${
           isLong ? '' : 'animate-fadeIn'
         }`}
       >
@@ -231,7 +236,7 @@ export function Tooltip({ k, children, placement = 'auto' }: TooltipProps) {
         )}
         <span>{rest}</span>
         {isLong && (
-          <div className="mt-2 text-right text-[11px] uppercase tracking-wide text-slate-400">
+          <div className="mt-2 text-right text-[11px] uppercase tracking-wide text-slate-500">
             Click outside or press Esc to close
           </div>
         )}

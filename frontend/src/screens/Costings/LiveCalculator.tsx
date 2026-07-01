@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ExternalLink, RadioTower, RefreshCw, AlertCircle, Loader2 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
 import { CostingsDashboard } from './CostingsDashboard'
@@ -26,6 +27,13 @@ export function LiveCalculator() {
   // finish (mode flips off 'loading') before mounting the iframe so the
   // session cookie is in place when /calculator loads.
   const { mode } = useCostings()
+
+  // v1.39.1 backport (Item 1b): thread a dashboard "Edit" deep-link (/costings/new?edit=<calculation_id>)
+  // onto the iframe src so the legacy calculator (calculator.js:2112 reads ?edit=) reopens that calculation
+  // for editing. No param → fresh calculator, unchanged.
+  const [searchParams] = useSearchParams()
+  const editId = searchParams.get('edit')
+  const iframeSrc = editId ? `${TARGET_URL}?edit=${encodeURIComponent(editId)}` : TARGET_URL
 
   return (
     <>
@@ -68,7 +76,7 @@ export function LiveCalculator() {
       ) : (
         <iframe
           key={reloadKey}
-          src={TARGET_URL}
+          src={iframeSrc}
           title="Calculator (live costing app)"
           className="flex-1 w-full border-0 bg-white"
           sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"

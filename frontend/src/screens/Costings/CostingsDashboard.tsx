@@ -49,6 +49,13 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
   useEffect(() => {
     if (mode === 'live' && !userPickedScope) setScope('all')
   }, [mode, userPickedScope])
+
+  // v1.39.1 backport (Item 4): refetch when the dashboard mounts so a costing saved
+  // in the /mes/calculator iframe (or changed out-of-band) appears on return. The
+  // CostingsProvider otherwise loads once at app-mount + on branch switch only, so the
+  // list showed stale after "save → navigate back to the dashboard". `refresh` is a
+  // stable useCallback, so this runs once per mount (no loop).
+  useEffect(() => { void refresh() }, [refresh])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [preJobTarget, setPreJobTarget] = useState<Costing | null>(null)
   const [repairTarget, setRepairTarget] = useState<Costing | null>(null)
@@ -259,9 +266,11 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                   <td className="px-3 py-2">
                     <span>{c.body_type.replace(/\s*\(REPAIR\)$/i, '')}</span>
                     {c.requires_chassis && (
-                      <span title="Requires chassis" className="ml-1 inline-flex">
-                        <Truck size={12} className="text-muted" />
-                      </span>
+                      <Tooltip text="Requires chassis">
+                        <span className="ml-1 inline-flex">
+                          <Truck size={12} className="text-muted" />
+                        </span>
+                      </Tooltip>
                     )}
                     {c.quote_type === 'Repair' && (
                       <span className="ml-1 inline-flex items-center rounded bg-[#7E22CE]/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#7E22CE]">
@@ -292,12 +301,11 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                       </div>
                     )}
                     {mode === 'live' && c.status === 'Accepted' && !c.production_job_id && (
-                      <span
-                        title="Accepted in the orderbook, but the production job hasn't been created yet."
-                        className="ml-1 inline-flex items-center rounded bg-status-amber/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-status-amber"
-                      >
-                        job pending
-                      </span>
+                      <Tooltip text="Accepted in the orderbook, but the production job hasn't been created yet.">
+                        <span className="ml-1 inline-flex items-center rounded bg-status-amber/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-status-amber">
+                          job pending
+                        </span>
+                      </Tooltip>
                     )}
                     {c.status === 'Pre-Job Sent' && !c.prejob_card && (
                       // §0.21 — the legacy bottleneck dot reads job-level signoff columns the
@@ -310,13 +318,27 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                   </td>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-wrap items-center gap-1">
-                      <Tooltip k="costings_dashboard.view_button">
-                        <Link
-                          to={`/costings/${encodeURIComponent(c.quote_number)}`}
-                          className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
-                        >
-                          <Eye size={12} /> View
-                        </Link>
+                      {/* v1.39.1 (Michael) — View opens the full /results report (the light legacy report,
+                          same-origin). Live rows link straight to it; mock rows (no calculation_id) fall back
+                          to the React costing detail. */}
+                      <Tooltip text={c.calculation_id ? 'Open the full costing report' : 'Open the costing detail'}>
+                        {c.calculation_id ? (
+                          <a
+                            href={`/results/${c.calculation_id}`}
+                            target="_blank"
+                            rel="noopener"
+                            className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
+                          >
+                            <Eye size={12} /> View
+                          </a>
+                        ) : (
+                          <Link
+                            to={`/costings/${encodeURIComponent(c.quote_number)}`}
+                            className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
+                          >
+                            <Eye size={12} /> View
+                          </Link>
+                        )}
                       </Tooltip>
                       {canAccept && c.status === 'Pending' && (
                         <Tooltip k="costings_dashboard.accept_button">
@@ -329,16 +351,17 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                         </Tooltip>
                       )}
                       {mode === 'live' && c.status === 'Accepted' && !c.production_job_id ? (
-                        <button
-                          onClick={() => acceptCosting(c.quote_number)}
-                          disabled={acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'}
-                          title="The costing was accepted but its production job wasn't created — retry (safe, idempotent)."
-                          className="flex items-center gap-1 rounded-md bg-status-amber px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
-                        >
-                          {acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'
-                            ? <Spinner size={12} />
-                            : <RotateCw size={12} />} Retry job creation
-                        </button>
+                        <Tooltip text="The costing was accepted but its production job wasn't created — retry (safe, idempotent).">
+                          <button
+                            onClick={() => acceptCosting(c.quote_number)}
+                            disabled={acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'}
+                            className="flex items-center gap-1 rounded-md bg-status-amber px-2 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                          >
+                            {acceptStage[c.quote_number] === 'accepting' || acceptStage[c.quote_number] === 'creating_job'
+                              ? <Spinner size={12} />
+                              : <RotateCw size={12} />} Retry job creation
+                          </button>
+                        </Tooltip>
                       ) : canPreJob && c.status === 'Accepted' && (mode !== 'live' || c.production_job_id) ? (
                         <Tooltip k="costings_dashboard.pre_job_card_button">
                           <button
@@ -349,10 +372,21 @@ export function CostingsDashboard({ embedded = false }: { embedded?: boolean }) 
                           </button>
                         </Tooltip>
                       ) : null}
-                      {c.status === 'Pending' && c.created_by === profile.id.replace('rep_', '').toUpperCase() && (
-                        <button className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt">
-                          <Pencil size={12} /> Edit
-                        </button>
+                      {/* v1.39.1 backport (Item 1): (a) gate on status only — the live FastAPI created_by
+                          ('admin') never equals the persona id ('ADMIN'), so the button never rendered;
+                          (b) wire Edit → /costings/new?edit=<calculation_id>. LiveCalculator threads ?edit=
+                          onto the /mes/calculator iframe src; the legacy calc JS (calculator.js:2112) loads
+                          that calculation for editing. Same ?edit=<id> contract as v4.37.1 #57 on main. */}
+                      {c.status === 'Pending' && (
+                        <Tooltip text={c.calculation_id ? 'Reopen this costing to edit' : 'Edit available on live costings only'}>
+                          <button
+                            onClick={() => c.calculation_id && nav(`/costings/new?edit=${c.calculation_id}`)}
+                            disabled={!c.calculation_id}
+                            className="flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-xs font-semibold text-body hover:bg-surface-alt disabled:opacity-50"
+                          >
+                            <Pencil size={12} /> Edit
+                          </button>
+                        </Tooltip>
                       )}
                       {c.status === 'Repair' && (
                         <button
@@ -418,14 +452,15 @@ function ModePill({ mode }: { mode: 'live' | 'mock' | 'loading' }) {
   }
   const live = mode === 'live'
   return (
-    <span
-      title={live ? 'Live data from /api/calculations' : 'Bundled mock data (FastAPI app unreachable)'}
-      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-        live ? 'bg-status-green/15 text-status-green' : 'bg-surface-alt text-muted'
-      }`}
-    >
-      {live ? <RadioTower size={11} /> : <Database size={11} />}
-      {live ? 'Live' : 'Mock'}
-    </span>
+    <Tooltip text={live ? 'Live data from /api/calculations' : 'Bundled mock data (FastAPI app unreachable)'}>
+      <span
+        className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+          live ? 'bg-status-green/15 text-status-green' : 'bg-surface-alt text-muted'
+        }`}
+      >
+        {live ? <RadioTower size={11} /> : <Database size={11} />}
+        {live ? 'Live' : 'Mock'}
+      </span>
+    </Tooltip>
   )
 }

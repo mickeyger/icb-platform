@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -12,6 +12,8 @@ import {
   AlertCircle,
   ShieldCheck,
   Lock,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { useCostings } from '../../store/CostingsContext'
 import { apiGet } from '../../lib/api'
@@ -20,7 +22,7 @@ import { Card, SectionTitle, StatusPill } from '../../components/ui/primitives'
 import { Toast } from '../../components/ui/overlays'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { zar, dmy, hhmm } from '../../lib/format'
-import { demoBom, demoBomTotal } from '../../data/mockData'
+// v1.39.1 backport (Item 5+7): demoBom/demoBomTotal removed — the BOM is now fetched live (see LiveBom below).
 import { styleForStatus, StatusPillCosting } from './statusPalette'
 import { PreJobCardModal } from './PreJobCardModal'
 import { RepairPhasePanel } from './RepairPhasePanel'
@@ -51,6 +53,12 @@ export function CostingDetail() {
     const t = setTimeout(() => setToast(''), 2200)
     return () => clearTimeout(t)
   }, [toast])
+
+  // v1.39.1 backport (Item 6): refetch on mount so a pre-job sign-off / approval done
+  // elsewhere (the /prejob/:id/signoff deep-link page, the outstanding-signoffs admin
+  // page, or another tab) is reflected when this costing detail is opened. CostingsContext
+  // otherwise loads once at app mount. `refresh` is a stable useCallback (runs once per mount).
+  useEffect(() => { void refresh() }, [refresh])
 
   if (!c) {
     return (
@@ -112,7 +120,11 @@ export function CostingDetail() {
             </button>
           )}
           <button
-            onClick={() => setToast('PDF generated — sent to printer')}
+            onClick={() =>
+              c.calculation_id
+                ? window.open(`/results/${c.calculation_id}`, '_blank', 'noopener')
+                : setToast('Print / PDF is available on live (saved) costings only')
+            }
             className="flex items-center gap-1 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white hover:bg-primary-dark"
           >
             <Printer size={14} /> Print costing PDF (MES style)
@@ -161,24 +173,30 @@ export function CostingDetail() {
         </Card>
 
         <Card>
-          <SectionTitle>Totals</SectionTitle>
-          <dl className="space-y-2 text-sm">
-            <TotalRow label="Cost" value={c.cost_zar} />
-            {/* WO v4.30 §0.2a — net_total is the headline; when a discount exists, show the pre-discount
-                selling as "before discount" + the discount, then the highlighted Net total. No decoration
-                when there's no discount (net == selling). */}
-            {(c.discount_amount ?? 0) > 0 ? (
-              <>
-                <TotalRow label="Before discount" value={c.gross_selling_zar ?? c.selling_zar} muted />
-                <TotalRow label="Discount" valueText={`- ${zar(c.discount_amount ?? 0)}`} muted />
-                <TotalRow label="Net total" value={c.selling_zar} highlight />
-              </>
-            ) : (
-              <TotalRow label="Selling price" value={c.selling_zar} highlight />
-            )}
-            <TotalRow label="Gross profit" value={c.gross_profit_zar} muted />
-            <TotalRow label="Markup" valueText={`${c.markup_pct}%`} muted />
-          </dl>
+          <SectionTitle>Cost summary</SectionTitle>
+          {/* v1.39.1 (Michael) — full cost review as per the /results report: manufacturing cost, cost/m²,
+              margin, ratio, discount, net + SELLING PRICE. Live rows read the saved_result (the costing-object
+              c.cost_zar/markup_pct are 0 — never populated from the calc); mock rows keep the legacy fallback. */}
+          <CostSummary
+            calculationId={c.calculation_id ?? null}
+            mode={mode}
+            fallback={
+              <dl className="space-y-2 text-sm">
+                <TotalRow label="Cost" value={c.cost_zar} />
+                {(c.discount_amount ?? 0) > 0 ? (
+                  <>
+                    <TotalRow label="Before discount" value={c.gross_selling_zar ?? c.selling_zar} muted />
+                    <TotalRow label="Discount" valueText={`- ${zar(c.discount_amount ?? 0)}`} muted />
+                    <TotalRow label="Net total" value={c.selling_zar} highlight />
+                  </>
+                ) : (
+                  <TotalRow label="Selling price" value={c.selling_zar} highlight />
+                )}
+                <TotalRow label="Gross profit" value={c.gross_profit_zar} muted />
+                <TotalRow label="Markup" valueText={`${c.markup_pct}%`} muted />
+              </dl>
+            }
+          />
         </Card>
       </div>
 
@@ -225,36 +243,8 @@ export function CostingDetail() {
       ) : null}
 
       <Card className="mb-4 p-0">
-        <div className="p-4 pb-2"><SectionTitle>Bill of materials (illustrative)</SectionTitle></div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-primary text-left text-white">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Item</th>
-                <th className="px-3 py-2 font-semibold">Description</th>
-                <th className="px-3 py-2 text-right font-semibold">Qty</th>
-                <th className="px-3 py-2 text-right font-semibold">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {demoBom.map((l, i) => (
-                <tr key={l.sap_item_code} className={i % 2 ? 'bg-surface-alt' : 'bg-white'}>
-                  <td className="px-3 py-2 font-mono text-xs">{l.sap_item_code}</td>
-                  <td className="px-3 py-2">{l.description}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{l.qty}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{zar(l.cost_zar)}</td>
-                </tr>
-              ))}
-              <tr className="border-t border-line font-semibold">
-                <td className="px-3 py-2" colSpan={3}>Total cost</td>
-                <td className="px-3 py-2 text-right tabular-nums">{zar(demoBomTotal)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="px-4 py-2 text-[11px] text-muted">
-          Mock BOM (reconciled to the demo job 32891). In Live mode the full BOM would come from the costing app's detail endpoint.
-        </p>
+        <div className="p-4 pb-2"><SectionTitle>Bill of materials</SectionTitle></div>
+        <LiveBom calculationId={c.calculation_id ?? null} mode={mode} />
       </Card>
 
       {/* v4.3 — Chassis-received tick box (only after chassis ETA captured) */}
@@ -263,6 +253,7 @@ export function CostingDetail() {
           <Card className={`mb-4 border-l-4 ${c.chassis_received_at ? 'border-status-green' : 'border-status-amber'}`}>
             <SectionTitle>Chassis received</SectionTitle>
             <div className="flex flex-wrap items-start gap-4">
+              <Tooltip text={hasPermission('production.chassis_received') ? (c.chassis_received_at ? 'Un-tick (mistake correction)' : 'Tick to mark chassis received') : 'Requires Planning role'}>
               <button
                 type="button"
                 disabled={!hasPermission('production.chassis_received')}
@@ -282,10 +273,10 @@ export function CostingDetail() {
                     ? 'border-status-green bg-status-green text-white'
                     : 'border-status-amber bg-white text-status-amber hover:bg-status-amber/10'
                 }`}
-                title={hasPermission('production.chassis_received') ? (c.chassis_received_at ? 'Un-tick (mistake correction)' : 'Tick to mark chassis received') : 'Requires Planning role'}
               >
                 {c.chassis_received_at ? <CheckCircle2 size={22} /> : <Circle size={22} />}
               </button>
+              </Tooltip>
               <div className="flex-1 min-w-[260px]">
                 {c.chassis_received_at ? (
                   <div className="space-y-1 text-sm">
@@ -504,7 +495,6 @@ function SignoffCheck({
                   ? 'border-primary bg-white text-primary hover:bg-primary-light'
                   : 'border-line bg-surface-alt text-muted'
             }`}
-            title={signed ? 'Signed' : canSign ? `Sign as ${requiredRole}` : `Disabled — requires ${requiredRole} role`}
           >
             {signed ? <CheckCircle2 size={16} /> : !canSign ? <Lock size={13} /> : null}
           </button>
@@ -550,17 +540,23 @@ function TotalRow({
   valueText,
   highlight,
   muted,
+  accentGreen,
 }: {
   label: string
   value?: number
   valueText?: string
   highlight?: boolean
   muted?: boolean
+  accentGreen?: boolean
 }) {
   return (
     <div className="flex items-center justify-between">
       <dt className={muted ? 'text-muted' : 'text-body'}>{label}</dt>
-      <dd className={`tabular-nums ${highlight ? 'text-lg font-bold text-primary' : 'font-semibold'}`}>
+      <dd
+        className={`tabular-nums ${
+          highlight ? 'text-lg font-bold text-primary' : accentGreen ? 'font-semibold text-status-green' : 'font-semibold'
+        }`}
+      >
         {valueText ?? (value != null ? zar(value) : '—')}
       </dd>
     </div>
@@ -626,6 +622,236 @@ function StatusTimeline({ c, statusHex }: { c: Costing; statusHex: string }) {
         )
       })}
     </ol>
+  )
+}
+
+// v1.39.1 backport (Item 5+7) — the REAL bill of materials, laid out to match the LEGACY costings Results
+// page (Costing model/app/templates/results.html): grouped by category (first-seen order) with an uppercase
+// category band, the full legacy column set (Material / SAP Code / Formula / Qty / Unit / Unit Price / Waste% /
+// Line Cost), a dim per-category subtotal, and a single emphasised grand-total band. Fetches saved_result.items[]
+// from GET /api/calculations/{id} keyed on calculation_id (LiveTimeline pattern), filters soft-excluded rows.
+// Graceful fallback (not-live / no id / fetch error / no items → a soft message, never fake numbers).
+interface BomRow {
+  category?: string | null
+  bom_id?: number
+  material: string
+  material_code?: string | null
+  unit?: string | null
+  formula?: string | null
+  quantity?: number
+  unit_price?: number
+  waste_pct?: number | null
+  line_cost?: number
+  excluded?: boolean
+}
+
+interface SavedResult {
+  items?: BomRow[]
+  category_totals?: Record<string, number>
+  grand_total?: number
+  cost_per_sqm?: number
+  profit_margin?: number
+  profit_amount?: number
+  ratio_label?: string
+  ratio_amount?: number
+  selling_price?: number
+  discount_kind?: string
+  discount_input?: number
+  discount_amount?: number
+  net_total?: number
+}
+
+function CostSummary({
+  calculationId,
+  mode,
+  fallback,
+}: {
+  calculationId: number | null
+  mode: string
+  fallback: ReactNode
+}) {
+  const [sr, setSr] = useState<SavedResult | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => {
+    if (calculationId == null) return
+    let alive = true
+    apiGet<{ saved_result?: SavedResult }>(`/api/calculations/${calculationId}`)
+      .then((r) => { if (alive) setSr(r.saved_result ?? null) })
+      .catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [calculationId])
+
+  if (mode !== 'live' || calculationId == null || err) return <>{fallback}</>
+  if (!sr) return <p className="py-1 text-sm text-muted">Loading cost summary…</p>
+
+  const disc = sr.discount_amount ?? 0
+  const money = (v?: number) => zar(v ?? 0, { decimals: true })
+  return (
+    <dl className="space-y-2 text-sm">
+      {sr.cost_per_sqm != null && <TotalRow label="Cost per m²" valueText={money(sr.cost_per_sqm)} muted />}
+      <TotalRow label="Total manufacturing" valueText={money(sr.grand_total)} />
+      {!!sr.profit_amount && (
+        <TotalRow label={`Profit margin (${sr.profit_margin}%)`} valueText={`+ ${money(sr.profit_amount)}`} accentGreen />
+      )}
+      {!!sr.ratio_amount && (
+        <TotalRow label={`Ratio (${sr.ratio_label})`} valueText={`+ ${money(sr.ratio_amount)}`} accentGreen />
+      )}
+      {sr.selling_price != null ? (
+        <TotalRow label="Selling price" valueText={money(sr.selling_price)} highlight />
+      ) : (
+        <TotalRow label="Total manufacturing cost" valueText={money(sr.grand_total)} highlight />
+      )}
+      {disc > 0 && (
+        <>
+          <TotalRow
+            label={`Discount${sr.discount_kind === 'percent' ? ` (${sr.discount_input}%)` : ''}`}
+            valueText={`− ${money(disc)}`}
+            accentGreen
+          />
+          <TotalRow label="Net total" valueText={money(sr.net_total)} highlight />
+        </>
+      )}
+    </dl>
+  )
+}
+
+function LiveBom({ calculationId, mode }: { calculationId: number | null; mode: string }) {
+  const [rows, setRows] = useState<BomRow[] | null>(null)
+  const [catTotals, setCatTotals] = useState<Record<string, number>>({})
+  const [total, setTotal] = useState<number | null>(null)
+  const [err, setErr] = useState(false)
+  // v1.39.1 (Michael's :8006 pass) — per-category collapse. Empty Set = all OPEN (matches the
+  // initial view he reviewed); a category key (g.cat) in the set hides that category's rows + subtotal.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggleCat = (cat: string) =>
+    setCollapsed((s) => {
+      const n = new Set(s)
+      if (n.has(cat)) n.delete(cat)
+      else n.add(cat)
+      return n
+    })
+  useEffect(() => {
+    if (calculationId == null) return
+    let alive = true
+    apiGet<{ saved_result?: SavedResult }>(`/api/calculations/${calculationId}`)
+      .then((r) => {
+        if (!alive) return
+        const items = (r.saved_result?.items ?? []).filter((l) => !l.excluded)
+        setRows(items)
+        setCatTotals(r.saved_result?.category_totals ?? {})
+        setTotal(r.saved_result?.grand_total ?? items.reduce((s, l) => s + (l.line_cost ?? 0), 0))
+      })
+      .catch(() => { if (alive) setErr(true) })
+    return () => { alive = false }
+  }, [calculationId])
+
+  if (mode !== 'live' || calculationId == null)
+    return <p className="px-4 py-3 text-sm text-muted">The full bill of materials is available on live (saved) costings.</p>
+  if (err) return <p className="px-4 py-3 text-sm text-muted">Bill of materials unavailable — couldn’t load the costing detail.</p>
+  if (rows == null) return <p className="px-4 py-3 text-sm text-muted">Loading bill of materials…</p>
+  if (rows.length === 0) return <p className="px-4 py-3 text-sm text-muted">No bill-of-materials lines recorded on this costing.</p>
+
+  // Group by category preserving first-seen order (matches the legacy ns.current_cat break detection —
+  // categories are contiguous runs in array order, never re-sorted).
+  const groups: { cat: string; items: BomRow[] }[] = []
+  const index = new Map<string, number>()
+  for (const it of rows) {
+    const cat = it.category ?? 'Uncategorised'
+    let gi = index.get(cat)
+    if (gi == null) { gi = groups.length; index.set(cat, gi); groups.push({ cat, items: [] }) }
+    groups[gi].items.push(it)
+  }
+  const subtotalFor = (g: { cat: string; items: BomRow[] }) =>
+    catTotals[g.cat] ?? g.items.reduce((s, l) => s + (l.line_cost ?? 0), 0)
+
+  // v1.39.1 (Michael) — Collapse all / Expand all toggle (mirrors the legacy calculator's COLLAPSE ALL).
+  const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.cat))
+  const setAll = (collapse: boolean) =>
+    setCollapsed(collapse ? new Set(groups.map((g) => g.cat)) : new Set())
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="flex justify-end px-1 pb-2">
+        <button
+          onClick={() => setAll(!allCollapsed)}
+          className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary-light"
+        >
+          {allCollapsed ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          {allCollapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-primary text-left text-white">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Category</th>
+            <th className="px-3 py-2 font-semibold">Material</th>
+            <th className="px-3 py-2 font-semibold">SAP Code</th>
+            <th className="px-3 py-2 font-semibold">Formula</th>
+            <th className="px-3 py-2 text-right font-semibold">Qty</th>
+            <th className="px-3 py-2 font-semibold">Unit</th>
+            <th className="px-3 py-2 text-right font-semibold">Unit Price</th>
+            <th className="px-3 py-2 text-right font-semibold">Waste&nbsp;%</th>
+            <th className="px-3 py-2 text-right font-semibold">Line Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((g) => (
+            <Fragment key={g.cat}>
+              {/* Category band — uppercase mono label; click to collapse/expand (results.html category header) */}
+              <tr
+                className="cursor-pointer select-none bg-surface-alt hover:bg-surface-alt/70"
+                onClick={() => toggleCat(g.cat)}
+              >
+                <td
+                  colSpan={collapsed.has(g.cat) ? 8 : 9}
+                  className="px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-wider text-primary"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    {collapsed.has(g.cat) ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    {g.cat}
+                  </span>
+                </td>
+                {/* v1.39.1 (Michael) — a COLLAPSED category still shows its total on the band row. */}
+                {collapsed.has(g.cat) && (
+                  <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-primary">
+                    {zar(subtotalFor(g), { decimals: true })}
+                  </td>
+                )}
+              </tr>
+              {!collapsed.has(g.cat) && (
+                <>
+                  {g.items.map((l, i) => (
+                    <tr key={`${l.bom_id ?? l.material_code ?? l.material}-${i}`} className="border-t border-line">
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2 text-body">{l.material}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted">{l.material_code ?? '—'}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-muted">{l.formula ?? ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {(l.quantity ?? 0).toLocaleString('en-ZA', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted">{l.unit ?? ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{zar(l.unit_price ?? 0, { decimals: true })}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{l.waste_pct ? `${l.waste_pct}%` : ''}</td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">{zar(l.line_cost ?? 0, { decimals: true })}</td>
+                    </tr>
+                  ))}
+                  {/* Per-category subtotal — dim right-aligned label + accent value */}
+                  <tr className="border-t border-line bg-surface-alt/40">
+                    <td colSpan={8} className="px-3 py-1.5 text-right text-xs text-muted">{g.cat} subtotal</td>
+                    <td className="px-3 py-1.5 text-right text-xs font-semibold tabular-nums text-primary">{zar(subtotalFor(g), { decimals: true })}</td>
+                  </tr>
+                </>
+              )}
+            </Fragment>
+          ))}
+          {/* Grand total band */}
+          <tr className="border-t-2 border-primary bg-primary/5">
+            <td colSpan={8} className="px-3 py-2.5 text-sm font-bold uppercase text-body">Total manufacturing cost</td>
+            <td className="px-3 py-2.5 text-right text-base font-bold tabular-nums text-primary">{zar(total ?? 0, { decimals: true })}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   )
 }
 

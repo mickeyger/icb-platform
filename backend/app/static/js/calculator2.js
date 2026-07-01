@@ -4874,7 +4874,7 @@ function _resolveFormulaForTooltip(formula) {
 function _rawFormulaHtml(formula) {
   // Render raw formula with {VAR} tokens styled in amber
   return escHtml(formula).replace(/\{([^}]+)\}/g,
-    (m, n) => `<span style="color:#e3a03c">{${escHtml(n)}}</span>`);
+    (m, n) => `<span style="color:#b45309">{${escHtml(n)}}</span>`);
 }
 
 function _buildFormulaTooltipHtml(formula, qty, unit) {
@@ -4900,7 +4900,7 @@ function _buildFormulaTooltipHtml(formula, qty, unit) {
       if (gv) { val = parseFloat(gv[1].toFixed(6)).toString(); type = 'global'; }
       else     { val = '?'; type = 'unknown'; }
     }
-    const color = type === 'body' ? '#e3a03c' : type === 'lib' ? '#bb5dff' : type === 'global' ? '#f0a500' : '#f85149';
+    const color = type === 'body' ? '#b45309' : type === 'lib' ? '#7c3aed' : type === 'global' ? '#a16207' : '#dc2626';
     const label = type === 'global' ? ' <span style="font-size:9px;opacity:.6">(global)</span>' : '';
     return `<span style="display:inline-block;margin:2px 10px 2px 0;white-space:nowrap">
       <span style="color:${color};font-family:var(--font-mono)">${escHtml(tok)}</span>
@@ -4917,7 +4917,7 @@ function _buildFormulaTooltipHtml(formula, qty, unit) {
   const geoRows = geoUsed.map(k => {
     const val = parseFloat(geo[k].toFixed(3));
     return `<span style="display:inline-block;margin:2px 10px 2px 0;white-space:nowrap">
-      <span style="color:#58a6ff;font-family:var(--font-mono)">${escHtml(k)}</span>
+      <span style="color:#2563eb;font-family:var(--font-mono)">${escHtml(k)}</span>
       <span style="color:var(--text-dim)"> = </span>
       <span style="color:var(--text)">${val}</span>
     </span>`;
@@ -4930,7 +4930,7 @@ function _buildFormulaTooltipHtml(formula, qty, unit) {
 
   if (resolved) {
     html += `<div style="margin:5px 0;color:var(--text-dim);font-size:10px">↓ substituted</div>`;
-    html += `<div style="font-family:var(--font-mono);font-size:12px;color:#4ade80;word-break:break-all;line-height:1.6">${escHtml(resolved)}</div>`;
+    html += `<div style="font-family:var(--font-mono);font-size:12px;color:#15803d;word-break:break-all;line-height:1.6">${escHtml(resolved)}</div>`;
   }
 
   html += `<div style="margin-top:7px;font-family:var(--font-mono);font-size:12px">

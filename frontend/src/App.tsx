@@ -44,7 +44,9 @@ export default function App() {
       <Route path="/chassis" element={<Layout><ChassisList /></Layout>} />
       <Route path="/chassis/:id" element={<Layout><ChassisDetail /></Layout>} />
       <Route path="/tablet/vacuum" element={<Layout><VacuumTablet /></Layout>} />
-      <Route path="/kanban/pre-assy" element={<Layout dark><KanbanTV /></Layout>} />
+      {/* v1.39.1 backport (Item 2): no 'dark' shell here — keeps app chrome consistent across all
+          routes; KanbanTV retains its own dark TV-board styling internally (production-floor display). */}
+      <Route path="/kanban/pre-assy" element={<Layout><KanbanTV /></Layout>} />
       <Route path="/production" element={<Layout><ProductionDashboard /></Layout>} />
       <Route path="/management" element={<Layout><ManagementDashboard /></Layout>} />
       {/* WO v4.33 §3.5 — Pre-Job Card check sign-off pages (deep-linkable from the email) */}

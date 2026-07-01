@@ -82,6 +82,23 @@ def test_busy_bay_409(page: Page, live_server: str) -> None:
     assert h.panels_event_count(b["job_id"]) == 0
 
 
+def test_panels_drop_onto_consumed_bay_ok(page: Page, live_server: str) -> None:
+    """WO v1.39.1 — once job A's body is attached, A's panels are CONSUMED (they move with the body), so the
+    bay reads empty in the UI (compute_bay_merge_readiness drops consumed panels). A fresh drop of B's panels
+    must then SUCCEED — the stale panels_arrived event must NOT 409 'already holds panels' (Michael's
+    empty-merge-bay false positive). Mirrors the busy-bay guard onto the same loose-panel signal the tile uses."""
+    a = h.make_assembly_job()
+    b = h.make_assembly_job()
+    admin_session(page)
+    assert _panels(page, live_server, a["job_id"], a["bay_id"]).status == 201          # A's panels → A's bay
+    r = h.api_post(page, live_server, f"/api/chassis-records/{a['chassis_id']}/body-attached",
+                   {"production_job_id": a["job_id"]})
+    assert r.status == 201, r.text()                                                   # A's body attached → panels consumed
+    r2 = _panels(page, live_server, b["job_id"], a["bay_id"])                          # B's panels → A's now-empty bay
+    assert r2.status == 201, r2.text()
+    assert h.panels_event_count(b["job_id"]) == 1
+
+
 # ── move-panels-back undo + mismatch legibility (the demo click-around finds) ────
 def test_clear_panels_moves_them_back(page: Page, live_server: str) -> None:
     s = h.make_assembly_job()

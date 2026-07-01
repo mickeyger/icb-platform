@@ -175,6 +175,37 @@ def test_schedule_occupied_409(fresh_planning_job, admin):
             pl.schedule(db, production_job_id=b, week=date(2026, 9, 7), bay="QA-1", user=admin)
 
 
+def test_schedule_onto_progressed_cell_ok(fresh_planning_job, admin):
+    """WO v1.39.1 — a cell whose only slot belongs to a PROGRESSED job (its panels have gone to a bay, so
+    build_board HIDES the slot) reads EMPTY on the board and must accept a fresh drop. The lingering
+    non-destructive slot row must NOT raise 'already occupied' on a visibly-empty cell (Michael's
+    vacuum-bay-1 false positive). Mirrors build_board's _progressed_job_ids read filter in the write guard."""
+    from app.database import SessionLocal
+    from app.models.mes import AssemblyBay, ProductionJobBayEvent
+    from app.services import planning as pl
+    rcv = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    a, b = fresh_planning_job(chassis_received_at=rcv), fresh_planning_job(chassis_received_at=rcv)
+    evt_id = None
+    try:
+        with SessionLocal() as db:
+            pl.schedule(db, production_job_id=a, week=date(2026, 9, 28), bay="V1391", user=admin)
+            # progress A off the board — its panels arrive in a bay (the JOB-side merge signal)
+            bay = db.query(AssemblyBay).filter_by(is_active=True).first()
+            evt = ProductionJobBayEvent(production_job_id=a, bay_id=bay.id,
+                                        event_type="panels_arrived_in_bay")
+            db.add(evt); db.commit(); db.refresh(evt); evt_id = evt.id
+            # the cell now reads empty on the board, so a fresh drop must succeed (no CellOccupiedError)
+            it = pl.schedule(db, production_job_id=b, week=date(2026, 9, 28), bay="V1391", user=admin)
+            assert it is not None and it.bay == "V1391"
+    finally:
+        with SessionLocal() as db:
+            if evt_id is not None:
+                e = db.get(ProductionJobBayEvent, evt_id)
+                if e:
+                    db.delete(e)
+                    db.commit()
+
+
 def test_schedule_eta_gate(fresh_planning_job, admin):
     from app.database import SessionLocal
     from app.services import planning as pl

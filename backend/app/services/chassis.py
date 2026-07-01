@@ -1045,13 +1045,18 @@ def record_panels_arrived_in_bay(db: Session, production_job_id: int, bay_id: in
         raise HTTPException(status_code=409,
                             detail=(f"panels for job {job_ref} are already in {prior_code} — "
                                     "move them back before assigning to another bay"))
-    # (4) busy-bay — the bay already holds another job's panels
+    # (4) busy-bay — the bay already holds another job's LOOSE panels
     other = db.execute(
         select(ProductionJobBayEvent).where(
             ProductionJobBayEvent.bay_id == bay_id,
             ProductionJobBayEvent.event_type == "panels_arrived_in_bay")
         .order_by(ProductionJobBayEvent.id.desc())).scalars().first()
-    if other is not None:
+    # WO v1.39.1 — mirror compute_bay_merge_readiness (the UI's truth): panels CONSUMED by a body
+    # (their job's chassis has body_attached → they moved with the body to Awaiting QA / merged) are
+    # no longer LOOSE on the bay, so the bay reads EMPTY to the user. Without this the stale
+    # panels_arrived event makes a visibly-empty merge bay raise "already holds panels" (the bug).
+    # Only un-consumed (loose) panels make the bay busy — exactly the loose-panel signal the tile uses.
+    if other is not None and not _panels_consumed(db, other.production_job_id):
         raise HTTPException(status_code=409, detail=f"{bay.code} already holds panels for another job")
     evt = ProductionJobBayEvent(production_job_id=production_job_id, bay_id=bay_id,
                                 event_type=event_type, user_id=user_id, notes=notes)

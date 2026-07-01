@@ -36,9 +36,8 @@ export function BottleneckIndicator({
       ? 'mt-1.5 px-2.5 py-1 text-xs'
       : 'mt-1 px-2 py-0.5 text-[11px]'
   return (
-    <Tooltip k="costings_detail.bottleneck_indicator">
+    <Tooltip text={tip}>
       <span
-        title={tip}
         className={`inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 text-amber-800 ${sz}`}
       >
         <Hourglass size={size === 'md' ? 13 : 11} />
