@@ -417,7 +417,10 @@ function escHtml(str) {
 }
 
 async function api(method, url, data) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  // v1.39.3 (CA10) — send the session CSRF token on state-changing requests; the middleware
+  // 403s POST/PUT/DELETE without it (previously omitted here → role/password/email saves failed).
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } };
   if (data) opts.body = JSON.stringify(data);
   const res = await fetch(url, opts);
   if (!res.ok) {

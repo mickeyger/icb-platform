@@ -63,6 +63,7 @@ def env(app_mod):
             made_sids.append(sid)
         c = TestClient(app_mod.app)
         c.cookies.set("session_id", sid)
+        c.headers["X-CSRF-Token"] = "t"    # matches the session's csrf_token (real session -> CSRF enforced)
         return c
 
     yield _client_as, target_id
