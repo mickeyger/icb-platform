@@ -57,6 +57,7 @@
           <th style="text-align:left;padding:8px;width:120px">Status</th>
           <th style="text-align:left;padding:8px">Username</th>
           <th style="text-align:left;padding:8px">Role</th>
+          <th style="text-align:left;padding:8px">Email</th>
           <th style="text-align:left;padding:8px">Last Login</th>
           <th style="text-align:left;padding:8px">Session</th>
           <th style="text-align:left;padding:8px">Created</th>
@@ -106,7 +107,13 @@
           <option value="user">User (Masked Cost)</option>
           <option value="full">Full Cost Access</option>
           <option value="admin">Admin</option>
+          <option value="sales">Sales</option>
+          <option value="planner">Planner</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email (optional — required to receive check emails)</label>
+        <input class="form-control" id="new-user-email" type="email" placeholder="e.g. name@icecoldgrp.co.za"/>
       </div>
     </div>
     <div class="modal-footer">
@@ -134,7 +141,13 @@
           <option value="user">User (Masked Cost)</option>
           <option value="full">Full Cost Access</option>
           <option value="admin">Admin</option>
+          <option value="sales">Sales</option>
+          <option value="planner">Planner</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email (blank = no check emails; required for sales/planner)</label>
+        <input class="form-control" id="edit-user-email" type="email" placeholder="e.g. name@icecoldgrp.co.za"/>
       </div>
       <div class="form-group">
         <label class="form-label">Change Password (leave blank to keep current)</label>
@@ -261,11 +274,12 @@ function renderUsers(users) {
           ${escHtml(u.role)}
         </span>
       </td>
+      <td style="padding:8px;font-size:11px;color:var(--text-dim)">${u.email ? escHtml(u.email) : '<span style="font-style:italic">—</span>'}</td>
       <td style="padding:8px">${_lastLoginCell(u)}</td>
       <td style="padding:8px">${_sessionCell(u)}</td>
       <td style="padding:8px;font-size:11px;color:var(--text-dim)">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
       <td style="padding:8px">
-        <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${u.id}, '${escHtml(u.username)}', '${u.role}')">
+        <button class="btn btn-outline btn-sm" onclick="openEditUserModal(${u.id})">
           ✎ Edit
         </button>
       </td>
@@ -289,6 +303,7 @@ async function createNewUser() {
   const username = document.getElementById('new-user-username').value.trim();
   const password = document.getElementById('new-user-password').value;
   const role = document.getElementById('new-user-role').value;
+  const email = document.getElementById('new-user-email').value.trim();
 
   if (!username) {
     toast('Username is required', 'error');
@@ -298,13 +313,18 @@ async function createNewUser() {
     toast('Password must be at least 6 characters', 'error');
     return;
   }
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    toast('Enter a valid email address (or leave blank)', 'error');
+    return;
+  }
 
   try {
-    await api('POST', '/api/users', { username, password, role });
+    await api('POST', '/api/users', { username, password, role, email });
     toast('User created successfully', 'success');
     closeModal('modal-add-user');
     document.getElementById('new-user-username').value = '';
     document.getElementById('new-user-password').value = '';
+    document.getElementById('new-user-email').value = '';
     document.getElementById('new-user-role').value = 'user';
     await loadUsers();
   } catch(e) {
@@ -313,10 +333,23 @@ async function createNewUser() {
 }
 
 // ── Edit User ──────────────────────────────────────
-function openEditUserModal(userId, username, role) {
+let _editingOriginalRole = null;
+
+function openEditUserModal(userId) {
+  const u = (window._cachedUsers || []).find(x => x.id === userId);
+  if (!u) return;
   currentEditingUserId = userId;
-  document.getElementById('edit-user-username').value = username;
-  document.getElementById('edit-user-role').value = role;
+  _editingOriginalRole = u.role;
+  document.getElementById('edit-user-username').value = u.username;
+  const roleSel = document.getElementById('edit-user-role');
+  // Safety: if the user's real role isn't one of the listed options (e.g. an operational
+  // role added outside this UI), inject it so the select shows the TRUE role and a save
+  // can't silently reset it (v1.39.3 CA10 — Burt=sales/Deon=planner must survive an edit).
+  if (![...roleSel.options].some(o => o.value === u.role)) {
+    roleSel.add(new Option(u.role, u.role));
+  }
+  roleSel.value = u.role;
+  document.getElementById('edit-user-email').value = u.email || '';
   document.getElementById('edit-user-password').value = '';
   openModal('modal-edit-user');
 }
@@ -325,24 +358,33 @@ async function saveUserChanges() {
   if (!currentEditingUserId) return;
 
   const role = document.getElementById('edit-user-role').value;
+  const email = document.getElementById('edit-user-email').value.trim();
   const newPassword = document.getElementById('edit-user-password').value;
 
-  try {
-    // Update role
-    await api('PUT', `/api/users/${currentEditingUserId}/role`, { role });
+  // basic client-side email shape check (mirrors the backend guard); blank is allowed
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    toast('Enter a valid email address (or leave blank)', 'error');
+    return;
+  }
+  if (newPassword && newPassword.length < 6) {
+    toast('Password must be at least 6 characters', 'error');
+    return;
+  }
 
-    // Update password if provided
+  try {
+    // Only PUT the role when it actually changed — so an email-only edit never touches it.
+    if (role !== _editingOriginalRole) {
+      await api('PUT', `/api/users/${currentEditingUserId}/role`, { role });
+    }
+    await api('PUT', `/api/users/${currentEditingUserId}/email`, { email });
     if (newPassword) {
-      if (newPassword.length < 6) {
-        toast('Password must be at least 6 characters', 'error');
-        return;
-      }
       await api('PUT', `/api/users/${currentEditingUserId}/password`, { password: newPassword });
     }
 
     toast('User updated successfully', 'success');
     closeModal('modal-edit-user');
     currentEditingUserId = null;
+    _editingOriginalRole = null;
     await loadUsers();
   } catch(e) {
     toast('Failed to update user: ' + e.message, 'error');
@@ -375,7 +417,10 @@ function escHtml(str) {
 }
 
 async function api(method, url, data) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  // v1.39.3 (CA10) — send the session CSRF token on state-changing requests; the middleware
+  // 403s POST/PUT/DELETE without it (previously omitted here → role/password/email saves failed).
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } };
   if (data) opts.body = JSON.stringify(data);
   const res = await fetch(url, opts);
   if (!res.ok) {

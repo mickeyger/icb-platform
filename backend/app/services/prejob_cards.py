@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -23,6 +24,8 @@ from sqlalchemy.orm import Session
 
 from app.database import CalculationRecord, User
 from app.models.mes import ChassisRecord, PrejobCard, PrejobTemplate, ProductionJob
+
+logger = logging.getLogger("icb.prejob")
 
 _LINE_RANK = {"rhinorange_2_0": 0, "rhinorange_legacy": 1, "standard": 2}
 
@@ -430,8 +433,10 @@ def _ensure_anchor_job(db: Session, calc_id: int, now: datetime) -> None:
         accepted_at=now, pre_job_sent_at=now, pre_job_confirmed_at=now))
 
 
-def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = False) -> PrejobCard:
-    """Stage A→B/C — §0.8 gate + §0.21 legacy status drive."""
+def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = False,
+                     base_url: str | None = None) -> PrejobCard:
+    """Stage A→B/C — §0.8 gate + §0.21 legacy status drive. base_url (the request origin) enables
+    the v1.39.3 server-side check email; omitted (None) → no auto-send (the mailto: fallback stands)."""
     # §3.2 — FOR UPDATE row-lock: under READ COMMITTED a concurrent second submit blocks here,
     # then re-reads 'sent_for_check' and 409s below before the auto-create runs — so no duplicate
     # 'expected' chassis (the §0.5 race guard; the VIN unique index is no backstop — NULLs don't
@@ -482,7 +487,37 @@ def submit_for_check(db: Session, card_id: int, user, waive_body_gap: bool = Fal
     _auto_create_chassis(db, card, user)
     db.commit()
     db.refresh(card)
+    # v1.39.3 — auto-send the check email to the Sales + Planner signers (+ CC). AFTER commit so a
+    # rolled-back submit sends nothing; best-effort so a mail failure never fails the submit (the
+    # mailto: helper below still exists as the manual fallback — §0.11). No-op when SMTP is unset.
+    if base_url:
+        _send_check_emails(db, card, base_url)
     return card
+
+
+def _send_check_emails(db: Session, card: PrejobCard, base_url: str) -> bool:
+    """v1.39.3 — server-side auto-send of the Pre-Job check notification. Resolves the Sales Rep +
+    Planner user emails (To), parses the card's cc_recipients (Cc), and sends the SAME subject/body
+    build_email() produces for the mailto: fallback. Best-effort and never raises — logged and
+    swallowed so a delivery failure cannot break the (already-committed) submit."""
+    try:
+        from app.services import notifications
+        content = build_email(db, card, base_url)
+
+        def _email(uid) -> str | None:
+            u = db.get(User, uid) if uid else None
+            e = (getattr(u, "email", "") or "").strip() if u else ""
+            return e if ("@" in e and "." in e.split("@")[-1]) else None
+
+        to = [e for e in (_email(card.sales_rep_user_id), _email(card.planner_user_id)) if e]
+        cc = content["cc"].split(",") if content.get("cc") else []
+        if not to and not cc:
+            logger.info("prejob %s check email skipped — no resolvable recipient addresses", card.id)
+            return False
+        return notifications.send_email_multi(content["subject"], content["body"], to, cc)
+    except Exception as e:  # noqa: BLE001 — best-effort; the submit is already committed
+        logger.warning("prejob %s check email send failed: %s", card.id, str(e)[:200])
+        return False
 
 
 # ── §3.6 — PDF + email content (the §0.11 transitional mailto pattern) ───────
