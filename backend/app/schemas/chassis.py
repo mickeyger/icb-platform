@@ -246,6 +246,6 @@ class BayOut(BaseModel):
     # for the bay right-click "unlink panels" menu so the operator can identify the blocking job/chassis.
     panels_chassis_vin: Optional[str] = None
     panels_customer_name: Optional[str] = None
-    # ── WO v1.39.2 Pre-Assembly build progress (migration 0030; auto-populated from the bay row) ──
+    # ── WO v1.39.2 Pre-Assembly build progress (migration 0031; auto-populated from the bay row) ──
     build_stage: Optional[str] = None              # NULL = no body; entry|pre_assembly|stage_2|stage_3|merge
     build_progress_pct: int = 0                    # 0..100, derived from build_stage

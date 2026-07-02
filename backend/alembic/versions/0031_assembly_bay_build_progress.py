@@ -1,8 +1,14 @@
-"""WO v1.39.2 — assembly_bays build progress (Migration 0030).
+"""WO v1.39.2 — assembly_bays build progress (Migration 0031).
 
-Revision ID: 0030
-Revises: 0029
+Revision ID: 0031
+Revises: 0030
 Create Date: 2026-07-01
+
+NOTE — originally cut as 0030, RENUMBERED to 0031: the parallel v1.39.3 backport (#67) landed its own
+0030 (icb_costings.users.email) on backport/v1.39-base first. Both effects are already live on the
+shared icb DB (users.email + assembly_bays.build_stage/pct); this migration is inspector-guarded, so a
+deployer at 0030 runs it as a no-op that simply stamps 0031 — no manual DB surgery. Chain is now
+0029 → 0030 (users.email) → 0031 (assembly_bays build progress), single head.
 
 Adds two additive, defaulted columns to icb_mes.assembly_bays for the Pre-Assembly build-progress
 model (v1.39.2 Phase 2). A body builds inside a bay while it holds panels (pre_assembly); these two
@@ -29,8 +35,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy import inspect as sa_inspect
 
-revision: str = "0030"
-down_revision: Union[str, Sequence[str], None] = "0029"
+revision: str = "0031"
+down_revision: Union[str, Sequence[str], None] = "0030"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
