@@ -549,8 +549,19 @@ async function _applyInsulationCopyZero(selectedMasterId) {
   if (pair.eps.variable_value == null && pair.pu.variable_value == null) return;
   const selected = String(pair.eps.id) === String(selectedMasterId) ? pair.eps : pair.pu;
   const other    = selected === pair.eps ? pair.pu : pair.eps;
-  const carry = Number(other.variable_value) || 0;
-  if (carry <= 0) return; // nothing to carry over — both-zero guard will flag it
+  let carry = Number(other.variable_value) || 0;
+  if (carry <= 0) {
+    // Nothing to carry. For the QUOTED rear door a both-zero pair is an
+    // invalid manufacturing state (a rear door is never built uninsulated),
+    // so fall back to the default thickness instead of leaving the pair 0/0.
+    const grp = pair.eps.body_option_group;
+    if (_DRDSR_TOGGLE_GROUPS.includes(grp) && _selectedRearDoor() === grp
+        && (Number(selected.variable_value) || 0) <= 0) {
+      carry = DEFAULT_REAR_DOOR_THICKNESS_M;
+    } else {
+      return; // nothing to carry over — both-zero guard will flag it
+    }
+  }
   selected.variable_value = carry;
   other.variable_value = 0;
   try {
@@ -589,12 +600,15 @@ function validateInsulationPairs() {
     if (!pair) return;
     // Suppress the both-zero warning for a DRD/SRD door type that isn't
     // selected — the non-quoted rear door is legitimately 0/0 (only the chosen
-    // door carries thickness). The selected door is auto-populated, so it
-    // won't be 0/0 anyway.
+    // door carries thickness). This includes the no-door-selected case (both
+    // toggled off): with no rear door quoted, neither pair warns. The selected
+    // door is auto-populated by _enforceRearDoorInvariant, so for door pairs
+    // this warning is only a transient tripwire (a manual edit to 0.000 shows
+    // it until the next render, which heals the pair back to the default).
     const _doorGrp = pair.eps.body_option_group;
     if (_DRDSR_TOGGLE_GROUPS.includes(_doorGrp)) {
       const _selDoor = _selectedRearDoor();
-      if (_selDoor && _doorGrp !== _selDoor) return;
+      if (_doorGrp !== _selDoor) return;
     }
     const bothZero = (Number(pair.eps.variable_value) || 0) <= 0
                   && (Number(pair.pu.variable_value)  || 0) <= 0;
@@ -3910,12 +3924,49 @@ function _bindTreeHandlers(tree, tid, collapsed) {
   });
 }
 
-// Public entry point — renders the panel (any of the three paths) and then
-// re-applies the insulation both-zero guard so red highlight + warning persist
-// across every re-render (radio switches, folder toggles, recalcs).
+// Public entry point — renders the panel (any of the three paths), self-heals
+// a quoted rear door whose insulation pair was left both-zero (invalid
+// manufacturing state), then re-applies the insulation both-zero guard so red
+// highlight + warning persist across every re-render (radio switches, folder
+// toggles, recalcs).
 function renderBodyOptions(bomItems) {
   _renderBodyOptionsInner(bomItems);
+  _enforceRearDoorInvariant();
   validateInsulationPairs();
+}
+
+// The quoted rear door must always carry a non-zero insulation thickness on
+// exactly one side (BA briefing 2026-06-30 §2: one of the four
+// (DRD|SRD)×(EPS|PU) cells holds T, the other three are 0). Template data can
+// violate this at load time — the carry only runs on door-type CLICKS, and a
+// past DRD→SRD switch zeroes the other door in the shared template while the
+// configurator draft keeps its own default door, so the next fresh load
+// renders a selected door at 0/0. When a render surfaces that state, run the
+// same carry a door-type click performs (thickness comes from the other door,
+// else the 0.06 m default), persist it, and repaint. _carryRearDoorThickness
+// mutates bomData synchronously before its first await, so the
+// validateInsulationPairs pass that follows in renderBodyOptions already sees
+// the healed pair — the both-zero warning never paints.
+let _rearDoorHealBusy = false;
+function _enforceRearDoorInvariant() {
+  if (_rearDoorHealBusy) return;
+  const door = _selectedRearDoor();
+  if (!door) return;
+  const pair = _doorInsulationPair(door);
+  if (!pair || _doorActiveCell(pair)) return;   // no rear-door pair, or already valid
+  // Only thickness-bearing pairs participate (mirrors _applyInsulationCopyZero):
+  // a never-seeded NULL/NULL pair means the body doesn't use the rear-door
+  // thickness mechanism — don't invent template data on mere page load.
+  if (pair.eps.variable_value == null && pair.pu.variable_value == null) return;
+  _rearDoorHealBusy = true;
+  _carryRearDoorThickness(door, door === 'DRD' ? 'SRD' : 'DRD')
+    .catch(() => { /* writes are non-fatal; in-memory state is already healed */ })
+    .then(() => {
+      _rearDoorHealBusy = false;
+      renderBodyOptions(bomData);   // repaint radios + thickness (pair now valid → no re-heal)
+      refreshBomDisplay();
+      scheduleCalc();
+    });
 }
 
 function _renderBodyOptionsInner(bomItems) {

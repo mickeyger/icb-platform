@@ -3375,7 +3375,45 @@ function _bindTreeHandlers(tree, tid, collapsed) {
   });
 }
 
+// Public entry point — renders the panel (any of the three paths) and
+// self-heals a quoted rear door whose insulation pair was left both-zero
+// (invalid manufacturing state). Costings 2 has no both-zero warning UI, so
+// without the heal the invalid state would sit here silently and feed wrong
+// {SRD EPS}/{SRD PU} deductions into the skin formulas.
 function renderBodyOptions(bomItems) {
+  _renderBodyOptionsInner(bomItems);
+  _enforceRearDoorInvariant();
+}
+
+// Same invariant as calculator.js (BA briefing 2026-06-30 §2): one of the four
+// (DRD|SRD)×(EPS|PU) cells holds the rear-door thickness T, the other three
+// are 0. The carry only runs on door-type CLICKS, so stale template data can
+// render a selected door at 0/0 — heal it with the same carry a click performs
+// (thickness from the other door, else the 0.06 m default), then repaint.
+let _rearDoorHealBusy = false;
+function _enforceRearDoorInvariant() {
+  if (_rearDoorHealBusy) return;
+  const door = _selectedRearDoor();
+  if (!door) return;
+  const pair = _doorInsulationPair(door);
+  if (!pair || _doorActiveCell(pair)) return;   // no rear-door pair, or already valid
+  // Only thickness-bearing pairs participate (mirrors calculator.js's
+  // _applyInsulationCopyZero): a never-seeded NULL/NULL pair means the body
+  // doesn't use the rear-door thickness mechanism — don't invent template
+  // data on mere page load.
+  if (pair.eps.variable_value == null && pair.pu.variable_value == null) return;
+  _rearDoorHealBusy = true;
+  _carryRearDoorThickness(door, door === 'DRD' ? 'SRD' : 'DRD')
+    .catch(() => { /* writes are non-fatal; in-memory state is already healed */ })
+    .then(() => {
+      _rearDoorHealBusy = false;
+      renderBodyOptions(bomData);   // repaint radios + thickness (pair now valid → no re-heal)
+      refreshBomDisplay();
+      scheduleCalc();
+    });
+}
+
+function _renderBodyOptionsInner(bomItems) {
   const section = document.getElementById('body-options-section');
   const list    = document.getElementById('body-options-list');
   if (!section || !list) return;
