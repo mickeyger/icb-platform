@@ -534,7 +534,7 @@ export function BayModelLanes() {
                           </div>
                           {isEmpty ? (
                             <div className="flex min-h-[42px] items-center justify-center gap-1 text-center text-[11px] text-muted">
-                              <Plus size={12} /> drop a ready panel-set
+                              {canAssign ? (<><Plus size={12} /> drop a ready panel-set</>) : 'empty'}
                             </div>
                           ) : (
                             <>

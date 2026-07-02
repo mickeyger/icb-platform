@@ -92,8 +92,8 @@ def test_planning_zone_drag_affordance_and_bay_clear(page: Page, live_server: st
     assert _move(page, live_server, s["chassis_id"], notes="QC ready").status == 201
     page.reload()
     expect(page.get_by_test_id("bay-model")).to_be_visible(timeout=T)
-    expect(page.locator(f'[data-testid="assembly-bay"][data-bay-id="{s["bay_id"]}"]')).to_have_attribute(
-        "data-bay-state", "empty", timeout=T)                                # bay flipped to empty
+    expect(page.locator(f'[data-testid="pre-assembly-empty"][data-bay-id="{s["bay_id"]}"]')).to_have_attribute(
+        "data-bay-state", "empty", timeout=T)                                # bay flipped to empty → Pre-Assembly lane
     card = page.locator('[data-testid="awaiting-qa-chassis"]', has_text=s["vin"])
     expect(card).to_be_visible(timeout=T)                                    # chassis now in the AWAITING QA zone
     shot(page, "02-moved-to-qa-zone", journey=JOURNEY)
