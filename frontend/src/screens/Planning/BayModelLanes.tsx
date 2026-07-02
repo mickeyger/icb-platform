@@ -64,6 +64,12 @@ interface ParkingPrompt {
 // (body attached) OR parking-draggable (no body), never both — the bay state decides.
 const PARK_MIME = 'application/x-return-to-parking'
 
+// WO v1.39.2 — Pre-Assembly build stages (mirror backend BUILD_STAGE_ORDER; forward-only manual advance).
+const BUILD_STAGES = ['entry', 'pre_assembly', 'stage_2', 'stage_3', 'merge'] as const
+const STAGE_LABEL: Record<string, string> = {
+  entry: 'Entry', pre_assembly: 'Pre-assembly', stage_2: 'Stage 2', stage_3: 'Stage 3', merge: 'Merge',
+}
+
 // WO v4.36a.5 — days a chassis has been on its bay, from the assembly_assigned event date (BayOut.since).
 // Day 0 = same calendar day, Day 1 = next day, etc. Returns null when there's no date (no counter shown).
 function dayCount(since?: string | null): number | null {
@@ -85,7 +91,7 @@ export function BayModelLanes() {
   const { hasPermission, isAdmin } = useAppData()
   const canAssign = isAdmin || hasPermission('chassis.assembly_assign')
   const { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
-          markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking } = useBayModel(toast.push)
+          markBodyAttached, clearPanels, advanceStage, moveToAwaitingQa, returnToParking } = useBayModel(toast.push)
   const [drag, setDrag] = useState<ChassisRecord | null>(null)
   const [rejectBay, setRejectBay] = useState<number | null>(null)
   const [busyBay, setBusyBay] = useState<number | null>(null)
@@ -201,6 +207,24 @@ export function BayModelLanes() {
       toast.push({ kind: 'ok', message: `Panels moved off ${bay.code}.` })
     } catch (e) {
       if (e instanceof ApiError) toast.push({ kind: 'warn', message: e.detail || 'Could not move the panels back.' })
+    } finally {
+      setBusyBay(null)
+    }
+  }
+
+  // WO v1.39.2 — advance the bay's building body one stage forward (forward-only; the backend rejects a
+  // backward move). One stage per click — the mockup's manual progression, adapted to a click gesture.
+  async function onAdvanceBuild(bay: Bay) {
+    if (!canAssign) return
+    const cur = (bay.build_stage ?? 'entry') as (typeof BUILD_STAGES)[number]
+    const next = BUILD_STAGES[BUILD_STAGES.indexOf(cur) + 1]
+    if (!next) return
+    try {
+      setBusyBay(bay.id)
+      await advanceStage(bay.id, next)
+      toast.push({ kind: 'ok', message: `${bay.code} → ${STAGE_LABEL[next]}.` })
+    } catch (e) {
+      if (e instanceof ApiError) toast.push({ kind: 'warn', message: e.detail || 'Could not advance the build.' })
     } finally {
       setBusyBay(null)
     }
@@ -522,6 +546,39 @@ export function BayModelLanes() {
                               {bay.panels_customer_name && (
                                 <div className="truncate text-[11px] text-muted">{bay.panels_customer_name}</div>
                               )}
+                              {/* v1.39.2 Phase 3 — build-progress bar + manual forward-only advance (R6/R7). */}
+                              {(() => {
+                                const bstage = bay.build_stage ?? 'entry'
+                                const pct = bay.build_progress_pct ?? 0
+                                const nextStage = BUILD_STAGES[BUILD_STAGES.indexOf(bstage as (typeof BUILD_STAGES)[number]) + 1]
+                                const atMerge = pct >= 100 || bstage === 'merge' || !nextStage
+                                return (
+                                  <div className="mt-1.5" data-testid="build-progress" data-build-stage={bstage} data-build-pct={pct}>
+                                    <div className="mb-0.5 flex items-center justify-between text-[10px] text-muted">
+                                      <span>{STAGE_LABEL[bstage] ?? bstage}</span>
+                                      <span className="font-mono">{pct}%</span>
+                                    </div>
+                                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-100">
+                                      <div className="h-full rounded-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    {canAssign && !atMerge && (
+                                      <button
+                                        data-testid="advance-build"
+                                        onClick={() => void onAdvanceBuild(bay)}
+                                        title="Advance this body to the next build stage (forward-only)"
+                                        className="mt-1 w-full rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 hover:bg-sky-100"
+                                      >
+                                        ▶ Advance to {STAGE_LABEL[nextStage] ?? '—'}
+                                      </button>
+                                    )}
+                                    {atMerge && (
+                                      <div data-testid="build-complete" className="mt-1 text-center text-[10px] font-medium text-status-green">
+                                        ✓ Ready for merge (100%)
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
                               {canAssign && bay.panels_job_id != null && (
                                 <button
                                   data-testid="clear-panels-pre"

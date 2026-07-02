@@ -27,6 +27,9 @@ export interface BayModel {
   markBodyAttached: (chassisId: number, productionJobId: number, notes?: string) => Promise<void>
   /** WO v4.35 §3.3b — the move-panels-back undo: remove a job's panels from its bay (corrects a wrong drop). */
   clearPanels: (productionJobId: number) => Promise<Bay[]>
+  /** WO v1.39.2 — advance a Pre-Assembly bay's building body forward one stage (forward-only). Re-throws
+   *  ApiError (409 forward-only / no-body-building) for an inline warn; resolves with the post-advance bays. */
+  advanceStage: (bayId: number, stage: string) => Promise<Bay[]>
   /** WO v4.36a.1 — move a body-attached chassis off its bay into the Awaiting-QA queue (status-promoting:
    *  the bay clears + the chassis appears in the zone). Thin — the confirm modal owns error handling. */
   moveToAwaitingQa: (chassisId: number, notes?: string) => Promise<void>
@@ -140,6 +143,19 @@ export function useBayModel(pushToast: PushToast): BayModel {
     [refreshAndNotifyBoard, pushToast],
   )
 
+  const advanceStage = useCallback(
+    async (bayId: number, stage: string): Promise<Bay[]> => {
+      try {
+        await apiPost(`/api/chassis-records/bays/${bayId}/advance-stage`, { stage })
+        return await refreshAndNotifyBoard()
+      } catch (e) {
+        handleApiError(e, pushToast) // 409 (forward-only / no body building) re-throws → caller warns
+        throw e
+      }
+    },
+    [refreshAndNotifyBoard, pushToast],
+  )
+
   const moveToAwaitingQa = useCallback(
     // Thin — the confirm modal owns error handling (so a 409 already-moved message isn't double-toasted).
     async (chassisId: number, notes?: string): Promise<void> => {
@@ -163,5 +179,5 @@ export function useBayModel(pushToast: PushToast): BayModel {
   )
 
   return { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
-           markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking }
+           markBodyAttached, clearPanels, advanceStage, moveToAwaitingQa, returnToParking }
 }

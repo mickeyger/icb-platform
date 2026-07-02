@@ -139,4 +139,8 @@ export interface Bay {
   // WO — the panels-job's OWN linked chassis VIN + customer, for the bay right-click "unlink panels" menu.
   panels_chassis_vin?: string | null
   panels_customer_name?: string | null
+  // WO v1.39.2 — Pre-Assembly build progress (present on /bays/assembly only; null build_stage = no body
+  // building). build_progress_pct is 0..100, derived from build_stage at the backend advance chokepoint.
+  build_stage?: string | null
+  build_progress_pct?: number | null
 }
