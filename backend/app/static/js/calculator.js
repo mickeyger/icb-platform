@@ -2025,7 +2025,11 @@ function cancelEdit() {
   editingRecordId = null;
   editReplay = null;
   editBodyVarOverrides = null;
-  window.location.href = '/calculator';
+  // v1.39.8 — this JS is shared by /calculator (dark legacy) and /mes/calculator
+  // (MES skin, embedded in /costings/new). A hardcoded '/calculator' dumped the
+  // MES iframe onto the dark theme on Cancel; pathname keeps the skin we were
+  // served on and still drops the ?edit=… query for a clean calculator.
+  window.location.href = window.location.pathname;
 }
 
 // Restore the saved profit-ratio dropdown selection. Prefer the exact saved
@@ -2265,7 +2269,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (!document.getElementById('approve-btn').disabled) approveCosting();
     },
     new: () => {
-      window.location.href = '/calculator';
+      // v1.39.8 — same skin-preserving navigation as cancelEdit (see there).
+      window.location.href = window.location.pathname;
     },
   });
 

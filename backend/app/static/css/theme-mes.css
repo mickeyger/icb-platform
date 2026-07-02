@@ -84,6 +84,11 @@ body {
 .nav-item        { color: var(--text); border-left-color: transparent; }
 .nav-item:hover  { background: var(--blue-dim); color: var(--blue-hi); }
 .nav-item.active { background: var(--blue-dim); color: var(--blue); border-left-color: var(--blue); }
+/* v1.39.8 — hide the sidebar "Dashboard" link (base.html href="/") under the MES skin.
+   Inside the /costings/new iframe it navigated to the dark legacy GRP dashboard; the MES
+   shell's Costings menu already provides that dashboard. The pristine /calculator route
+   never loads this stylesheet, so the legacy app keeps its Dashboard link. */
+.sidebar-nav .nav-item[href="/"] { display: none; }
 
 .sidebar-footer { border-top: 1px solid var(--border); }
 .user-avatar    { background: var(--blue-dim); color: var(--blue); }
