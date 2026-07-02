@@ -1058,6 +1058,9 @@ def record_panels_arrived_in_bay(db: Session, production_job_id: int, bay_id: in
     # Only un-consumed (loose) panels make the bay busy — exactly the loose-panel signal the tile uses.
     if other is not None and not _panels_consumed(db, other.production_job_id):
         raise HTTPException(status_code=409, detail=f"{bay.code} already holds panels for another job")
+    # WO v1.39.2 — the panels start a body building at ENTRY (progress 0) in this bay (mockup §4.4 / R3).
+    bay.build_stage = "entry"
+    bay.build_progress_pct = 0
     evt = ProductionJobBayEvent(production_job_id=production_job_id, bay_id=bay_id,
                                 event_type=event_type, user_id=user_id, notes=notes)
     db.add(evt)
@@ -1084,11 +1087,49 @@ def clear_panels_arrived(db: Session, production_job_id: int) -> dict:
             status_code=409,
             detail="Panels are part of a body in Assembly / Awaiting QA — they can't be moved back to "
                    "planning.")
+    # WO v1.39.2 — reset the build on every bay the job's panels were on (the body is un-started).
+    from app.models.mes import AssemblyBay
+    _bay_ids = [r[0] for r in db.query(ProductionJobBayEvent.bay_id).filter(
+        ProductionJobBayEvent.production_job_id == production_job_id,
+        ProductionJobBayEvent.event_type == "panels_arrived_in_bay").all()]
     removed = db.query(ProductionJobBayEvent).filter(
         ProductionJobBayEvent.production_job_id == production_job_id,
         ProductionJobBayEvent.event_type == "panels_arrived_in_bay").delete(synchronize_session=False)
+    for _bid in _bay_ids:
+        _b = db.get(AssemblyBay, _bid)
+        if _b is not None:
+            _b.build_stage = None
+            _b.build_progress_pct = 0
     db.commit()
     return {"production_job_id": production_job_id, "removed": int(removed or 0)}
+
+
+# ── WO v1.39.2 — Pre-Assembly build stages (forward-only; progress is a pure function of stage, §7) ──
+BUILD_STAGE_ORDER = ["entry", "pre_assembly", "stage_2", "stage_3", "merge"]
+BUILD_STAGE_PROGRESS = {"entry": 0, "pre_assembly": 33, "stage_2": 62, "stage_3": 85, "merge": 100}
+
+
+def advance_build_stage(db: Session, bay_id: int, stage: str, *, actor_id=None):
+    """WO v1.39.2 — advance a Pre-Assembly bay's building body forward one stage. Forward-only (R6): the
+    new stage must be >= the current; progress is derived from the stage (R7). A build only exists while
+    the bay holds loose panels (state 'pre_assembly'). actor_id is threaded for future audit (no store yet)."""
+    from app.models.mes import AssemblyBay
+    bay = db.get(AssemblyBay, bay_id)
+    if bay is None or not bay.is_active:
+        raise HTTPException(status_code=404, detail="assembly bay not found")
+    if stage not in BUILD_STAGE_PROGRESS:
+        raise HTTPException(status_code=422, detail=f"unknown build stage '{stage}'")
+    if compute_bay_merge_readiness(db, bay_id)["state"] != "pre_assembly":
+        raise HTTPException(status_code=409, detail="no body is building in this bay")
+    cur = bay.build_stage or "entry"
+    cur_idx = BUILD_STAGE_ORDER.index(cur) if cur in BUILD_STAGE_ORDER else 0
+    if BUILD_STAGE_ORDER.index(stage) < cur_idx:
+        raise HTTPException(status_code=409, detail="the build is forward-only — a body can't move backward")
+    bay.build_stage = stage
+    bay.build_progress_pct = BUILD_STAGE_PROGRESS[stage]
+    db.commit()
+    db.refresh(bay)
+    return bay
 
 
 def add_photos(db: Session, record_id: int, event_id: int, files, who: str) -> list[ChassisPhotoOut]:

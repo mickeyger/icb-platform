@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 from ..database import User, get_db
 from ..deps import require_permission, require_user
 from ..schemas.chassis import (
-    AssemblyAssignRequest, AwaitingQaOut, BayOut, BodyAttachedRequest, ChassisCreateResult,
-    ChassisEventCapture, ChassisEventOut, ChassisModelOut, ChassisPhotoOut, ChassisRecordCreate,
-    ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate, ChassisVinCapture,
+    AssemblyAssignRequest, AwaitingQaOut, BayAdvanceStageRequest, BayOut, BodyAttachedRequest,
+    ChassisCreateResult, ChassisEventCapture, ChassisEventOut, ChassisModelOut, ChassisPhotoOut,
+    ChassisRecordCreate, ChassisRecordDetail, ChassisRecordOut, ChassisRecordUpdate, ChassisVinCapture,
     MoveToAwaitingQaRequest, ReturnToParkingRequest,
 )
 from ..services import chassis as svc
@@ -49,6 +49,16 @@ def bays_assembly(db: Session = Depends(get_db), user: User = Depends(require_us
     WO v4.32 §0.4 extends the response with per-bay utilisation (occupant chassis/job + since,
     event-derived per §0.12) — additive fields; v4.31 consumers are unaffected."""
     return svc.assembly_bays_utilisation(db)
+
+
+@router.post("/bays/{bay_id}/advance-stage", response_model=BayOut)
+def advance_bay_build_stage(bay_id: int, payload: BayAdvanceStageRequest,
+                            db: Session = Depends(get_db),
+                            user: User = Depends(require_permission("chassis.assembly_assign"))):
+    """WO v1.39.2 — advance a Pre-Assembly bay's building body one stage forward (forward-only). Returns
+    the fresh full BayOut (new build_stage/progress + the derived state) so the lane updates in place."""
+    svc.advance_build_stage(db, bay_id, payload.stage, actor_id=user.id)
+    return next(b for b in svc.assembly_bays_utilisation(db) if b.id == bay_id)
 
 
 @router.get("/bays/parking", response_model=List[BayOut])

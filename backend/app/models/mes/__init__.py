@@ -916,6 +916,11 @@ class AssemblyBay(Base):
     label = Column(String(64))                             # human label, e.g. 'Assembly Bay 1'
     sort_order = Column(Integer)                           # 1..5 — natural ordering for the lane
     is_active = Column(Boolean, nullable=False, default=True, server_default=sa_text("true"))
+    # WO v1.39.2 (migration 0030) — Pre-Assembly build progress. build_stage NULL = no body / EMPTY bay;
+    # else entry→pre_assembly→stage_2→stage_3→merge (forward-only, app-enforced at the advance chokepoint).
+    # build_progress_pct 0..100 (DB CHECK) is derived from the stage; both reset when the bay's panels clear.
+    build_stage = Column(String(16))
+    build_progress_pct = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
