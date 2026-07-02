@@ -182,6 +182,12 @@ class PanelsArrivedRequest(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=500)
 
 
+class BayAdvanceStageRequest(BaseModel):
+    """WO v1.39.2 — advance a Pre-Assembly bay's building body one stage forward (forward-only;
+    POST /api/chassis-records/bays/{bay_id}/advance-stage)."""
+    stage: str = Field(..., description="entry | pre_assembly | stage_2 | stage_3 | merge")
+
+
 class MoveToAwaitingQaRequest(BaseModel):
     """WO v4.36a.1 §0.5 — move a body-attached chassis off its assembly bay into the QA queue
     (POST /api/chassis-records/{id}/move-to-awaiting-qa). Optional handover note only — the chassis
@@ -240,3 +246,6 @@ class BayOut(BaseModel):
     # for the bay right-click "unlink panels" menu so the operator can identify the blocking job/chassis.
     panels_chassis_vin: Optional[str] = None
     panels_customer_name: Optional[str] = None
+    # ── WO v1.39.2 Pre-Assembly build progress (migration 0031; auto-populated from the bay row) ──
+    build_stage: Optional[str] = None              # NULL = no body; entry|pre_assembly|stage_2|stage_3|merge
+    build_progress_pct: int = 0                    # 0..100, derived from build_stage

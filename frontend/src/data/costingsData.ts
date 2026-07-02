@@ -197,7 +197,10 @@ export interface CostingsFile {
   repair_insertion_sample: RepairInsertionSample
 }
 
-export const costingsMock = raw as unknown as CostingsFile
+// Blank-slate onboarding: strip the bundled demo costings so a wiped backend can
+// never resurrect phantom rows via the mock fallback. Everything else in the mock
+// (demo user profiles, permissions, status_counts) is preserved.
+export const costingsMock = { ...(raw as any), costings: [] } as unknown as CostingsFile
 
 // ---------------------------------------------------------------------------
 // Role → permissions table (from Addendum v1.2.1 §7). The JSON only gives Burt's

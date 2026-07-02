@@ -64,6 +64,12 @@ interface ParkingPrompt {
 // (body attached) OR parking-draggable (no body), never both — the bay state decides.
 const PARK_MIME = 'application/x-return-to-parking'
 
+// WO v1.39.2 — Pre-Assembly build stages (mirror backend BUILD_STAGE_ORDER; forward-only manual advance).
+const BUILD_STAGES = ['entry', 'pre_assembly', 'stage_2', 'stage_3', 'merge'] as const
+const STAGE_LABEL: Record<string, string> = {
+  entry: 'Entry', pre_assembly: 'Pre-assembly', stage_2: 'Stage 2', stage_3: 'Stage 3', merge: 'Merge',
+}
+
 // WO v4.36a.5 — days a chassis has been on its bay, from the assembly_assigned event date (BayOut.since).
 // Day 0 = same calendar day, Day 1 = next day, etc. Returns null when there's no date (no counter shown).
 function dayCount(since?: string | null): number | null {
@@ -85,7 +91,7 @@ export function BayModelLanes() {
   const { hasPermission, isAdmin } = useAppData()
   const canAssign = isAdmin || hasPermission('chassis.assembly_assign')
   const { mode, bays, parking, occupantByBay, awaitingQa, refresh, assign, markPanelsArrived,
-          markBodyAttached, clearPanels, moveToAwaitingQa, returnToParking } = useBayModel(toast.push)
+          markBodyAttached, clearPanels, advanceStage, moveToAwaitingQa, returnToParking } = useBayModel(toast.push)
   const [drag, setDrag] = useState<ChassisRecord | null>(null)
   const [rejectBay, setRejectBay] = useState<number | null>(null)
   const [busyBay, setBusyBay] = useState<number | null>(null)
@@ -201,6 +207,24 @@ export function BayModelLanes() {
       toast.push({ kind: 'ok', message: `Panels moved off ${bay.code}.` })
     } catch (e) {
       if (e instanceof ApiError) toast.push({ kind: 'warn', message: e.detail || 'Could not move the panels back.' })
+    } finally {
+      setBusyBay(null)
+    }
+  }
+
+  // WO v1.39.2 — advance the bay's building body one stage forward (forward-only; the backend rejects a
+  // backward move). One stage per click — the mockup's manual progression, adapted to a click gesture.
+  async function onAdvanceBuild(bay: Bay) {
+    if (!canAssign) return
+    const cur = (bay.build_stage ?? 'entry') as (typeof BUILD_STAGES)[number]
+    const next = BUILD_STAGES[BUILD_STAGES.indexOf(cur) + 1]
+    if (!next) return
+    try {
+      setBusyBay(bay.id)
+      await advanceStage(bay.id, next)
+      toast.push({ kind: 'ok', message: `${bay.code} → ${STAGE_LABEL[next]}.` })
+    } catch (e) {
+      if (e instanceof ApiError) toast.push({ kind: 'warn', message: e.detail || 'Could not advance the build.' })
     } finally {
       setBusyBay(null)
     }
@@ -376,6 +400,10 @@ export function BayModelLanes() {
   }
 
   const freeBays = bays.filter((b) => !occupantByBay[b.id] && (b.state ?? 'empty') === 'empty').length
+  // v1.39.2 Phase 1 (BA-ratified filter) — the Merge lane shows only NON-EMPTY bays: empty bays live in
+  // the Pre-Assembly lane above (panel drop targets). A bay "moves" into Merge once it holds panels or a
+  // chassis, so an empty bay never offers both "drop panels" + "drop a chassis" (the dual-empty ambiguity).
+  const mergeBays = bays.filter((b) => (b.state ?? 'empty') !== 'empty')
 
   return (
     <div className="mt-4 grid grid-cols-[260px_1fr] gap-4" data-testid="bay-model">
@@ -438,40 +466,130 @@ export function BayModelLanes() {
             Rendered HERE only; the Merge grid's inline pre_assembly branch is removed below to avoid a double-render. */}
         <Card>
           {(() => {
-            const preBays = bays.filter((b) => (b.state ?? 'empty') === 'pre_assembly')
+            // v1.39.2 Phase 1 — Pre-Assembly is now a proper LANE (state-based, D3): EMPTY bays are panel
+            // drop targets; pre_assembly bays are building. Reuses the native-DnD drop (onBayDrop →
+            // panels-arrived) + clear_panels_arrived (the ✕ drag-back). The build-progress bar + manual
+            // drag-to-advance land in Phase 2 (after the schema migration). The Merge lane below still
+            // renders all 5 bays for the chassis/merge side, so empty bays appear in both views — a
+            // Phase-1 presentation point flagged for BA review (whether to filter the Merge lane).
+            const preBays = bays.filter((b) => {
+              const s = b.state ?? 'empty'
+              return s === 'empty' || s === 'pre_assembly'
+            })
+            const building = preBays.filter((b) => (b.state ?? 'empty') === 'pre_assembly').length
             return (
               <>
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-semibold uppercase tracking-wide text-muted">Pre-Assembly</span>
-                  <span className="text-[11px] text-muted">{preBays.length} {preBays.length === 1 ? 'bay' : 'bays'} with panels</span>
+                  <span className="text-[11px] text-muted">
+                    {building} {building === 1 ? 'bay' : 'bays'} building · {preBays.length - building} free
+                  </span>
                 </div>
                 {preBays.length > 0 ? (
                   <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
                     {preBays.map((bay) => {
-                      const ui = BAY_TILE.pre_assembly
+                      const state = (bay.state ?? 'empty') as BayState
+                      const isEmpty = state === 'empty'
+                      const ui = BAY_TILE[state]
                       const jobNo = bay.panels_job_number ?? bay.occupant_job_number ?? bay.panels_job_id ?? '—'
+                      const rejected = rejectBay === bay.id
+                      const busy = busyBay === bay.id
+                      // R3/R4 — only EMPTY bays highlight + accept a panel-set drop; occupied (building) bays
+                      // reject (no drop handlers). The drag SOURCE (a scheduled slot-cell) is already gated on
+                      // canSchedule (D2: readiness == scheduled), so not-ready / unscheduled jobs aren't draggable.
+                      const dropCue = panelDragActive && canAssign && isEmpty
+                        ? (panelHoverBay === bay.id ? ' ring-2 ring-sky-500' : ' ring-1 ring-sky-400/50')
+                        : ''
                       return (
                         <div
                           key={bay.id}
-                          data-testid="pre-assembly-bay"
+                          data-testid={isEmpty ? 'pre-assembly-empty' : 'pre-assembly-bay'}
                           data-bay-id={bay.id}
                           data-bay-code={bay.code}
-                          data-bay-state="pre_assembly"
-                          className={`relative rounded-md p-2 ${ui.border}`}
+                          data-bay-state={state}
+                          onDragOver={(e) => {
+                            if (!canAssign || !isEmpty) return
+                            const isPanel = e.dataTransfer.types.includes('application/x-panel-job')
+                            if (drag || isPanel) e.preventDefault()
+                          }}
+                          onDragEnter={(e) => {
+                            if (canAssign && isEmpty && e.dataTransfer.types.includes('application/x-panel-job')) setPanelHoverBay(bay.id)
+                          }}
+                          onDragLeave={() => setPanelHoverBay((b) => (b === bay.id ? null : b))}
+                          onDrop={(e) => { if (isEmpty) onBayDrop(e, bay.id) }}
+                          className={`relative rounded-md p-2 transition ${
+                            rejected ? 'border-2 border-status-red bg-status-red/20' : ui.border
+                          }${dropCue}`}
                         >
+                          {busy && (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-white/60 text-[11px] text-muted">
+                              working…
+                            </div>
+                          )}
                           <div className="flex items-center justify-between text-[11px] text-muted">
                             <span>{bay.code}</span>
-                            {ui.badge ? (
+                            {!isEmpty && ui.badge ? (
                               <span className={`rounded px-1 text-[10px] font-medium ${ui.badgeClass}`}>{ui.badge}</span>
                             ) : null}
                           </div>
-                          <div className="font-mono text-xs font-semibold text-sky-700">Panels in bay</div>
-                          <div className="truncate text-[11px] text-muted">Job {jobNo}</div>
-                          {bay.panels_chassis_vin && (
-                            <div className="truncate text-[11px] text-muted">{bay.panels_chassis_vin}</div>
-                          )}
-                          {bay.panels_customer_name && (
-                            <div className="truncate text-[11px] text-muted">{bay.panels_customer_name}</div>
+                          {isEmpty ? (
+                            <div className="flex min-h-[42px] items-center justify-center gap-1 text-center text-[11px] text-muted">
+                              {canAssign ? (<><Plus size={12} /> drop a ready panel-set</>) : 'empty'}
+                            </div>
+                          ) : (
+                            <>
+                              <div className="font-mono text-xs font-semibold text-sky-700">Panels in bay</div>
+                              <div className="truncate text-[11px] text-muted">Job {jobNo}</div>
+                              {bay.panels_chassis_vin && (
+                                <div className="truncate text-[11px] text-muted">{bay.panels_chassis_vin}</div>
+                              )}
+                              {bay.panels_customer_name && (
+                                <div className="truncate text-[11px] text-muted">{bay.panels_customer_name}</div>
+                              )}
+                              {/* v1.39.2 Phase 3 — build-progress bar + manual forward-only advance (R6/R7). */}
+                              {(() => {
+                                const bstage = bay.build_stage ?? 'entry'
+                                const pct = bay.build_progress_pct ?? 0
+                                const nextStage = BUILD_STAGES[BUILD_STAGES.indexOf(bstage as (typeof BUILD_STAGES)[number]) + 1]
+                                const atMerge = pct >= 100 || bstage === 'merge' || !nextStage
+                                return (
+                                  <div className="mt-1.5" data-testid="build-progress" data-build-stage={bstage} data-build-pct={pct}>
+                                    <div className="mb-0.5 flex items-center justify-between text-[10px] text-muted">
+                                      <span>{STAGE_LABEL[bstage] ?? bstage}</span>
+                                      <span className="font-mono">{pct}%</span>
+                                    </div>
+                                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-sky-100">
+                                      <div className="h-full rounded-full bg-sky-500 transition-all" style={{ width: `${pct}%` }} />
+                                    </div>
+                                    {canAssign && !atMerge && (
+                                      <button
+                                        data-testid="advance-build"
+                                        onClick={() => void onAdvanceBuild(bay)}
+                                        title="Advance this body to the next build stage (forward-only)"
+                                        className="mt-1 w-full rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 hover:bg-sky-100"
+                                      >
+                                        ▶ Advance to {STAGE_LABEL[nextStage] ?? '—'}
+                                      </button>
+                                    )}
+                                    {atMerge && (
+                                      <div data-testid="build-complete" className="mt-1 text-center text-[10px] font-medium text-status-green">
+                                        ✓ Ready for merge (100%)
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+                              {canAssign && bay.panels_job_id != null && (
+                                <button
+                                  data-testid="clear-panels-pre"
+                                  onClick={() => void onClearPanels(bay)}
+                                  title="Move this job's panels back out of the bay (reversible until the chassis attaches)"
+                                  className="mt-1 w-full rounded border border-line px-1.5 py-0.5 text-[10px] text-muted hover:bg-surface-alt"
+                                >
+                                  ✕ move panels back
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       )
@@ -479,11 +597,11 @@ export function BayModelLanes() {
                   </div>
                 ) : (
                   <div className="rounded-md border border-dashed border-line p-4 text-center text-xs text-muted">
-                    No bays in pre-assembly — panels appear here when a scheduled job’s panels are dropped on a bay before its chassis.
+                    All bays are in Merge — no empty or building pre-assembly bays right now.
                   </div>
                 )}
                 <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
-                  Panels built down the chute · the chassis joins them in Merge below.
+                  Drop a scheduled job's ready panels on an empty bay to start the body · it builds down the chute · the chassis joins it in Merge below.
                 </div>
               </>
             )
@@ -494,10 +612,10 @@ export function BayModelLanes() {
         <Card>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-semibold uppercase tracking-wide text-muted">Merge</span>
-          <span className="text-[11px] text-muted">{bays.length} bays · {freeBays} free</span>
+          <span className="text-[11px] text-muted">{mergeBays.length} {mergeBays.length === 1 ? 'bay' : 'bays'} in merge</span>
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(132px,1fr))] gap-2">
-          {bays.map((bay) => {
+          {mergeBays.map((bay) => {
             const occ = occupantByBay[bay.id]
             const state: BayState = bay.state ?? (occ ? 'awaiting_attachment' : 'empty')
             const ui = BAY_TILE[state]
@@ -626,7 +744,11 @@ export function BayModelLanes() {
               </div>
             )
           })}
-          {bays.length === 0 && <div className="text-sm text-muted">No assembly bays.</div>}
+          {mergeBays.length === 0 && (
+            <div className="col-span-full rounded-md border border-dashed border-line p-4 text-center text-xs text-muted">
+              No bays in merge yet — a bay moves here once it holds panels or a chassis (empty bays are in Pre-Assembly above).
+            </div>
+          )}
         </div>
         <div className="mt-3 border-t border-line pt-3 text-[11px] text-muted">
           {canAssign

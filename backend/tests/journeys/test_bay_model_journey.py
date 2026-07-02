@@ -58,8 +58,8 @@ def test_bay_model_admin_lanes_and_assign_affordance(page: Page, parking_chassis
     bay_model = page.get_by_test_id("bay-model")
     # Parking lane: the booked-in chassis is in the pool.
     expect(bay_model.get_by_text(parking_chassis)).to_be_visible(timeout=T)
-    # Assembly lane: the 5 seeded bays render.
-    expect(page.get_by_test_id("assembly-bay")).to_have_count(5, timeout=T)
+    # v1.39.2 — empty bays render in the Pre-Assembly lane now (Merge shows only non-empty bays).
+    expect(page.get_by_test_id("pre-assembly-empty")).to_have_count(5, timeout=T)
     # Admin (wildcard) has the assign affordance: drag hint + drop-target hint.
     expect(bay_model.get_by_text("Drag onto an assembly bay")).to_be_visible(timeout=T)
     expect(page.get_by_text("drop a chassis").first).to_be_visible(timeout=T)
@@ -72,9 +72,9 @@ def test_bay_model_workshop_is_view_only(page: Page, live_server: str, role_user
     _open_board(page)
     bay_model = page.get_by_test_id("bay-model")
     expect(bay_model.get_by_text(parking_chassis)).to_be_visible(timeout=T)     # lanes visible
-    expect(page.get_by_test_id("assembly-bay")).to_have_count(5, timeout=T)
+    expect(page.get_by_test_id("pre-assembly-empty")).to_have_count(5, timeout=T)
     expect(bay_model.get_by_text("Drag onto an assembly bay")).to_have_count(0)  # no drag hint
     expect(page.get_by_text("drop a chassis")).to_have_count(0)                  # no drop-target hint
-    free_bays = page.get_by_test_id("assembly-bay").get_by_text("empty")         # free bays read-only
+    free_bays = page.get_by_test_id("pre-assembly-empty").get_by_text("empty")   # free bays read-only
     expect(free_bays.first).to_be_visible(timeout=T)
     shot(page, "02-bay-model-workshop-readonly", journey=JOURNEY)
